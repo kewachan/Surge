@@ -1,5 +1,6 @@
 #!name=kewchan rewrite
 #!author=kewachan
+#!description=for daily app blocking
 
 [URL Rewrite]
 ##### Macau #####
