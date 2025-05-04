@@ -89,6 +89,10 @@ DOMAIN-SUFFIX, boc.cn
 
 ############ Macau ############
 
+# ##SSH###
+DOMAIN, freco.synology.me
+DOMAIN, kewachan.ddns.net
+
 #BNU
 DOMAIN-SUFFIX, bnu.com.mo
 
