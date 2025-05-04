@@ -26,9 +26,6 @@ DOMAIN-SUFFIX, teams.microsoft.com
 IP-CIDR, 52.112.0.0/14
 IP-CIDR, 52.96.0.0/12
 
-#Google
-#DOMAIN, www.google.com
-
 #Oracle Cloud
 DOMAIN, console-telemetry.oci.oraclecloud.com
 DOMAIN-SUFFIX, oracleinfinity.io
