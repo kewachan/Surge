@@ -90,3 +90,16 @@
 
 #QQ Browser
 ^https?:\/\/kde.qq.com\/getAds - reject
+
+#Wikipedia
+(https?:\/\/zh.m.wikipedia.org\/)(wiki)(\/.+) $1zh-hk$3 302
+(https?:\/\/zh.m.wikipedia.org\/)(zh-cn)(\/.+) $1zh-hk$3 302
+(https?:\/\/zh.m.wikipedia.org\/)(zh-hans)(\/.+) $1zh-hk$3 302
+(https?:\/\/zh.m.wikipedia.org\/)(zh)(\/.+) $1zh-hk$3 302
+(https?:\/\/zh.wikipedia.org\/)(wiki)(\/.+) $1zh-hk$3 302
+(https?:\/\/zh.wikipedia.org\/)(zh-cn)(\/.+) $1zh-hk$3 302
+(https?:\/\/zh.wikipedia.org\/)(zh-hans)(\/.+) $1zh-hk$3 302
+(https?:\/\/zh.wikipedia.org\/)(zh)(\/.+) $1zh-hk$3 302
+
+[MITM]
+hostname = wikipedia.org, *.wikipedia.org
