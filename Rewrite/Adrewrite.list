@@ -101,7 +101,7 @@
 (https?:\/\/zh.wikipedia.org\/)(zh-hans)(\/.+) $1zh-hk$3 302
 (https?:\/\/zh.wikipedia.org\/)(zh)(\/.+) $1zh-hk$3 302
 
-#Google 
+#Google
 (https?:\/\/www\.google\.com/search\?q=.+)(&client=.+) $1&gl=hk&safe=off 302
 
 [MITM]
