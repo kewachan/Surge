@@ -3,9 +3,11 @@
 ##############################
 
 #My tracker list
-DOMAIN, netseer-ipaddr-assoc.xz.fbcdn.net
-DOMAIN, analytics.google.com
-DOMAIN, adservice.google.com
+DOMAIN-SUFFIX, netseer-ipaddr-assoc.xz.fbcdn.net
+DOMAIN-SUFFIX, analytics.google.com
+DOMAIN-SUFFIX, adservice.google.com
+DOMAIN-SUFFIX, browser.sentry-cdn.com
+DOMAIN-SUFFIX, app.getsentry.com
 
 #My Adblock list
 DOMAIN-SUFFIX, weedbits.com
