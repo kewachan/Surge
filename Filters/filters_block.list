@@ -4,6 +4,8 @@
 
 #My tracker list
 DOMAIN-SUFFIX, netseer-ipaddr-assoc.xz.fbcdn.net, Privacy
+DOMAIN-SUFFIX, analytics.google.com, Privacy
+DOMAIN-SUFFIX, adservice.google.com, Privacy
 
 #My Adblock list
 DOMAIN-SUFFIX, weedbits.com, Advertising
