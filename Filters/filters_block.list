@@ -4,8 +4,7 @@
 
 #My tracker list
 DOMAIN-SUFFIX, netseer-ipaddr-assoc.xz.fbcdn.net
-DOMAIN-SUFFIX, analytics.google.com
-DOMAIN-SUFFIX, adservice.google.com
+DOMAIN-SUFFIX, ts-analysis.shoalter.com
 
 #My Adblock list
 DOMAIN-SUFFIX, weedbits.com
