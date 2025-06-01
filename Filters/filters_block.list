@@ -2,11 +2,10 @@
 ############ Reject ############
 ##############################
 
-#My tracker list
+#My Adblock list
 DOMAIN-SUFFIX, netseer-ipaddr-assoc.xz.fbcdn.net
 DOMAIN-SUFFIX, ts-analysis.shoalter.com
-
-#My Adblock list
+DOMAIN-SUFFIX, ad-splash.hktvmall.com
 DOMAIN-SUFFIX, weedbits.com
 DOMAIN-SUFFIX, ad-api.uogroup.com
 DOMAIN-SUFFIX, ibytedtos.com
