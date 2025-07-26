@@ -285,6 +285,3 @@ DOMAIN-SUFFIX, browser.sentry-cdn.com
 DOMAIN-SUFFIX, app.getsentry.com
 DOMAIN-SUFFIX, appmetrica.yandex.ru
 DOMAIN-SUFFIX, metrics.icloud.com
-
-#Temp Ruls
-DOMAIN, graph.facebook.com
