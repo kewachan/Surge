@@ -26,6 +26,9 @@ DOMAIN-SUFFIX, teams.microsoft.com
 IP-CIDR, 52.112.0.0/14
 IP-CIDR, 52.96.0.0/12
 
+#Youtube subtitle service
+URL-REGEX,^https:\/\/www.youtube.com\/api\/timedtext+
+
 #Oracle Cloud
 DOMAIN, console-telemetry.oci.oraclecloud.com
 DOMAIN-SUFFIX, oracleinfinity.io
@@ -36,10 +39,6 @@ DOMAIN-SUFFIX, mastercard.com
 
 #Dcard
 DOMAIN-SUFFIX, dcard.tw
-
-#POE
-DOMAIN, www.quora.com
-DOMAIN-SUFFIX, poe.com
 
 #radio
 DOMAIN, live3.tdm.com.mo
