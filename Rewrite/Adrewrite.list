@@ -92,9 +92,6 @@
 ^https?:\/\/www.hktvmall.com\/hktvwebservices\/v1\/hktv\/get_floating_button\? - reject
 ^https?:\/\/ts-analysis.shoalter.com\/topics\/hktvmall_ios_tracker_event - reject
 
-#QQ Browser
-^https?:\/\/kde.qq.com\/getAds - reject
-
 #Wikipedia
 (https?:\/\/zh.m.wikipedia.org\/)(wiki)(\/.+) $1zh-hk$3 302
 (https?:\/\/zh.m.wikipedia.org\/)(zh-cn)(\/.+) $1zh-hk$3 302
@@ -109,4 +106,4 @@
 (https?:\/\/www\.google\.com/search\?q=.+)(&client=.+) $1&gl=hk&safe=off 302
 
 [MITM]
-hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.macaupass.com
+hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, ,*macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, *.xiaohongshu.com, *.manhuashe.com, *.lihkg.com, *.amap.com, *.qq.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, *.hktvmall.com, 
