@@ -90,7 +90,7 @@
 
 #HKTV mall
 ^https?:\/\/www.hktvmall.com\/hktvwebservices\/v1\/hktv\/get_floating_button\? - reject
-^https?:\/\/ts-analysis.shoalter.com\/topics\/hktvmall_ios_tracker_event - reject
+#^https?:\/\/ts-analysis.shoalter.com\/topics\/hktvmall_ios_tracker_event - reject
 
 #Wikipedia
 (https?:\/\/zh.m.wikipedia.org\/)(wiki)(\/.+) $1zh-hk$3 302
