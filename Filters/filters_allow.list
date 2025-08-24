@@ -48,6 +48,9 @@ DOMAIN, coolism-webaac.cdn.byteark.com
 #Pokemon TCGP
 DOMAIN-KEYWORD, player-api-prod
 
+#HKTVmall
+DOMAIN-KEYWORD, hktvmall
+
 #Buyee
 DOMAIN-SUFFIX, buyee.jp
 
