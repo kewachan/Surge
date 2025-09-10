@@ -32,7 +32,7 @@
 
 #MPay
 #^https?:\/\/pay.macaupass.com\/tdrmp\/adver\/ - reject
-#^https?:\/\/quicktracking\-api.macaupass.com - reject
+^https?:\/\/quicktracking\-api.macaupass.com - reject
 
 #Mfood
 ^https?:\/\/userside.api.o2o.mfoodapp.com\/orgs\/banner\/advertisement - reject
