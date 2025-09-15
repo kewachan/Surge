@@ -32,6 +32,8 @@ DOMAIN-SUFFIX, geo.yahoo.com
 DOMAIN-SUFFIX, ads.yap.yahoo.com
 DOMAIN-SUFFIX, x.research.qq.com
 DOMAIN-SUFFIX, rmonitor.qq.com
+DOMAIN-SUFFIX, adsgram.ai
+DOMAIN-KEYWORD, nicegram
 
 #d3ward ads list
 DOMAIN-SUFFIX, pagead2.googlesyndication.com
