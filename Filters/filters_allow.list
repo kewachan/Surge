@@ -43,8 +43,9 @@ DOMAIN-SUFFIX, dcard.tw
 #radio
 DOMAIN, live3.tdm.com.mo
 DOMAIN, live4.tdm.com.mo
-DOMAIN, coolism-webaac.cdn.byteark.com
+DOMAIN, coolism-web.cdn.byteark.com
 DOMAIN, streaming.flexconnect.net
+DOMAIN-SUFFIX, theradioapp.com
 
 #Pokemon TCGP
 DOMAIN-KEYWORD, player-api-prod
