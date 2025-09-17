@@ -44,7 +44,7 @@ DOMAIN-SUFFIX, dcard.tw
 DOMAIN, live3.tdm.com.mo
 DOMAIN, live4.tdm.com.mo
 DOMAIN, coolism-webaac.cdn.byteark.com
-DOMAIN, flexconnect.net
+DOMAIN, streaming.flexconnect.net
 
 #Pokemon TCGP
 DOMAIN-KEYWORD, player-api-prod
