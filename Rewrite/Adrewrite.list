@@ -31,7 +31,7 @@
 ^http?:\/\/statistic.live.126.net\/statics\/report\/common\/form - reject
 
 #MPay
-#^https?:\/\/pay.macaupass.com\/tdrmp\/adver\/ - reject
+^https?:\/\/pay.macaupass.com\/tdrmp\/adver\/ - reject
 ^https?:\/\/quicktracking\-api.macaupass.com - reject
 
 #Mfood
