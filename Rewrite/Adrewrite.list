@@ -32,6 +32,7 @@
 
 #MPay
 ^https?:\/\/pay.macaupass.com\/tdrmp\/adver\/ - reject
+^https?:\/\/gateway\-mp.macaupass.com\/mpay\/tdrmp\/newGateway\/adver\/ - reject
 ^https?:\/\/quicktracking\-api.macaupass.com - reject
 
 #Mfood
