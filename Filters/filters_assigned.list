@@ -32,32 +32,19 @@ DOMAIN, coolism-web.cdn.byteark.com
 DOMAIN, streaming.flexconnect.net
 DOMAIN-SUFFIX, theradioapp.com
 
-#Pokemon TCGP
-DOMAIN-KEYWORD, player-api-prod
-
 #HKTVmall
 DOMAIN-KEYWORD, hktvmall
 
-#Buyee
-DOMAIN-SUFFIX, buyee.jp
-
 #Maaseas Youtube Adblock
 DOMAIN, stream.maasea.workers.dev
+
+#Pokemon TCGP
+DOMAIN-KEYWORD, player-api-prod
 
 ############ Macau ############
 #SSH
 DOMAIN, freco.synology.me
 DOMAIN, kewachan.ddns.net
-
-#BNU
-DOMAIN-SUFFIX, bnu.com.mo
-
-#Macao2North car registration
-DOMAIN-SUFFIX, dcloud.net.cn
-DOMAIN, macaoapply.singlewindow.gd.cn
-
-#Kiang Wu hospital
-DOMAIN-SUFFIX, kwh.org.mo
 
 #Oasis parking
 DOMAIN, skyoasis.itmacau.com

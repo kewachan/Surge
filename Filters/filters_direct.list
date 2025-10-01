@@ -38,5 +38,9 @@ DOMAIN-SUFFIX, boc.cn
 
 ############ Macau ############
 
+#Macao2North car registration
+DOMAIN-SUFFIX, dcloud.net.cn
+DOMAIN, macaoapply.singlewindow.gd.cn
+
 #Macau government
 DOMAIN-SUFFIX, gov.mo
