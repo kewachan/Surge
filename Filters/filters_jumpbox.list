@@ -25,9 +25,6 @@ DOMAIN-SUFFIX, oraclecloud.com
 #MasterCard
 DOMAIN-SUFFIX, mastercard.com
 
-#Dcard
-DOMAIN-SUFFIX, dcard.tw
-
 #radio
 DOMAIN, live3.tdm.com.mo
 DOMAIN, live4.tdm.com.mo
