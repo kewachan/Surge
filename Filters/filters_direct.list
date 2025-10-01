@@ -3,6 +3,9 @@
 #Dcard
 DOMAIN-SUFFIX, dcard.tw
 
+#Pokemon TCGP
+DOMAIN-KEYWORD, player-api-prod
+
 ############ China ############
 
 #TP-Link

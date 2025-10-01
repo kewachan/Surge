@@ -38,9 +38,6 @@ DOMAIN-KEYWORD, hktvmall
 #Maaseas Youtube Adblock
 DOMAIN, stream.maasea.workers.dev
 
-#Pokemon TCGP
-DOMAIN-KEYWORD, player-api-prod
-
 ############ Macau ############
 
 #SSH
