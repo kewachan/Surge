@@ -18,14 +18,6 @@ DOMAIN, fpinit.itunes.apple.com
 #Shazam
 DOMAIN, api.shazam.apple.com
 
-#Microsoft Teams
-DOMAIN, teams.events.data.microsoft.com
-DOMAIN-SUFFIX, teams.cdn.live.net
-DOMAIN-SUFFIX, teams.live.com
-DOMAIN-SUFFIX, teams.microsoft.com
-IP-CIDR, 52.112.0.0/14
-IP-CIDR, 52.96.0.0/12
-
 #Youtube subtitle service
 URL-REGEX,^https:\/\/www.youtube.com\/api\/timedtext+
 
@@ -61,9 +53,6 @@ DOMAIN, stream.maasea.workers.dev
 
 ############ China ############
 
-#Shell
-DOMAIN-SUFFIX, shell.com.cn
-
 #TP-Link
 DOMAIN-SUFFIX, tplinkcloud.com.cn
 IP-CIDR, 45.64.22.0/24
@@ -80,9 +69,6 @@ DOMAIN-SUFFIX, mijia.tech
 DOMAIN, trade-acs.m.taobao.com
 DOMAIN, trade-acs.wapa.taobao.com
 DOMAIN, px.ucweb.com
-
-#Wechat Tiny Tools
-DOMAIN-SUFFIX, wuuxiang.com
 
 #HengQin car registration
 DOMAIN-SUFFIX, hengqin.gov.cn
@@ -102,10 +88,6 @@ DOMAIN, kewachan.ddns.net
 
 #BNU
 DOMAIN-SUFFIX, bnu.com.mo
-
-#ICBC
-DOMAIN-SUFFIX, icbc.com.cn
-DOMAIN-SUFFIX, icbc.com.mo
 
 #Macao2North car registration
 DOMAIN-SUFFIX, dcloud.net.cn
