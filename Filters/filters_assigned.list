@@ -42,6 +42,7 @@ DOMAIN, stream.maasea.workers.dev
 DOMAIN-KEYWORD, player-api-prod
 
 ############ Macau ############
+
 #SSH
 DOMAIN, freco.synology.me
 DOMAIN, kewachan.ddns.net
