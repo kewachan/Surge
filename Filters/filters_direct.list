@@ -10,7 +10,6 @@ DOMAIN-KEYWORD, player-api-prod
 
 #TP-Link
 DOMAIN-SUFFIX, tplinkcloud.com.cn
-IP-CIDR, 45.64.22.0/24
 
 #XiaoMi
 DOMAIN-SUFFIX, xiaomi.net
