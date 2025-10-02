@@ -27,7 +27,10 @@ DOMAIN, px.ucweb.com
 
 #HengQin car registration
 DOMAIN-SUFFIX, hengqin.gov.cn
-DOMAIN, service.dcloud.net.cn
+
+#Macao2North car registration
+DOMAIN-SUFFIX, dcloud.net.cn
+DOMAIN-SUFFIX, singlewindow.gd.cn
 
 #12123#
 DOMAIN-SUFFIX, 122.gov.cn
@@ -36,10 +39,6 @@ DOMAIN-SUFFIX, 122.gov.cn
 DOMAIN-SUFFIX, boc.cn
 
 ############ Macau ############
-
-#Macao2North car registration
-DOMAIN-SUFFIX, dcloud.net.cn
-DOMAIN, macaoapply.singlewindow.gd.cn
 
 #Macau government
 DOMAIN-SUFFIX, gov.mo
