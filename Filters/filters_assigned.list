@@ -14,6 +14,9 @@ DOMAIN, fpinit.itunes.apple.com
 #Shazam
 DOMAIN, api.shazam.apple.com
 
+#Google
+DOMAIN-SUFFIX, google.com
+
 #Youtube subtitle service
 URL-REGEX,^https:\/\/www.youtube.com\/api\/timedtext+
 
