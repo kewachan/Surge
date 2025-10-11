@@ -44,3 +44,22 @@ DOMAIN, kewachan.ddns.net
 #Oasis parking
 DOMAIN, skyoasis.itmacau.com
 DOMAIN-SUFFIX, skyoasis.com.mo
+
+#Macau government
+DOMAIN-SUFFIX, gov.mo
+
+############ China ############
+
+#XiaoMi
+DOMAIN-SUFFIX, xiaomi.net
+DOMAIN-SUFFIX, mi.com
+DOMAIN, miot-spec.org
+DOMAIN-SUFFIX, youpin.mi-img.com
+DOMAIN-SUFFIX, xiaomiyoupin.com
+DOMAIN-SUFFIX, mijia.tech
+
+#12123#
+DOMAIN-SUFFIX, 122.gov.cn
+
+#BOC CN
+DOMAIN-SUFFIX, boc.cn

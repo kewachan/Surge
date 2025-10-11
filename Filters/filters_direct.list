@@ -11,14 +11,6 @@ DOMAIN-KEYWORD, player-api-prod
 #TP-Link
 DOMAIN-SUFFIX, tplinkcloud.com.cn
 
-#XiaoMi
-DOMAIN-SUFFIX, xiaomi.net
-DOMAIN-SUFFIX, mi.com
-DOMAIN, miot-spec.org
-DOMAIN-SUFFIX, youpin.mi-img.com
-DOMAIN-SUFFIX, xiaomiyoupin.com
-DOMAIN-SUFFIX, mijia.tech
-
 #Taobao
 DOMAIN, trade-acs.m.taobao.com
 DOMAIN, trade-acs.wapa.taobao.com
@@ -31,13 +23,3 @@ DOMAIN-SUFFIX, hengqin.gov.cn
 DOMAIN-SUFFIX, dcloud.net.cn
 DOMAIN-SUFFIX, singlewindow.gd.cn
 
-#12123#
-DOMAIN-SUFFIX, 122.gov.cn
-
-#BOC CN
-DOMAIN-SUFFIX, boc.cn
-
-############ Macau ############
-
-#Macau government
-DOMAIN-SUFFIX, gov.mo
