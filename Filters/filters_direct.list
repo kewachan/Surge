@@ -23,3 +23,7 @@ DOMAIN-SUFFIX, hengqin.gov.cn
 DOMAIN-SUFFIX, dcloud.net.cn
 DOMAIN-SUFFIX, singlewindow.gd.cn
 
+############ Macau ############
+
+#Macau government
+DOMAIN-SUFFIX, gov.mo

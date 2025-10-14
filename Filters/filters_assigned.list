@@ -45,9 +45,6 @@ DOMAIN, kewachan.ddns.net
 DOMAIN, skyoasis.itmacau.com
 DOMAIN-SUFFIX, skyoasis.com.mo
 
-#Macau government
-DOMAIN-SUFFIX, gov.mo
-
 ############ China ############
 
 #XiaoMi
