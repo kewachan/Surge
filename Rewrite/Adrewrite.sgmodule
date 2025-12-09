@@ -47,7 +47,7 @@
 ##### Others #####
 
 #xiaohongshu
-^https?:\/\/.+\.xiaohongshu\.com\/.+(collect|metrics|report|Report) - reject
+#^https?:\/\/.+\.xiaohongshu\.com\/.+(collect|metrics|report|Report) - reject
 
 #Manhuashe
 ^https?:\/\/comicapi\.manhuashe\.com\/v\d\/ads - reject
