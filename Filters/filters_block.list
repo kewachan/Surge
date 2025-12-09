@@ -30,18 +30,6 @@ DOMAIN-SUFFIX, x.research.qq.com
 DOMAIN-SUFFIX, rmonitor.qq.com
 DOMAIN-SUFFIX, adsgram.ai
 
-DOMAIN, dns.alidns.com
-DOMAIN, doh.pub
-DOMAIN, ads-img-al.xhscdn.com
-DOMAIN, ads-img-qc.xhscdn.com
-DOMAIN, ads-video-al.xhscdn.com
-DOMAIN, ads-video-qc.xhscdn.com
-DOMAIN, ads-vp5.xhscdn.com
-DOMAIN, growth-img.xhscdn.com
-DOMAIN, sns-webpic.xhscdn.com
-DOMAIN, xhslive-video.xhscnd.com
-
-
 #d3ward ads list
 DOMAIN-SUFFIX, pagead2.googlesyndication.com
 DOMAIN-SUFFIX, pagead2.googleadservices.com
