@@ -25,5 +25,9 @@ DOMAIN-SUFFIX, singlewindow.gd.cn
 
 ############ Macau ############
 
+#SSH
+DOMAIN, freco.synology.me
+DOMAIN, kewachan.ddns.net
+
 #Macau government
 DOMAIN-SUFFIX, gov.mo

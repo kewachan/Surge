@@ -35,10 +35,6 @@ DOMAIN, stream.maasea.workers.dev
 
 ############ Macau ############
 
-#SSH
-DOMAIN, freco.synology.me
-DOMAIN, kewachan.ddns.net
-
 #Oasis parking
 DOMAIN, skyoasis.itmacau.com
 DOMAIN-SUFFIX, skyoasis.com.mo
