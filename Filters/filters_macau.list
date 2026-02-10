@@ -1,3 +1,8 @@
+############ International ############
+
+#Apple update CDN
+DOMAIN, cdn-apple.com
+
 ############ China ############
 
 #Taobao
