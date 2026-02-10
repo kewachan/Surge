@@ -14,11 +14,6 @@ DOMAIN-KEYWORD, player-api-prod
 #TP-Link
 DOMAIN-SUFFIX, tplinkcloud.com.cn
 
-#Taobao
-DOMAIN, trade-acs.m.taobao.com
-DOMAIN, trade-acs.wapa.taobao.com
-DOMAIN, px.ucweb.com
-
 #HengQin car registration
 DOMAIN-SUFFIX, hengqin.gov.cn
 
