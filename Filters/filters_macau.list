@@ -13,6 +13,9 @@ DOMAIN, trade-acs.m.taobao.com
 DOMAIN, trade-acs.wapa.taobao.com
 DOMAIN, px.ucweb.com
 
+#Netease
+DOMAIN-SUFFIX, easebar.com
+
 ############ Macau ############
 
 #CTM
