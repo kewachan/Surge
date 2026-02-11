@@ -8,9 +8,6 @@ DOMAIN-KEYWORD, player-api-prod
 
 ############ China ############
 
-#TP-Link
-DOMAIN-SUFFIX, tplinkcloud.com.cn
-
 #HengQin car registration
 DOMAIN-SUFFIX, hengqin.gov.cn
 
