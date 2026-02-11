@@ -17,3 +17,7 @@ DOMAIN, px.ucweb.com
 
 #CTM
 DOMAIN-SUFFIX, ctm.net
+
+#Oasis parking
+DOMAIN, skyoasis.itmacau.com
+DOMAIN-SUFFIX, skyoasis.com.mo

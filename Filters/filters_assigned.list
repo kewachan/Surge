@@ -33,12 +33,6 @@ DOMAIN-KEYWORD, hktvmall
 #Maaseas Youtube Adblock
 DOMAIN, stream.maasea.workers.dev
 
-############ Macau ############
-
-#Oasis parking
-DOMAIN, skyoasis.itmacau.com
-DOMAIN-SUFFIX, skyoasis.com.mo
-
 ############ China ############
 
 #XiaoMi
