@@ -1,8 +1,5 @@
 ############ International ############
 
-#Dcard
-DOMAIN-SUFFIX, dcard.tw
-
 #Recaptcha
 DOMAIN-SUFFIX, recaptcha.net
 

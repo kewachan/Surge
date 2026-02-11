@@ -1,5 +1,8 @@
 ############ International ############
 
+#Dcard
+DOMAIN-SUFFIX, dcard.tw
+
 #Apple update CDN
 DOMAIN, cdn-apple.com
 
