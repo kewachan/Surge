@@ -21,6 +21,10 @@ DOMAIN-SUFFIX, easebar.com
 
 ############ Macau ############
 
+#radio
+DOMAIN, live3.tdm.com.mo
+DOMAIN, live4.tdm.com.mo
+
 #CTM
 DOMAIN-SUFFIX, ctm.net
 

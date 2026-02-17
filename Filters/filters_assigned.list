@@ -21,8 +21,6 @@ DOMAIN-SUFFIX, oraclecloud.com
 DOMAIN-SUFFIX, mastercard.com
 
 #radio
-DOMAIN, live3.tdm.com.mo
-DOMAIN, live4.tdm.com.mo
 DOMAIN, coolism-web.cdn.byteark.com
 DOMAIN, streaming.flexconnect.net
 DOMAIN-SUFFIX, theradioapp.com
