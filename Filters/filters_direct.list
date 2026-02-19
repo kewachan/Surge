@@ -20,6 +20,4 @@ DOMAIN-SUFFIX, singlewindow.gd.cn
 #SSH
 DOMAIN, freco.synology.me
 DOMAIN, kewachan.ddns.net
-
-#Macau government
-DOMAIN-SUFFIX, gov.mo
+DOMAIN, 
