@@ -22,6 +22,10 @@ DOMAIN-SUFFIX, tplinkcloud.com.cn
 #Netease
 DOMAIN-SUFFIX, easebar.com
 
+#xiaoyakankan
+DOMAIN-KEYWORD,kkzycdn
+DOMAIN-KEYWORD,bfikuncdn
+
 ############ Macau ############
 
 #radio
