@@ -29,8 +29,7 @@ DOMAIN-KEYWORD,bfikuncdn
 ############ Macau ############
 
 #radio
-DOMAIN, live3.tdm.com.mo
-DOMAIN, live4.tdm.com.mo
+DOMAIN-SUFFIX, tdm.com.mo
 
 #CTM
 DOMAIN-SUFFIX, ctm.net
