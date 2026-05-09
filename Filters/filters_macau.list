@@ -45,3 +45,6 @@ DOMAIN-KEYWORD, skyoasis
 
 #Macau government
 DOMAIN-SUFFIX, gov.mo
+
+#AXA
+DOMAIN-SUFFIX, axa.com.hk
