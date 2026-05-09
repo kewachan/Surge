@@ -9,6 +9,12 @@ DOMAIN, cdn-apple.com
 #Apple GrandSlam Authentication
 DOMAIN, gsa.apple.com
 
+#RandomArt
+DOMAIN-SUFFIX, randomdailyart.com
+
+#BasaltArt
+DOMAIN-SUFFIX, basalt.yevgenglukhov.com
+
 ############ China ############
 
 #Taobao
