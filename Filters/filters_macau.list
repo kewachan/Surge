@@ -4,7 +4,7 @@
 DOMAIN-SUFFIX, dcard.tw
 
 #Apple update CDN
-DOMAIN, cdn-apple.com
+DOMAIN-SUFFIX, cdn-apple.com
 
 #Apple GrandSlam Authentication
 DOMAIN, gsa.apple.com
