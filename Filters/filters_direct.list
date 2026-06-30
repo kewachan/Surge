@@ -7,7 +7,7 @@ DOMAIN-SUFFIX, recaptcha.net
 DOMAIN-KEYWORD, player-api-prod
 
 #Lrclib
-DOMAIN-KEYWORD, lrclib.net
+DOMAIN-SUFFIX, lrclib.net
 
 ############ China ############
 
