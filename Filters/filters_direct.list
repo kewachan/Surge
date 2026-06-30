@@ -6,6 +6,9 @@ DOMAIN-SUFFIX, recaptcha.net
 #Pokemon TCGP
 DOMAIN-KEYWORD, player-api-prod
 
+#Lrclib
+DOMAIN-KEYWORD, lrclib.net
+
 ############ China ############
 
 #HengQin car registration
