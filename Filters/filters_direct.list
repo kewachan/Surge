@@ -6,6 +6,9 @@ DOMAIN-SUFFIX, recaptcha.net
 #Pokemon TCGP
 DOMAIN-KEYWORD, player-api-prod
 
+#Youtube subtitle service
+URL-REGEX,^https:\/\/www.youtube.com\/api\/timedtext+
+
 #Lrclib
 DOMAIN-KEYWORD, lrclib
 
