@@ -139,8 +139,11 @@ async function translateCaptionResponse() {
     const pieces = [];
     let part;
     segment.lastIndex = 0;
-    while ((part = segment.exec(match[2]))) pieces.push(decodeXml(part[1]));
-    const text = pieces.join("").replace(/\s+/g, " ").trim();
+    while ((part = segment.exec(match[2]))) pieces.push(part[1]);
+    // srv3 may contain either word-level <s> nodes or plain text directly
+    // inside each timed <p> node.
+    const rawText = pieces.length ? pieces.join("") : match[2].replace(/<[^>]*>/g, "");
+    const text = decodeXml(rawText).replace(/\s+/g, " ").trim();
     if (text) captions.push({start: match.index, end: paragraph.lastIndex, attributes: match[1] || "", text});
   }
   if (!captions.length) return $done({});
