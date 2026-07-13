@@ -1,5 +1,5 @@
 #!name=Youtube (Music) Enhance - kewachan
-#!desc=Enhancements for YouTube and YouTube Music, including a fix for the new Sponsored feed ads
+#!desc=Enhancements for YouTube and YouTube Music
 #!arguments=Block Upload Button:true,Block Immersive Button:true,Block Shorts Button:false,Caption Translation Language:off,Enable Debug Mode:false
 #!arguments-desc=- Blocking options: [true, false] \n- Translation option: [language code, off] \n\n1. Language codes follow the Google Translate language codes. Use off to disable translation.\n2. Enable debug mode to output additional logs.
 
