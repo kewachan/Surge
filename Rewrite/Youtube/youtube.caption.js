@@ -4,8 +4,8 @@
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 // The web endpoint accepts requests around 12 KB. Larger batches keep a full
 // caption track within the YouTube app's roughly eight-second response limit.
-const MAX_QUERY_BYTES = 12000;
-const CONCURRENCY = 8;
+const MAX_ENCODED_QUERY_CHARS = 14000;
+const CONCURRENCY = 48;
 
 function getQueryValue(url, name) {
   const match = url.match(new RegExp(`[?&]${name}=([^&#]*)`));
@@ -49,18 +49,17 @@ function encodeXml(text) {
 }
 
 function separator(index) {
-  return `\n[[[YTSPLIT]]]${index}[[[YTSPLIT]]]\n`;
+  return `\n[[YTS:${index}]]\n`;
 }
 
 function buildBatches(captions) {
-  const encoder = new TextEncoder();
   const batches = [];
   let batch = [];
   let query = "";
 
   captions.forEach((caption, index) => {
     const addition = `${batch.length ? separator(index) : ""}${caption.text}`;
-    if (batch.length && encoder.encode(query + addition).length > MAX_QUERY_BYTES) {
+    if (batch.length && encodeURIComponent(query + addition).length > MAX_ENCODED_QUERY_CHARS) {
       batches.push({items: batch, query});
       batch = [];
       query = "";
@@ -93,7 +92,7 @@ function fetchTranslation(query, source, target) {
 }
 
 function splitTranslation(text, items) {
-  const pattern = /\s*\[\[\[YTSPLIT\]\]\]\s*\d+\s*\[\[\[YTSPLIT\]\]\]\s*/g;
+  const pattern = /\s*\[\[YTS:\s*\d+\s*\]\]\s*/g;
   const parts = text.split(pattern);
   return parts.length === items.length ? parts : null;
 }
@@ -127,10 +126,19 @@ async function translateCaptionResponse() {
 
   const body = $response.body;
   const captions = [];
-  const expression = /<s(\s[^>]*)?>([\s\S]*?)<\/s>/g;
+  // Translate complete timed paragraphs. Auto-generated srv3 captions may
+  // contain thousands of word-level <s> nodes; translating those separately
+  // is too slow and produces oversized delimiter payloads.
+  const expression = /<p(\s[^>]*)?>([\s\S]*?)<\/p>/g;
+  const segmentExpression = /<s(?:\s[^>]*)?>([\s\S]*?)<\/s>/g;
   let match;
   while ((match = expression.exec(body))) {
-    captions.push({start: match.index, end: expression.lastIndex, attributes: match[1] || "", text: decodeXml(match[2]).replace(/\s+/g, " ").trim()});
+    const pieces = [];
+    let segment;
+    segmentExpression.lastIndex = 0;
+    while ((segment = segmentExpression.exec(match[2]))) pieces.push(decodeXml(segment[1]));
+    const text = pieces.join("").replace(/\s+/g, " ").trim();
+    if (text) captions.push({start: match.index, end: expression.lastIndex, attributes: match[1] || "", text});
   }
   if (!captions.length) return $done({});
 
@@ -140,7 +148,7 @@ async function translateCaptionResponse() {
   let position = 0;
   captions.forEach((caption) => {
     output += body.slice(position, caption.start);
-    output += `<s${caption.attributes}>${encodeXml(caption.translated || caption.text)}</s>`;
+    output += `<p${caption.attributes}><s ac="0">${encodeXml(caption.translated || caption.text)}</s></p>`;
     position = caption.end;
   });
   output += body.slice(position);
