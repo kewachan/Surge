@@ -1,6 +1,4 @@
 // Build: 2026/7/13 kewachan feed-ad fix (based on Maasea 2026/7/12 22:44:32)
-// Keep the upstream bundle intact while normalizing the generated caption label.
-(()=>{const encode=TextEncoder.prototype.encode;TextEncoder.prototype.encode=function(value){return encode.call(this,typeof value==="string"?value.replace(/^@Enhance \(/,"Enhance ("):value)}})();
 (()=>{try{const key="YouTubeAdvertiseInfo",eml="landscape_image_wide_button_layout.eml-fe",cache=JSON.parse($persistentStore.read(key)||"null")||{version:"1.0",whiteNo:[],blackNo:[],whiteEml:[],blackEml:[]};cache.version="1.0";cache.whiteNo=cache.whiteNo||[];cache.blackNo=cache.blackNo||[];cache.whiteEml=(cache.whiteEml||[]).filter(item=>item!==eml);cache.blackEml=cache.blackEml||[];cache.blackEml.includes(eml)||cache.blackEml.push(eml);$persistentStore.write(JSON.stringify(cache),key)}catch(error){console.log(`YouTube feed-ad cache patch: ${error}`)}})();
 // Remove Sponsored continuation cards stored in the currently unknown
 // Browse.onResponseReceivedAction.sectionListRenderer protobuf field 32.
