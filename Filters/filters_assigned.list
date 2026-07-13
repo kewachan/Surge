@@ -9,9 +9,6 @@ DOMAIN-SUFFIX, ess.apple.com
 DOMAIN, speedysub.itunes.apple.com
 DOMAIN, fpinit.itunes.apple.com
 
-#Youtube subtitle service
-URL-REGEX,^https:\/\/www.youtube.com\/api\/timedtext+
-
 #Oracle Cloud
 DOMAIN, console-telemetry.oci.oraclecloud.com
 DOMAIN-SUFFIX, oracleinfinity.io

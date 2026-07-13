@@ -9,6 +9,9 @@ DOMAIN-SUFFIX, cdn-apple.com
 #Apple GrandSlam Authentication
 DOMAIN, gsa.apple.com
 
+#Youtube subtitle service
+URL-REGEX,^https:\/\/www.youtube.com\/api\/timedtext+
+
 #RandomArt
 DOMAIN-SUFFIX, randomdailyart.com
 
