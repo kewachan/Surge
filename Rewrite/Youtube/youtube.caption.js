@@ -4,6 +4,7 @@
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 const MAX_ENCODED_QUERY_CHARS = 14000;
 const CONCURRENCY = 48;
+const RESPONSE_BUDGET_MS = 6000;
 
 function getQueryValue(url, name) {
   const match = url.match(new RegExp(`[?&]${name}=([^&#]*)`));
@@ -11,7 +12,31 @@ function getQueryValue(url, name) {
 }
 
 function mapTargetLanguage(language) {
-  return {"zh-Hant": "zh-TW", "zh-Hans": "zh-CN"}[language] || language;
+  const normalized = language.toLowerCase();
+  return {"zh-hant": "zh-TW", "zh-tw": "zh-TW", "zh-hans": "zh-CN", "zh-cn": "zh-CN"}[normalized] || language;
+}
+
+function cacheKey(query, source, target) {
+  let hash = 2166136261;
+  const value = `${source}|${target}|${query}`;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `YouTubeCaption.${(hash >>> 0).toString(16)}`;
+}
+
+function readCachedParts(key, length) {
+  try {
+    const parts = JSON.parse($persistentStore.read(key) || "null");
+    return Array.isArray(parts) && parts.length === length ? parts : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeCachedParts(key, parts) {
+  try { $persistentStore.write(JSON.stringify(parts), key); } catch (_) {}
 }
 
 function rewriteCaptionRequest(url) {
@@ -80,8 +105,13 @@ async function translateBatches(batches, captions, source, target) {
     while (cursor < batches.length) {
       const batch = batches[cursor++];
       try {
-        const translated = await fetchTranslation(batch.query, source, target);
-        const parts = translated.split(/\s*\[\[YTS:\s*\d+\s*\]\]\s*/g);
+        const key = cacheKey(batch.query, source, target);
+        let parts = readCachedParts(key, batch.items.length);
+        if (!parts) {
+          const translated = await fetchTranslation(batch.query, source, target);
+          parts = translated.split(/\s*\[\[YTS:\s*\d+\s*\]\]\s*/g);
+          if (parts.length === batch.items.length) writeCachedParts(key, parts);
+        }
         if (parts.length !== batch.items.length) continue;
         batch.items.forEach((item, index) => { captions[item.captionIndex].translated = parts[index].trim(); });
       } catch (error) {
@@ -89,7 +119,10 @@ async function translateBatches(batches, captions, source, target) {
       }
     }
   }
-  await Promise.all(Array.from({length: Math.min(CONCURRENCY, batches.length)}, worker));
+  const work = Promise.all(Array.from({length: Math.min(CONCURRENCY, batches.length)}, worker));
+  let timer;
+  await Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, RESPONSE_BUDGET_MS); })]);
+  if (timer) clearTimeout(timer);
 }
 
 async function translateCaptionResponse() {
