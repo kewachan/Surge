@@ -2,11 +2,10 @@
 // No account or API key is required. Public endpoint limits still apply.
 
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
-// Google accepts roughly 5,000 characters per web translation request. Keep
-// some headroom for multibyte text and URL encoding while minimizing the
-// number of requests needed for a full caption track.
-const MAX_QUERY_BYTES = 4200;
-const CONCURRENCY = 6;
+// The web endpoint accepts requests around 12 KB. Larger batches keep a full
+// caption track within the YouTube app's roughly eight-second response limit.
+const MAX_QUERY_BYTES = 12000;
+const CONCURRENCY = 8;
 
 function getQueryValue(url, name) {
   const match = url.match(new RegExp(`[?&]${name}=([^&#]*)`));
@@ -77,7 +76,7 @@ function buildBatches(captions) {
 function fetchTranslation(query, source, target) {
   const url = `${TRANSLATE_ENDPOINT}?client=gtx&sl=${encodeURIComponent(source)}&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(query)}`;
   return new Promise((resolve, reject) => {
-    $httpClient.get({url, headers: {Accept: "application/json"}}, (error, response, body) => {
+    $httpClient.get({url, timeout: 7, headers: {Accept: "application/json"}}, (error, response, body) => {
       if (error) return reject(error);
       try {
         const result = JSON.parse(body);
