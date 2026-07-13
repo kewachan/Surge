@@ -2,8 +2,11 @@
 // No account or API key is required. Public endpoint limits still apply.
 
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
-const MAX_QUERY_BYTES = 1500;
-const CONCURRENCY = 2;
+// Google accepts roughly 5,000 characters per web translation request. Keep
+// some headroom for multibyte text and URL encoding while minimizing the
+// number of requests needed for a full caption track.
+const MAX_QUERY_BYTES = 4200;
+const CONCURRENCY = 6;
 
 function getQueryValue(url, name) {
   const match = url.match(new RegExp(`[?&]${name}=([^&#]*)`));
