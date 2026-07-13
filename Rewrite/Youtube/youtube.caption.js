@@ -1,9 +1,9 @@
-// MyMemory caption translator for YouTube srv3 timedtext responses.
-// No account or API key is required. Public API limits still apply.
+// Google web caption translator for YouTube srv3 timedtext responses.
+// No account or API key is required. Public endpoint limits still apply.
 
-const MYMEMORY_ENDPOINT = "https://api.mymemory.translated.net/get";
-const MAX_QUERY_BYTES = 450;
-const CONCURRENCY = 4;
+const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
+const MAX_QUERY_BYTES = 1500;
+const CONCURRENCY = 2;
 
 function getQueryValue(url, name) {
   const match = url.match(new RegExp(`[?&]${name}=([^&#]*)`));
@@ -28,7 +28,7 @@ function rewriteCaptionRequest(url) {
 
 function decodeXml(text) {
   return text
-    .replace(/&#(d+);/g, (_, value) => String.fromCodePoint(Number(value)))
+    .replace(/&#(\d+);/g, (_, value) => String.fromCodePoint(Number(value)))
     .replace(/&#x([\da-f]+);/gi, (_, value) => String.fromCodePoint(parseInt(value, 16)))
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
@@ -72,16 +72,17 @@ function buildBatches(captions) {
 }
 
 function fetchTranslation(query, source, target) {
-  const url = `${MYMEMORY_ENDPOINT}?q=${encodeURIComponent(query)}&langpair=${encodeURIComponent(`${source}|${target}`)}`;
+  const url = `${TRANSLATE_ENDPOINT}?client=gtx&sl=${encodeURIComponent(source)}&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(query)}`;
   return new Promise((resolve, reject) => {
     $httpClient.get({url, headers: {Accept: "application/json"}}, (error, response, body) => {
       if (error) return reject(error);
       try {
         const result = JSON.parse(body);
-        if ((response.status || response.statusCode) !== 200 || result.responseStatus !== 200 || result.quotaFinished) {
-          throw new Error(result.responseDetails || `MyMemory status ${result.responseStatus}`);
+        const status = response.status || response.statusCode;
+        if (status !== 200 || !Array.isArray(result?.[0])) {
+          throw new Error(`Google Translate status ${status}`);
         }
-        resolve(result.responseData.translatedText);
+        resolve(result[0].map((part) => part?.[0] || "").join(""));
       } catch (parseError) {
         reject(parseError);
       }
@@ -108,7 +109,7 @@ async function translateBatches(batches, captions, source, target) {
           captions[item.captionIndex].translated = parts[index].trim();
         });
       } catch (error) {
-        console.log(`MyMemory caption batch failed: ${error}`);
+        console.log(`Google caption batch failed: ${error}`);
       }
     }
   }
@@ -116,7 +117,9 @@ async function translateBatches(batches, captions, source, target) {
 }
 
 async function translateCaptionResponse() {
-  const target = mapTargetLanguage(getQueryValue($request.url, "enhance_tlang"));
+  const target = mapTargetLanguage(
+    getQueryValue($request.url, "enhance_tlang") || getQueryValue($request.url, "tlang"),
+  );
   const source = getQueryValue($request.url, "lang") || "en";
   if (!target || !$response.body) return $done({});
 
@@ -146,7 +149,7 @@ if (typeof $response === "undefined") {
   $done({url: rewriteCaptionRequest($request.url)});
 } else {
   translateCaptionResponse().catch((error) => {
-    console.log(`MyMemory caption translation failed: ${error}`);
+    console.log(`Google caption translation failed: ${error}`);
     $done({});
   });
 }
