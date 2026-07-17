@@ -1,5 +1,5 @@
 #!name=General AdBlock
-#!desc=HAR-driven general advertising blocker with an updateable JavaScript blocklist.
+#!desc=HAR-driven general advertising blocker
 #!system=ios
 
 [Script]
