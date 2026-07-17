@@ -15,17 +15,8 @@ try {
     url.pathname.startsWith(BLOCKED_PATH_PREFIX);
 
   if (shouldBlock) {
-    console.log(`[DailyArt AdBlock] Blocked: ${$request.url}`);
-    $done({
-      response: {
-        status: 200,
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "no-store"
-        },
-        body: ""
-      }
-    });
+    console.log(`[DailyArt AdBlock] Aborted: ${$request.url}`);
+    $done();
   } else {
     $done({});
   }
