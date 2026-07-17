@@ -3,7 +3,7 @@
 #!system=ios
 
 [Script]
-DailyArt AdBlock = type=http-request,pattern=^https?:\/\/googleads\.g\.doubleclick\.net\/mads\/,script-path=https://raw.githubusercontent.com/USER/REPO/main/Scripts/dailyart-adblock.js,script-update-interval=86400,timeout=5
+DailyArt AdBlock = type=http-request,pattern=^https?:\/\/googleads\.g\.doubleclick\.net\/mads\/,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/DailyArt/dailyart-adblock.js,script-update-interval=86400,timeout=5
 
 [MITM]
 hostname = %APPEND% googleads.g.doubleclick.net
