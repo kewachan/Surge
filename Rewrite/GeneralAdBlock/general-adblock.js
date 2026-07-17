@@ -10,10 +10,15 @@
 const BLOCKED_DOMAINS = [
   // Advertising
   "googleads.g.doubleclick.net",
+  "sdkconfig.ad.xiaomi.com", // Xiaomi advertising SDK configuration
 
   // Crash reporting
   "firebase-settings.crashlytics.com",
-  "sentry.dailyart.nodea.net.pl"
+  "sentry.dailyart.nodea.net.pl",
+  "apmplus.volces.com", // Xiaomi APM, diagnostics, and session telemetry
+
+  // Tracking
+  "tracking.miui.com" // Xiaomi behavioural tracking
 ];
 
 const BLOCKED_URL_PATTERNS = [
