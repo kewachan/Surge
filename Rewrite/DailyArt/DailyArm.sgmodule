@@ -1,0 +1,9 @@
+#!name=DailyArt AdBlock
+#!desc=Blocks the Google Mobile Ads SDK request observed in DailyArt.
+#!system=ios
+
+[Script]
+DailyArt AdBlock = type=http-request,pattern=^https?:\/\/googleads\.g\.doubleclick\.net\/mads\/,script-path=https://raw.githubusercontent.com/USER/REPO/main/Scripts/dailyart-adblock.js,script-update-interval=86400,timeout=5
+
+[MITM]
+hostname = %APPEND% googleads.g.doubleclick.net
