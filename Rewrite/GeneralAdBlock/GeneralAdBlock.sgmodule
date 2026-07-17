@@ -1,0 +1,9 @@
+#!name=General AdBlock
+#!desc=HAR-driven general advertising blocker with an updateable JavaScript blocklist.
+#!system=ios
+
+[Script]
+GeneralAdBlock = type=rule,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/general-adblock.js,script-update-interval=86400,timeout=5
+
+[Rule]
+SCRIPT,GeneralAdBlock,REJECT
