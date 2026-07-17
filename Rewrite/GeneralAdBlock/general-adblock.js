@@ -2,12 +2,18 @@
  * General AdBlock for Surge
  *
  * The blocklist is updated from advertising traffic confirmed in HAR captures.
- * Keep consent, analytics, crash reporting, and first-party API traffic out of
- * this list unless they are independently confirmed to deliver advertising.
+ * In addition to advertising, crash-reporting hosts explicitly requested by
+ * the user are included. Keep consent and first-party API traffic out of this
+ * list unless blocking them is explicitly requested.
  */
 
 const BLOCKED_DOMAINS = [
-  "googleads.g.doubleclick.net"
+  // Advertising
+  "googleads.g.doubleclick.net",
+
+  // Crash reporting
+  "firebase-settings.crashlytics.com",
+  "sentry.dailyart.nodea.net.pl"
 ];
 
 const BLOCKED_URL_PATTERNS = [
