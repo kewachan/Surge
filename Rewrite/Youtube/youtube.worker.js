@@ -3,6 +3,7 @@ const UMP_CONTENT_TYPE = "application/vnd.yt-ump";
 const ENCRYPTED_INNERTUBE_RESPONSE = 25;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+const UPSTREAM_TIMEOUT_MS = 25000;
 
 function concatBytes(...chunks) {
   const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
@@ -533,16 +534,30 @@ function upstreamHeaders(requestHeaders) {
   return headers;
 }
 
-function responseWithBytes(upstream, bytes, result) {
+function responseHeaders(upstream, result, rewritten) {
   const headers = new Headers(upstream.headers);
-  headers.delete("content-length");
-  headers.delete("content-encoding");
   headers.delete("transfer-encoding");
+  if (rewritten) {
+    headers.delete("content-length");
+    headers.delete("content-encoding");
+  }
   headers.set("x-youtube-adblock", result);
+  return headers;
+}
+
+function responseWithBytes(upstream, bytes, result) {
   return new Response(bytes, {
     status: upstream.status,
     statusText: upstream.statusText,
-    headers,
+    headers: responseHeaders(upstream, result, true),
+  });
+}
+
+function responseWithStream(upstream, result) {
+  return new Response(upstream.body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: responseHeaders(upstream, result, false),
   });
 }
 
@@ -576,19 +591,50 @@ async function handleRequest(request) {
   const requestBytes = new Uint8Array(await request.arrayBuffer());
   if (requestBytes.length > MAX_REQUEST_BYTES) return new Response("Request Too Large", { status: 413 });
 
-  const upstream = await fetch(target, {
-    method: "POST",
-    headers: upstreamHeaders(request.headers),
-    body: requestBytes,
-    redirect: "manual",
-  });
-  const responseBytes = new Uint8Array(await upstream.arrayBuffer());
-  if (responseBytes.length > MAX_RESPONSE_BYTES) return responseWithBytes(upstream, responseBytes, "bypass-too-large");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+  let upstream;
+  try {
+    upstream = await fetch(target, {
+      method: "POST",
+      headers: upstreamHeaders(request.headers),
+      body: requestBytes,
+      redirect: "manual",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const timedOut = controller.signal.aborted;
+    clearTimeout(timeout);
+    return new Response(timedOut ? "Upstream Timeout" : "Upstream Failed", {
+      status: timedOut ? 504 : 502,
+      headers: {"x-youtube-adblock": timedOut ? "bypass-timeout" : "bypass-fetch-error"},
+    });
+  }
 
   const contentType = upstream.headers.get("content-type")?.toLowerCase() || "";
   if (!upstream.ok || !contentType.includes(UMP_CONTENT_TYPE)) {
-    return responseWithBytes(upstream, responseBytes, "bypass-not-ump");
+    clearTimeout(timeout);
+    return responseWithStream(upstream, "bypass-not-ump");
   }
+  const responseLength = Number(upstream.headers.get("content-length") || 0);
+  if (Number.isFinite(responseLength) && responseLength > MAX_RESPONSE_BYTES) {
+    clearTimeout(timeout);
+    return responseWithStream(upstream, "bypass-too-large");
+  }
+
+  let responseBytes;
+  try {
+    responseBytes = new Uint8Array(await upstream.arrayBuffer());
+  } catch (error) {
+    const timedOut = controller.signal.aborted;
+    clearTimeout(timeout);
+    return new Response(timedOut ? "Upstream Timeout" : "Upstream Read Failed", {
+      status: timedOut ? 504 : 502,
+      headers: {"x-youtube-adblock": timedOut ? "bypass-timeout" : "bypass-read-error"},
+    });
+  }
+  clearTimeout(timeout);
+  if (responseBytes.length > MAX_RESPONSE_BYTES) return responseWithBytes(upstream, responseBytes, "bypass-too-large");
 
   try {
     const result = await processUmpResponse(responseBytes, clientKey);

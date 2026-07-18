@@ -1,9 +1,7 @@
 // Build: 2026/7/13 kewachan feed-ad fix (based on Maasea 2026/7/12 22:44:32)
-// Caption label is generated as "Enhance (language)" in the bundled code.
-// Older builds globally blacklisted this shared layout while fixing a feed ad.
-// It is also used by watch-page content, so remove the stale cache entry and
-// let the targeted protobuf patch below decide by the actual pagead marker.
-(()=>{try{const key="YouTubeAdvertiseInfo",eml="landscape_image_wide_button_layout.eml-fe",raw=$persistentStore.read(key);if(!raw)return;const cache=JSON.parse(raw);if(!cache||typeof cache!=="object")return;cache.blackEml=(cache.blackEml||[]).filter(item=>item!==eml);cache.whiteEml=(cache.whiteEml||[]).filter(item=>item!==eml);$persistentStore.write(JSON.stringify(cache),key)}catch(error){console.log(`YouTube feed-ad cache cleanup: ${error}`)}})();
+// Advertisement learning caches are versioned, bounded, and scoped by endpoint
+// in the generated bundle below so one response type cannot poison another.
+(()=>{try{const base="YouTubeAdvertiseInfo",cacheVersion="2.0",ttl=7*24*60*60*1000,limit=64,match=$request.url.match(/\/youtubei\/v1\/([^?]+)/),scope=(match?.[1]||"other").replace(/\//g,"."),key=`${base}.${scope}`,read=$persistentStore.read.bind($persistentStore),write=$persistentStore.write.bind($persistentStore);$persistentStore.read=name=>{if(name!==base)return read(name);try{const cache=JSON.parse(read(key)||"null");return cache&&cache._enhanceCacheVersion===cacheVersion&&Date.now()-Number(cache._savedAt||0)<ttl?JSON.stringify(cache):null}catch{return null}};$persistentStore.write=(value,name)=>{if(name!==base)return write(value,name);try{const cache=JSON.parse(value||"null");if(!cache||typeof cache!=="object")return write("",key);for(const field of["whiteNo","blackNo","whiteEml","blackEml"])cache[field]=Array.isArray(cache[field])?cache[field].slice(-limit):[];cache._enhanceCacheVersion=cacheVersion;cache._savedAt=Date.now();return write(JSON.stringify(cache),key)}catch{return write(value,key)}}}catch(error){console.log(`YouTube advertisement cache isolation: ${error}`)}})();
 // Remove Sponsored continuation cards stored in the currently unknown
 // Browse.onResponseReceivedAction.sectionListRenderer protobuf field 32.
 (()=>{if(!$request.url.includes("/browse"))return;const finish=$done;$done=result=>{const hasBody=result?.body!=null||result?.response?.body!=null;finish(hasBody?result:{body:$response.body})}})();
