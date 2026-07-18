@@ -2,8 +2,14 @@ const GOOGLEVIDEO_HOST = /^[a-z0-9-]+\.googlevideo\.com$/i;
 const UMP_CONTENT_TYPE = "application/vnd.yt-ump";
 const ENCRYPTED_INNERTUBE_RESPONSE = 25;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
-const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+// The Worker has a 128 MB isolate limit, while decrypting, decompressing, and
+// rewriting a UMP response can temporarily keep several full-size copies.
+const MAX_RESPONSE_BYTES = 24 * 1024 * 1024;
+const MAX_CLIENT_KEY_CHARS = 64;
 const UPSTREAM_TIMEOUT_MS = 25000;
+const TEXT_ENCODER = new TextEncoder();
+const PAGEAD_MARKER = TEXT_ENCODER.encode("pagead");
+const YT_ADS_WEBVIEW_MARKER = TEXT_ENCODER.encode("yt-ads-web-view-id");
 
 function concatBytes(...chunks) {
   const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
@@ -127,8 +133,7 @@ function upsertLengthDelimitedFields(bytes, replacements) {
   return concatBytes(...output);
 }
 
-function containsAscii(bytes, value) {
-  const needle = new TextEncoder().encode(value);
+function containsBytes(bytes, needle) {
   outer: for (let index = 0; index <= bytes.length - needle.length; index++) {
     for (let offset = 0; offset < needle.length; offset++) {
       if (bytes[index + offset] !== needle[offset]) continue outer;
@@ -162,6 +167,86 @@ function rewriteLengthDelimitedField(bytes, no, rewriter) {
   return changed ? concatBytes(...output) : bytes;
 }
 
+function containsCommentAreaAdMarkers(bytes) {
+  // These are stable implementation markers. Visible labels such as
+  // "Sponsored" are localized and must not be part of the classifier.
+  return containsBytes(bytes, PAGEAD_MARKER)
+    && containsBytes(bytes, YT_ADS_WEBVIEW_MARKER);
+}
+
+function firstLengthDelimitedValue(bytes, no) {
+  return parseProto(bytes).find((field) => field.no === no && field.wire === 2)?.value;
+}
+
+function isWatchNextChipRow(bytes) {
+  try {
+    const renderer = firstLengthDelimitedValue(bytes, 50195462);
+    const content = renderer && firstLengthDelimitedValue(renderer, 5);
+    const chipShelf = content && firstLengthDelimitedValue(content, 188360221);
+    const chipContent = chipShelf && firstLengthDelimitedValue(chipShelf, 1);
+    const chipList = chipContent && firstLengthDelimitedValue(chipContent, 90823135);
+    if (!chipList) return false;
+
+    let chips = 0;
+    for (const field of parseProto(chipList)) {
+      if (
+        field.no === 1
+        && field.wire === 2
+        && parseProto(field.value).some((child) => child.no === 91394224 && child.wire === 2)
+      ) chips++;
+    }
+    return chips >= 2;
+  } catch {
+    return false;
+  }
+}
+
+function stripCommentAreaAdRenderers(bytes, depth = 0) {
+  if (!containsCommentAreaAdMarkers(bytes) || depth > 16) {
+    return { bytes, removed: 0 };
+  }
+
+  let fields;
+  try {
+    fields = parseProto(bytes);
+  } catch {
+    return { bytes, removed: 0 };
+  }
+
+  const output = [];
+  let removed = 0;
+  let changed = false;
+  for (const field of fields) {
+    if (field.wire !== 2 || !containsCommentAreaAdMarkers(field.value)) {
+      output.push(field.raw);
+      continue;
+    }
+
+    // Known comment-area ad renderer. Remove only this nested renderer instead
+    // of its outer section-list item, which can also contain chips, comments,
+    // continuations, and recommendations.
+    if (field.no === 50195462) {
+      removed++;
+      changed = true;
+      continue;
+    }
+
+    const nested = stripCommentAreaAdRenderers(field.value, depth + 1);
+    removed += nested.removed;
+    if (nested.removed > 0) {
+      changed = true;
+      output.push(encodeLengthDelimitedField(field.no, nested.bytes));
+    } else {
+      output.push(field.raw);
+    }
+  }
+
+  return {
+    bytes: changed ? concatBytes(...output) : bytes,
+    removed,
+  };
+}
+
 function stripNextResponseAds(nextBytes) {
   let removed = 0;
   try {
@@ -173,14 +258,28 @@ function stripNextResponseAds(nextBytes) {
             const output = [];
             let changed = false;
             for (const field of fields) {
-              const isCommentAreaAd = field.no === 1
-                && field.wire === 2
-                && containsAscii(field.value, "pagead")
-                && containsAscii(field.value, "yt-ads-web-view-id")
-                && containsAscii(field.value, "Sponsored");
-              if (isCommentAreaAd) {
-                removed++;
+              if (field.no === 1 && field.wire === 2) {
+                // This renderer owns the watch-page filter chips (All, Related,
+                // For you, etc.). Its payload can share ad marker strings with
+                // sibling render data, so it must remain byte-for-byte intact.
+                if (isWatchNextChipRow(field.value)) {
+                  output.push(field.raw);
+                  continue;
+                }
+
+                const item = stripCommentAreaAdRenderers(field.value);
+                removed += item.removed;
+                if (item.removed === 0) {
+                  output.push(field.raw);
+                  continue;
+                }
+
                 changed = true;
+                // A pure ad item becomes empty and can be removed. Mixed items
+                // retain their outer field and every non-ad child.
+                if (item.bytes.length > 0) {
+                  output.push(encodeLengthDelimitedField(field.no, item.bytes));
+                }
               } else {
                 output.push(field.raw);
               }
@@ -233,7 +332,6 @@ function stripPlayerAds(playerBytes) {
   const output = [];
   let removed = 0;
   let enhanced = false;
-  let hasPlayabilityStatus = false;
 
   for (const field of fields) {
     // PlayerResponse.adPlacements and PlayerResponse.adSlots.
@@ -244,7 +342,6 @@ function stripPlayerAds(playerBytes) {
 
     // PlayerResponse.playabilityStatus: enable background playback and PiP.
     if (field.no === 2 && field.wire === 2) {
-      hasPlayabilityStatus = true;
       const playabilityStatus = enhancePlayabilityStatus(field.value);
       if (!equalBytes(playabilityStatus, field.value)) {
         enhanced = true;
@@ -268,11 +365,6 @@ function stripPlayerAds(playerBytes) {
     }
 
     output.push(field.raw);
-  }
-
-  if (!hasPlayabilityStatus) {
-    enhanced = true;
-    output.push(encodeLengthDelimitedField(2, enhancePlayabilityStatus(new Uint8Array())));
   }
 
   return {
@@ -523,6 +615,14 @@ function upstreamHeaders(requestHeaders) {
   for (const name of [
     "host",
     "content-length",
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
     "cf-connecting-ip",
     "cf-ipcountry",
     "cf-ray",
@@ -568,6 +668,7 @@ async function handleRequest(request) {
   const targetValue = workerUrl.searchParams.get("target");
   const clientKeyValue = workerUrl.searchParams.get("ck");
   if (!targetValue || !clientKeyValue) return new Response("Missing target or ck", { status: 400 });
+  if (clientKeyValue.length > MAX_CLIENT_KEY_CHARS) return new Response("Invalid ck", { status: 400 });
 
   let target;
   let clientKey;
@@ -581,8 +682,10 @@ async function handleRequest(request) {
     target.protocol !== "https:"
     || !GOOGLEVIDEO_HOST.test(target.hostname)
     || target.pathname !== "/initplayback"
+    || target.port
     || target.username
     || target.password
+    || target.hash
   ) return new Response("Target Not Allowed", { status: 403 });
   if (clientKey.length !== 32) return new Response("Invalid ck", { status: 400 });
 
