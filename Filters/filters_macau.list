@@ -9,6 +9,9 @@ DOMAIN-SUFFIX, cdn-apple.com
 #Apple GrandSlam Authentication
 DOMAIN, gsa.apple.com
 
+#Youtube EI
+DOMAIN, youtubei.googleapis.com
+
 #RandomArt
 DOMAIN-SUFFIX, randomdailyart.com
 
