@@ -10,6 +10,9 @@ const UPSTREAM_TIMEOUT_MS = 25000;
 const TEXT_ENCODER = new TextEncoder();
 const PAGEAD_MARKER = TEXT_ENCODER.encode("pagead");
 const YT_ADS_WEBVIEW_MARKER = TEXT_ENCODER.encode("yt-ads-web-view-id");
+const INLINE_INJECTION_ENTRYPOINT_MARKER = TEXT_ENCODER.encode("inline_injection_entrypoint_layout.eml");
+const SHOPPING_TIMELY_SHELF_MARKER = TEXT_ENCODER.encode("shopping_timely_shelf.eml-fe");
+const PRODUCT_LOCATION_TIMELY_SHELF_MARKER = TEXT_ENCODER.encode("PRODUCT_LOCATION_TIMELY_SHELF");
 
 function concatBytes(...chunks) {
   const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
@@ -167,11 +170,29 @@ function rewriteLengthDelimitedField(bytes, no, rewriter) {
   return changed ? concatBytes(...output) : bytes;
 }
 
-function containsCommentAreaAdMarkers(bytes) {
-  // These are stable implementation markers. Visible labels such as
-  // "Sponsored" are localized and must not be part of the classifier.
+function containsRichItemAdSignal(bytes) {
+  // Match Maasea's rich-item classifier: pagead is sufficient at the known
+  // RichItemContent boundary, while inline injection is a known ad EML. The
+  // web-view marker covers newer variants which omit the other two signals.
+  // Visible labels such as "Sponsored" are localized and intentionally unused.
   return containsBytes(bytes, PAGEAD_MARKER)
-    && containsBytes(bytes, YT_ADS_WEBVIEW_MARKER);
+    || containsBytes(bytes, YT_ADS_WEBVIEW_MARKER)
+    || containsBytes(bytes, INLINE_INJECTION_ENTRYPOINT_MARKER);
+}
+
+function containsStrongStandaloneAdSignal(bytes) {
+  // Outside the known rich-item boundary, keep the stricter legacy check to
+  // avoid treating generic pagead analytics in comments or filter chips as an
+  // entire ad renderer.
+  return (
+    containsBytes(bytes, PAGEAD_MARKER)
+    && containsBytes(bytes, YT_ADS_WEBVIEW_MARKER)
+  ) || containsBytes(bytes, INLINE_INJECTION_ENTRYPOINT_MARKER);
+}
+
+function containsTimelyShoppingShelf(bytes) {
+  return containsBytes(bytes, PRODUCT_LOCATION_TIMELY_SHELF_MARKER)
+    || containsBytes(bytes, SHOPPING_TIMELY_SHELF_MARKER);
 }
 
 function firstLengthDelimitedValue(bytes, no) {
@@ -214,8 +235,8 @@ function stripItemSectionRichAds(bytes) {
   for (const field of fields) {
     // ItemSectionRenderer.richItemContents. YouTube can place the chip row,
     // recommendations, and a Sponsored card in the same item section. Remove
-    // only the rich item carrying both stable ad implementation markers.
-    if (field.no === 1 && field.wire === 2 && containsCommentAreaAdMarkers(field.value)) {
+    // only the rich item carrying a known Maasea-compatible ad signal.
+    if (field.no === 1 && field.wire === 2 && containsRichItemAdSignal(field.value)) {
       removed++;
       continue;
     }
@@ -229,7 +250,7 @@ function stripItemSectionRichAds(bytes) {
 }
 
 function stripCommentAreaAdRenderers(bytes, depth = 0) {
-  if (!containsCommentAreaAdMarkers(bytes) || depth > 16) {
+  if (!containsRichItemAdSignal(bytes) || depth > 16) {
     return { bytes, removed: 0 };
   }
 
@@ -244,7 +265,7 @@ function stripCommentAreaAdRenderers(bytes, depth = 0) {
   let removed = 0;
   let changed = false;
   for (const field of fields) {
-    if (field.wire !== 2 || !containsCommentAreaAdMarkers(field.value)) {
+    if (field.wire !== 2 || !containsRichItemAdSignal(field.value)) {
       output.push(field.raw);
       continue;
     }
@@ -269,7 +290,12 @@ function stripCommentAreaAdRenderers(bytes, depth = 0) {
       }
 
       // Older responses used a standalone ad renderer instead of a mixed item
-      // section. It is safe to remove only after the chip and rich-item checks.
+      // section. It is safe to remove only after the chip and rich-item checks,
+      // and only when the stronger standalone signal is present.
+      if (!containsStrongStandaloneAdSignal(field.value)) {
+        output.push(field.raw);
+        continue;
+      }
       removed++;
       changed = true;
       continue;
@@ -291,41 +317,116 @@ function stripCommentAreaAdRenderers(bytes, depth = 0) {
   };
 }
 
-function stripNextResponseAds(nextBytes) {
-  let removed = 0;
-  try {
-    const rewritten = rewriteLengthDelimitedField(nextBytes, 7, (field7) => (
-      rewriteLengthDelimitedField(field7, 51779735, (watchNextResults) => (
-        rewriteLengthDelimitedField(watchNextResults, 1, (contents) => (
-          rewriteLengthDelimitedField(contents, 49399797, (sectionList) => {
-            const fields = parseProto(sectionList);
-            const output = [];
-            let changed = false;
-            for (const field of fields) {
-              if (field.no === 1 && field.wire === 2) {
-                const item = stripCommentAreaAdRenderers(field.value);
-                removed += item.removed;
-                if (item.removed === 0) {
-                  output.push(field.raw);
-                  continue;
-                }
+function stripTimelyShoppingShelf(nextBytes) {
+  if (!containsTimelyShoppingShelf(nextBytes)) {
+    return { bytes: nextBytes, removed: 0 };
+  }
 
-                changed = true;
-                // A pure ad item becomes empty and can be removed. Mixed items
-                // retain their outer field and every non-ad child.
-                if (item.bytes.length > 0) {
-                  output.push(encodeLengthDelimitedField(field.no, item.bytes));
-                }
-              } else {
-                output.push(field.raw);
-              }
-            }
-            return changed ? concatBytes(...output) : sectionList;
-          })
-        ))
-      ))
-    ));
-    return { bytes: rewritten, removed };
+  let nextFields;
+  try {
+    nextFields = parseProto(nextBytes);
+  } catch {
+    return { bytes: nextBytes, removed: 0 };
+  }
+
+  const nextOutput = [];
+  let removed = 0;
+  let changed = false;
+  for (const nextField of nextFields) {
+    // The metadata carousel directly below a video is delivered in the
+    // framework-update branch, not in the watch-next recommendation list:
+    // NextResponse.frameworkUpdates(14) -> extension 78882851 -> updates(42).
+    // Drop only the update identified as PRODUCT_LOCATION_TIMELY_SHELF. Other
+    // metadata updates (comments, chapters, chips, etc.) remain byte-for-byte.
+    if (
+      nextField.no !== 14
+      || nextField.wire !== 2
+      || !containsTimelyShoppingShelf(nextField.value)
+    ) {
+      nextOutput.push(nextField.raw);
+      continue;
+    }
+
+    let frameworkFields;
+    try {
+      frameworkFields = parseProto(nextField.value);
+    } catch {
+      nextOutput.push(nextField.raw);
+      continue;
+    }
+
+    const frameworkOutput = [];
+    let frameworkChanged = false;
+    for (const frameworkField of frameworkFields) {
+      if (
+        frameworkField.no !== 78882851
+        || frameworkField.wire !== 2
+        || !containsTimelyShoppingShelf(frameworkField.value)
+      ) {
+        frameworkOutput.push(frameworkField.raw);
+        continue;
+      }
+
+      let updateFields;
+      try {
+        updateFields = parseProto(frameworkField.value);
+      } catch {
+        frameworkOutput.push(frameworkField.raw);
+        continue;
+      }
+
+      const updateOutput = [];
+      let updateChanged = false;
+      for (const updateField of updateFields) {
+        if (
+          updateField.no === 42
+          && updateField.wire === 2
+          && containsTimelyShoppingShelf(updateField.value)
+        ) {
+          removed++;
+          updateChanged = true;
+          continue;
+        }
+        updateOutput.push(updateField.raw);
+      }
+
+      if (updateChanged) {
+        frameworkChanged = true;
+        frameworkOutput.push(encodeLengthDelimitedField(
+          frameworkField.no,
+          concatBytes(...updateOutput),
+        ));
+      } else {
+        frameworkOutput.push(frameworkField.raw);
+      }
+    }
+
+    if (frameworkChanged) {
+      changed = true;
+      nextOutput.push(encodeLengthDelimitedField(nextField.no, concatBytes(...frameworkOutput)));
+    } else {
+      nextOutput.push(nextField.raw);
+    }
+  }
+
+  return {
+    bytes: changed ? concatBytes(...nextOutput) : nextBytes,
+    removed,
+  };
+}
+
+function stripNextResponseAds(nextBytes) {
+  try {
+    // Maasea walks richItemContents across the complete decoded response, not
+    // only the initial Next.content field. A recursive protobuf walk also
+    // covers continuation actions and newly introduced wrapper fields while
+    // the unique ItemSectionRenderer extension keeps deletion tightly scoped.
+    const adResult = stripCommentAreaAdRenderers(nextBytes);
+    const shoppingResult = stripTimelyShoppingShelf(adResult.bytes);
+    return {
+      bytes: shoppingResult.bytes,
+      removed: adResult.removed + shoppingResult.removed,
+    };
   } catch (error) {
     console.error("YouTube NextResponse ad content was left unchanged:", error);
     return { bytes: nextBytes, removed: 0 };
