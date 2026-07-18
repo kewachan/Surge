@@ -533,13 +533,12 @@ function upstreamHeaders(requestHeaders) {
   return headers;
 }
 
-function responseWithBytes(upstream, bytes, result, colo = "unknown") {
+function responseWithBytes(upstream, bytes, result) {
   const headers = new Headers(upstream.headers);
   headers.delete("content-length");
   headers.delete("content-encoding");
   headers.delete("transfer-encoding");
   headers.set("x-youtube-adblock", result);
-  headers.set("x-youtube-worker-colo", colo);
   return new Response(bytes, {
     status: upstream.status,
     statusText: upstream.statusText,
@@ -576,7 +575,6 @@ async function handleRequest(request) {
   if (declaredLength > MAX_REQUEST_BYTES) return new Response("Request Too Large", { status: 413 });
   const requestBytes = new Uint8Array(await request.arrayBuffer());
   if (requestBytes.length > MAX_REQUEST_BYTES) return new Response("Request Too Large", { status: 413 });
-  const colo = request.cf?.colo || "unknown";
 
   const upstream = await fetch(target, {
     method: "POST",
@@ -585,19 +583,19 @@ async function handleRequest(request) {
     redirect: "manual",
   });
   const responseBytes = new Uint8Array(await upstream.arrayBuffer());
-  if (responseBytes.length > MAX_RESPONSE_BYTES) return responseWithBytes(upstream, responseBytes, "bypass-too-large", colo);
+  if (responseBytes.length > MAX_RESPONSE_BYTES) return responseWithBytes(upstream, responseBytes, "bypass-too-large");
 
   const contentType = upstream.headers.get("content-type")?.toLowerCase() || "";
   if (!upstream.ok || !contentType.includes(UMP_CONTENT_TYPE)) {
-    return responseWithBytes(upstream, responseBytes, "bypass-not-ump", colo);
+    return responseWithBytes(upstream, responseBytes, "bypass-not-ump");
   }
 
   try {
     const result = await processUmpResponse(responseBytes, clientKey);
-    return responseWithBytes(upstream, result.bytes, `removed-${result.removed}`, colo);
+    return responseWithBytes(upstream, result.bytes, `removed-${result.removed}`);
   } catch (error) {
     console.error("YouTube UMP response was left unchanged:", error);
-    return responseWithBytes(upstream, responseBytes, "bypass-error", colo);
+    return responseWithBytes(upstream, responseBytes, "bypass-error");
   }
 }
 
