@@ -1,6 +1,9 @@
 // Build: 2026/7/13 kewachan feed-ad fix (based on Maasea 2026/7/12 22:44:32)
 // Caption label is generated as "Enhance (language)" in the bundled code.
-(()=>{try{const key="YouTubeAdvertiseInfo",eml="landscape_image_wide_button_layout.eml-fe",cache=JSON.parse($persistentStore.read(key)||"null")||{version:"1.0",whiteNo:[],blackNo:[],whiteEml:[],blackEml:[]};cache.version="1.0";cache.whiteNo=cache.whiteNo||[];cache.blackNo=cache.blackNo||[];cache.whiteEml=(cache.whiteEml||[]).filter(item=>item!==eml);cache.blackEml=cache.blackEml||[];cache.blackEml.includes(eml)||cache.blackEml.push(eml);$persistentStore.write(JSON.stringify(cache),key)}catch(error){console.log(`YouTube feed-ad cache patch: ${error}`)}})();
+// Older builds globally blacklisted this shared layout while fixing a feed ad.
+// It is also used by watch-page content, so remove the stale cache entry and
+// let the targeted protobuf patch below decide by the actual pagead marker.
+(()=>{try{const key="YouTubeAdvertiseInfo",eml="landscape_image_wide_button_layout.eml-fe",raw=$persistentStore.read(key);if(!raw)return;const cache=JSON.parse(raw);if(!cache||typeof cache!=="object")return;cache.blackEml=(cache.blackEml||[]).filter(item=>item!==eml);cache.whiteEml=(cache.whiteEml||[]).filter(item=>item!==eml);$persistentStore.write(JSON.stringify(cache),key)}catch(error){console.log(`YouTube feed-ad cache cleanup: ${error}`)}})();
 // Remove Sponsored continuation cards stored in the currently unknown
 // Browse.onResponseReceivedAction.sectionListRenderer protobuf field 32.
 (()=>{if(!$request.url.includes("/browse"))return;const finish=$done;$done=result=>{const hasBody=result?.body!=null||result?.response?.body!=null;finish(hasBody?result:{body:$response.body})}})();
