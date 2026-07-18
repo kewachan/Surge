@@ -201,6 +201,33 @@ function isWatchNextChipRow(bytes) {
   }
 }
 
+function stripItemSectionRichAds(bytes) {
+  let fields;
+  try {
+    fields = parseProto(bytes);
+  } catch {
+    return { bytes, removed: 0 };
+  }
+
+  const output = [];
+  let removed = 0;
+  for (const field of fields) {
+    // ItemSectionRenderer.richItemContents. YouTube can place the chip row,
+    // recommendations, and a Sponsored card in the same item section. Remove
+    // only the rich item carrying both stable ad implementation markers.
+    if (field.no === 1 && field.wire === 2 && containsCommentAreaAdMarkers(field.value)) {
+      removed++;
+      continue;
+    }
+    output.push(field.raw);
+  }
+
+  return {
+    bytes: removed > 0 ? concatBytes(...output) : bytes,
+    removed,
+  };
+}
+
 function stripCommentAreaAdRenderers(bytes, depth = 0) {
   if (!containsCommentAreaAdMarkers(bytes) || depth > 16) {
     return { bytes, removed: 0 };
@@ -222,10 +249,27 @@ function stripCommentAreaAdRenderers(bytes, depth = 0) {
       continue;
     }
 
-    // Known comment-area ad renderer. Remove only this nested renderer instead
-    // of its outer section-list item, which can also contain chips, comments,
-    // continuations, and recommendations.
     if (field.no === 50195462) {
+      const richItems = stripItemSectionRichAds(field.value);
+      if (richItems.removed > 0) {
+        removed += richItems.removed;
+        changed = true;
+        if (richItems.bytes.length > 0) {
+          output.push(encodeLengthDelimitedField(field.no, richItems.bytes));
+        }
+        continue;
+      }
+
+      // This exact renderer owns the watch-page filter chips (All, Related,
+      // For you, etc.). Its payload may contain ad-like tracking strings, but
+      // without an ad rich item the renderer must remain byte-for-byte intact.
+      if (isWatchNextChipRow(field.raw)) {
+        output.push(field.raw);
+        continue;
+      }
+
+      // Older responses used a standalone ad renderer instead of a mixed item
+      // section. It is safe to remove only after the chip and rich-item checks.
       removed++;
       changed = true;
       continue;
@@ -259,14 +303,6 @@ function stripNextResponseAds(nextBytes) {
             let changed = false;
             for (const field of fields) {
               if (field.no === 1 && field.wire === 2) {
-                // This renderer owns the watch-page filter chips (All, Related,
-                // For you, etc.). Its payload can share ad marker strings with
-                // sibling render data, so it must remain byte-for-byte intact.
-                if (isWatchNextChipRow(field.value)) {
-                  output.push(field.raw);
-                  continue;
-                }
-
                 const item = stripCommentAreaAdRenderers(field.value);
                 removed += item.removed;
                 if (item.removed === 0) {
