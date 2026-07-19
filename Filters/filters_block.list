@@ -207,27 +207,28 @@ DOMAIN-SUFFIX, swiftgram.app
 # 4Gamers
 DOMAIN-SUFFIX, collect.4gamers.com.tw
 
-# Mobile Manufacturers
-DOMAIN-SUFFIX, ad.samsungadhub.com
+# Oppo
 DOMAIN-SUFFIX, adsfs.oppomobile.com
 DOMAIN-SUFFIX, adx.ads.oppomobile.com
-DOMAIN-SUFFIX, analytics-api.samsunghealthcn.com
-DOMAIN-SUFFIX, analytics.oneplus.cn
-DOMAIN-SUFFIX, analytics.samsungknox.com
-DOMAIN-SUFFIX, bdapi-ads.realmemobile.com
-DOMAIN-SUFFIX, bdapi-in-ads.realmemobile.com
 DOMAIN-SUFFIX, bdapi.ads.oppomobile.com
-DOMAIN-SUFFIX, bigdata.ssp.samsung.com
-DOMAIN-SUFFIX, business.samsungusa.com
 DOMAIN-SUFFIX, ck.ads.oppomobile.com
-DOMAIN-SUFFIX, click.oneplus.cn
-DOMAIN-SUFFIX, click.oneplus.com
-DOMAIN-SUFFIX, config.samsungads.com
 DOMAIN-SUFFIX, data.ads.oppomobile.com
 DOMAIN-SUFFIX, g1.ads.oppomobile.com
-DOMAIN-SUFFIX, grs.hicloud.com
+
+# Realme
+DOMAIN-SUFFIX, bdapi-ads.realmemobile.com
+DOMAIN-SUFFIX, bdapi-in-ads.realmemobile.com
 DOMAIN-SUFFIX, iot-eu-logser.realme.com
 DOMAIN-SUFFIX, iot-logser.realme.com
+
+# OnePlus
+DOMAIN-SUFFIX, analytics.oneplus.cn
+DOMAIN-SUFFIX, click.oneplus.cn
+DOMAIN-SUFFIX, click.oneplus.com
+DOMAIN-SUFFIX, open.oneplus.net
+
+# Huawei
+DOMAIN-SUFFIX, grs.hicloud.com
 DOMAIN-SUFFIX, logbak.hicloud.com
 DOMAIN-SUFFIX, logservice.hicloud.com
 DOMAIN-SUFFIX, logservice1.hicloud.com
@@ -238,8 +239,15 @@ DOMAIN-SUFFIX, metrics2.data.hicloud.com
 DOMAIN-SUFFIX, metrics3.data.hicloud.com
 DOMAIN-SUFFIX, metrics4.data.hicloud.com
 DOMAIN-SUFFIX, metrics5.data.hicloud.com
+
+# Samsung
+DOMAIN-SUFFIX, ad.samsungadhub.com
+DOMAIN-SUFFIX, analytics-api.samsunghealthcn.com
+DOMAIN-SUFFIX, analytics.samsungknox.com
+DOMAIN-SUFFIX, bigdata.ssp.samsung.com
+DOMAIN-SUFFIX, business.samsungusa.com
+DOMAIN-SUFFIX, config.samsungads.com
 DOMAIN-SUFFIX, nmetrics.samsung.com
-DOMAIN-SUFFIX, open.oneplus.net
 DOMAIN-SUFFIX, samsung-com.112.2o7.net
 DOMAIN-SUFFIX, samsungadhub.com
 DOMAIN-SUFFIX, samsungads.com
@@ -303,12 +311,16 @@ DOMAIN-SUFFIX, static.media.net
 DOMAIN-SUFFIX, wd.adcolony.com
 DOMAIN-SUFFIX, webview.unityads.unity3d.com
 
-# Publishers and App Services
+# iThome
 DOMAIN-SUFFIX, itadapi.ithome.com.tw
 DOMAIN-SUFFIX, itadstatic.ithome.com.tw
+
+# Tencent
 DOMAIN-SUFFIX, rmonitor.qq.com
-DOMAIN-SUFFIX, tsn.baidu.com
 DOMAIN-SUFFIX, x.research.qq.com
+
+# Baidu
+DOMAIN-SUFFIX, tsn.baidu.com
 
 # Ad Networks and Malvertising
 DOMAIN-SUFFIX, adxadserv.com
