@@ -8,13 +8,16 @@ let body = $response.body || "";
 
 // Google Search: hide the "Ask and explore anything with the Google app" promo.
 if ($request.url.includes("www.google.com/search")) {
-  const style =
-    '<style id="general-adblock-google-promo">' +
-    '.B2VR9.CJHX3e:has(a[href*="iga.google.com"]){display:none!important}' +
-    '</style>';
-
-  if (!body.includes("general-adblock-google-promo")) {
-    body = body.replace(/<\/head>/i, `${style}</head>`);
+  if (body.includes("Ask and explore anything with the Google app")) {
+    body = body
+      .replaceAll(
+        'class=\\"B2VR9 CJHX3e\\"',
+        'class=\\"B2VR9 CJHX3e\\" style=\\"display:none!important\\"'
+      )
+      .replaceAll(
+        'class="B2VR9 CJHX3e"',
+        'class="B2VR9 CJHX3e" style="display:none!important"'
+      );
   }
 }
 
