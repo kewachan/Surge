@@ -2,8 +2,9 @@
 #!desc=HAR-driven general advertising blocker
 #!system=ios
 
-[Script]
-GeneralAdBlock = type=rule,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/general-adblock.js,script-update-interval=86400,timeout=5
-
 [Rule]
-SCRIPT,GeneralAdBlock,REJECT
+DOMAIN-SUFFIX,sdkconfig.ad.xiaomi.com,REJECT
+DOMAIN-SUFFIX,firebase-settings.crashlytics.com,REJECT
+DOMAIN-SUFFIX,sentry.dailyart.nodea.net.pl,REJECT
+DOMAIN-SUFFIX,apmplus.volces.com,REJECT
+DOMAIN-SUFFIX,tracking.miui.com,REJECT
