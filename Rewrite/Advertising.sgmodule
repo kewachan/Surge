@@ -3,6 +3,11 @@
 #!author=kewachan
 #!category=Advertising
 
+# Sources:
+# https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Surge/Advertising/Advertising.sgmodule
+# https://whatshub.top/module/AdBlock.module
+# https://ruleset.skk.moe/Modules/sukka_url_rewrite.sgmodule
+
 [URL Rewrite]
 "(?i)\b\.ott\.cibntv\.net\/[\w\/-]+?\.mp4\?sid=" - reject
 "(?i)\b\/(outadservice|ting\/preload)\/" - reject
