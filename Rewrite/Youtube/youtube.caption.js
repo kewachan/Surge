@@ -16,6 +16,16 @@ function getQueryValue(url, name) {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
+function getConfiguredTargetLanguage() {
+  try {
+    if (typeof $argument !== "string" || !$argument || $argument.includes("{{{")) return "";
+    const value = JSON.parse($argument).captionLang;
+    return typeof value === "string" && value !== "off" ? mapTargetLanguage(value) : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 function mapTargetLanguage(language) {
   const normalized = language.toLowerCase();
   return {"zh-hant": "zh-TW", "zh-tw": "zh-TW", "zh-hans": "zh-CN", "zh-cn": "zh-CN"}[normalized] || language;
@@ -62,11 +72,10 @@ function writeCachedParts(key, parts) {
 }
 
 function rewriteCaptionRequest(url) {
-  const target = getQueryValue(url, "tlang");
+  const target = getQueryValue(url, "tlang") || getConfiguredTargetLanguage();
   if (!target) return url;
-  return url.replace(/([?&])tlang=([^&#]*)/, (_, separator, value) =>
-    `${separator}enhance_tlang=${encodeURIComponent(mapTargetLanguage(decodeURIComponent(value)))}`,
-  );
+  if (getQueryValue(url, "enhance_tlang")) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}enhance_tlang=${encodeURIComponent(mapTargetLanguage(target))}`;
 }
 
 function decodeXml(text) {
@@ -184,7 +193,7 @@ async function translateBatches(batches, captions, source, target) {
 }
 
 async function translateCaptionResponse() {
-  const target = mapTargetLanguage(getQueryValue($request.url, "enhance_tlang") || getQueryValue($request.url, "tlang"));
+  const target = mapTargetLanguage(getQueryValue($request.url, "enhance_tlang") || getQueryValue($request.url, "tlang") || getConfiguredTargetLanguage());
   const source = getQueryValue($request.url, "lang") || "auto";
   if (!target || !$response.body) return $done({});
 
