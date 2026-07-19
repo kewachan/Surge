@@ -7,7 +7,6 @@
 
 const BLOCKED_DOMAINS = [
   // Advertising
-  "googleads.g.doubleclick.net",
   "sdkconfig.ad.xiaomi.com", // Xiaomi advertising SDK configuration
 
   // Crash reporting
