@@ -279,9 +279,11 @@ DOMAIN-SUFFIX, weather-analytics-events.apple.com
 DOMAIN-SUFFIX, notes-analytics-events.apple.com
 
 #AI Generated
-DOMAIN-SUFFIX, firebase-settings.crashlytics.com
-DOMAIN-SUFFIX, sentry.dailyart.nodea.net.pl
 DOMAIN-SUFFIX, apmplus.volces.com
+DOMAIN-SUFFIX, csp.withgoogle.com
+DOMAIN-SUFFIX, firebase-settings.crashlytics.com
+DOMAIN-SUFFIX, googletagmanager.com
+DOMAIN-SUFFIX, sentry.dailyart.nodea.net.pl
 
 #Imported List
 #Sources:
