@@ -3,14 +3,7 @@
 #!system=ios
 
 [Script]
-GeneralAdBlock = type=rule,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/general-adblock.js?v=20260719-1,script-update-interval=86400,timeout=5
-GeneralAdBlock.BahamutAnime = type=http-response,pattern=^https:\/\/api\.gamer\.com\.tw\/mobile_app\/anime\/v4\/token\.php,requires-body=1,max-size=0,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/general-adblock.js?v=20260719-1,script-update-interval=86400,timeout=5
-
-[URL Rewrite]
-^(https:\/\/api\.gamer\.com\.tw\/mobile_app\/anime\/v1\/stat_ad\.php\?)ad=&(.*)$ $1ad=end&$2 302
+GeneralAdBlock = type=rule,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/general-adblock.js,script-update-interval=86400,timeout=5
 
 [Rule]
 SCRIPT,GeneralAdBlock,REJECT
-
-[MITM]
-hostname = %APPEND% api.gamer.com.tw
