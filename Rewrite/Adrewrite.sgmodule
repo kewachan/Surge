@@ -34,6 +34,7 @@
 ^https?:\/\/pay.macaupass.com\/tdrmp\/adver\/ - reject
 ^https?:\/\/gateway\-mp.macaupass.com\/mpay\/tdrmp\/newGateway\/adver\/ - reject
 ^https?:\/\/quicktracking\-api.macaupass.com - reject
+^https?:\/\/gateway\.macaupass\.com\/mcoin\-mall\/api\/v2\/business\/indexpostercache - reject
 
 #Mfood
 ^https?:\/\/userside.api.o2o.mfoodapp.com\/orgs\/banner\/advertisement - reject
