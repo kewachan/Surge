@@ -165,33 +165,47 @@ DOMAIN-SUFFIX, log.byteoversea.com
 DOMAIN-SUFFIX, pangle.io
 DOMAIN-SUFFIX, pglstatp-toutiao.com
 
-# Social and Community Platforms
-DOMAIN-SUFFIX, ads-api.twitter.com
-DOMAIN-SUFFIX, ads-dev.pinterest.com
-DOMAIN-SUFFIX, ads-twitter.com
+# Facebook
 DOMAIN-SUFFIX, ads.facebook.com
-DOMAIN-SUFFIX, ads.linkedin.com
-DOMAIN-SUFFIX, ads.pinterest.com
-DOMAIN-SUFFIX, ads.reddit.com
-DOMAIN-SUFFIX, ads.xfastest.com
-DOMAIN-SUFFIX, adsgram.ai
-DOMAIN-SUFFIX, advertising.twitter.com
 DOMAIN-SUFFIX, an.facebook.com
 DOMAIN-SUFFIX, analytics.facebook.com
-DOMAIN-SUFFIX, analytics.pinterest.com
-DOMAIN-SUFFIX, analytics.pointdrive.linkedin.com
-DOMAIN-SUFFIX, collect.4gamers.com.tw
-DOMAIN-SUFFIX, d.reddit.com
-DOMAIN-SUFFIX, events.reddit.com
-DOMAIN-SUFFIX, events.redditmedia.com
-DOMAIN-SUFFIX, log.pinterest.com
 DOMAIN-SUFFIX, pixel.facebook.com
-DOMAIN-SUFFIX, rereddit.com
+
+# X (Twitter)
+DOMAIN-SUFFIX, ads-api.twitter.com
+DOMAIN-SUFFIX, ads-twitter.com
+DOMAIN-SUFFIX, advertising.twitter.com
 DOMAIN-SUFFIX, static.ads-twitter.com
-DOMAIN-SUFFIX, swiftgram.app
+
+# LinkedIn
+DOMAIN-SUFFIX, ads.linkedin.com
+DOMAIN-SUFFIX, analytics.pointdrive.linkedin.com
+
+# Pinterest
+DOMAIN-SUFFIX, ads-dev.pinterest.com
+DOMAIN-SUFFIX, ads.pinterest.com
+DOMAIN-SUFFIX, analytics.pinterest.com
+DOMAIN-SUFFIX, log.pinterest.com
 DOMAIN-SUFFIX, trk.pinterest.com
 DOMAIN-SUFFIX, trk2.pinterest.com
 DOMAIN-SUFFIX, widgets.pinterest.com
+
+# Reddit
+DOMAIN-SUFFIX, ads.reddit.com
+DOMAIN-SUFFIX, d.reddit.com
+DOMAIN-SUFFIX, events.reddit.com
+DOMAIN-SUFFIX, events.redditmedia.com
+DOMAIN-SUFFIX, rereddit.com
+
+# XFastest
+DOMAIN-SUFFIX, ads.xfastest.com
+
+# Telegram Clients
+DOMAIN-SUFFIX, adsgram.ai
+DOMAIN-SUFFIX, swiftgram.app
+
+# 4Gamers
+DOMAIN-SUFFIX, collect.4gamers.com.tw
 
 # Mobile Manufacturers
 DOMAIN-SUFFIX, ad.samsungadhub.com
