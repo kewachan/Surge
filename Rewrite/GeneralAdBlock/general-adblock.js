@@ -1,31 +1,21 @@
 /**
  * General AdBlock for Surge
  *
- * Blocks confirmed advertising, crash-reporting, and tracking hosts collected
- * from HAR captures.
+ * Response modifications that cannot be handled safely by rules or URL Rewrite.
  */
 
-const BLOCKED_DOMAINS = [
-  // Advertising
-  "sdkconfig.ad.xiaomi.com", // Xiaomi advertising SDK configuration
+let body = $response.body || "";
 
-  // Crash reporting
-  "firebase-settings.crashlytics.com",
-  "sentry.dailyart.nodea.net.pl",
-  "apmplus.volces.com", // Xiaomi APM, diagnostics, and session telemetry
+// Google Search: hide the "Ask and explore anything with the Google app" promo.
+if ($request.url.includes("www.google.com/search")) {
+  const style =
+    '<style id="general-adblock-google-promo">' +
+    '.B2VR9.CJHX3e:has(a[href*="iga.google.com"]){display:none!important}' +
+    '</style>';
 
-  // Tracking
-  "tracking.miui.com" // Xiaomi behavioural tracking
-];
-
-const url = String($request.url || "");
-const hostname = String($request.hostname || "").toLowerCase();
-const matched = BLOCKED_DOMAINS.some(
-  domain => hostname === domain || hostname.endsWith(`.${domain}`)
-);
-
-if (matched) {
-  console.log(`[General AdBlock] Blocked: ${url || hostname}`);
+  if (!body.includes("general-adblock-google-promo")) {
+    body = body.replace(/<\/head>/i, `${style}</head>`);
+  }
 }
 
-$done({ matched });
+$done({ body });
