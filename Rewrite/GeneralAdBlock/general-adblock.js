@@ -26,17 +26,28 @@ const BLOCKED_URL_PATTERNS = [
   // advertising hostname would be too broad.
 ];
 
-const hostname = String($request.hostname || "").toLowerCase();
+const BILIBILI_PLAY_PAUSE =
+  "https://grpc.biliapi.net/bilibili.app.viewunite.v1.View/PlayPause";
+
 const url = String($request.url || "");
 
-const domainMatched = BLOCKED_DOMAINS.some(
-  domain => hostname === domain || hostname.endsWith(`.${domain}`)
-);
-const urlMatched = BLOCKED_URL_PATTERNS.some(pattern => pattern.test(url));
-const matched = domainMatched || urlMatched;
+if ($script.type === "http-response" && url === BILIBILI_PLAY_PAUSE) {
+  // The PlayPause response is a gRPC message containing Bilibili's pause-page
+  // advertising card. Return a valid uncompressed gRPC frame whose protobuf
+  // payload is empty: 1-byte compression flag + 4-byte payload length.
+  console.log("[General AdBlock] Removed Bilibili PlayPause advertisement");
+  $done({ body: new Uint8Array([0, 0, 0, 0, 0]) });
+} else {
+  const hostname = String($request.hostname || "").toLowerCase();
+  const domainMatched = BLOCKED_DOMAINS.some(
+    domain => hostname === domain || hostname.endsWith(`.${domain}`)
+  );
+  const urlMatched = BLOCKED_URL_PATTERNS.some(pattern => pattern.test(url));
+  const matched = domainMatched || urlMatched;
 
-if (matched) {
-  console.log(`[General AdBlock] Matched: ${url || hostname}`);
+  if (matched) {
+    console.log(`[General AdBlock] Matched: ${url || hostname}`);
+  }
+
+  $done({ matched });
 }
-
-$done({ matched });
