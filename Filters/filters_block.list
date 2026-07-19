@@ -266,12 +266,14 @@ DOMAIN-SUFFIX, browser.sentry-cdn.com
 DOMAIN-SUFFIX, careers.hotjar.com
 DOMAIN-SUFFIX, cdn-test.mouseflow.com
 DOMAIN-SUFFIX, cdn.luckyorange.com
+DOMAIN-SUFFIX, cdn.mouseflow.com
 DOMAIN-SUFFIX, claritybt.freshmarketer.com
 DOMAIN-SUFFIX, cs.luckyorange.net
 DOMAIN-SUFFIX, events.hotjar.io
 DOMAIN-SUFFIX, firebase-settings.crashlytics.com
 DOMAIN-SUFFIX, freshmarketer.com
 DOMAIN-SUFFIX, fwtracks.freshmarketer.com
+DOMAIN-SUFFIX, gtm.mouseflow.com
 DOMAIN-SUFFIX, hotjar-analytics.com
 DOMAIN-SUFFIX, hotjar.com
 DOMAIN-SUFFIX, identify.hotjar.com
@@ -280,6 +282,7 @@ DOMAIN-SUFFIX, luckyorange.com
 DOMAIN-SUFFIX, luckyorange.net
 DOMAIN-SUFFIX, mouseflow.com
 DOMAIN-SUFFIX, notify.bugsnag.com
+DOMAIN-SUFFIX, o2.mouseflow.com
 DOMAIN-SUFFIX, realtime.luckyorange.com
 DOMAIN-SUFFIX, script.hotjar.com
 DOMAIN-SUFFIX, sentry.dailyart.nodea.net.pl
