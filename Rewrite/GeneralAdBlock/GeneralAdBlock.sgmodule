@@ -7,10 +7,3 @@ GeneralAdBlock = type=rule,script-path=https://raw.githubusercontent.com/kewacha
 
 [Rule]
 SCRIPT,GeneralAdBlock,REJECT
-
-[URL Rewrite]
-# Bilibili pause-page advertisement
-^https:\/\/grpc\.biliapi\.net\/bilibili\.app\.viewunite\.v1\.View\/PlayPause$ _ reject
-
-[MITM]
-hostname = %APPEND% grpc.biliapi.net
