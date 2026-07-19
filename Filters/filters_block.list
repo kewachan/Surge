@@ -1,7 +1,9 @@
 #AI Generated
 
 # HKTVmall
+DOMAIN-SUFFIX, ad-splash.hktvmall.com
 DOMAIN-SUFFIX, ads.hktvmall.com
+DOMAIN-SUFFIX, ts-analysis.shoalter.com
 
 # Google
 DOMAIN-SUFFIX, csp.withgoogle.com
@@ -16,36 +18,53 @@ DOMAIN-SUFFIX, sentry.dailyart.nodea.net.pl
 # Firebase Crashlytics
 DOMAIN-SUFFIX, firebase-settings.crashlytics.com
 
-#My Adblock list
-DOMAIN-SUFFIX, netseer-ipaddr-assoc.xz.fbcdn.net
-DOMAIN-SUFFIX, ts-analysis.shoalter.com
-DOMAIN-SUFFIX, ad-splash.hktvmall.com
-DOMAIN-SUFFIX, weedbits.com
-DOMAIN-SUFFIX, ad-api.uogroup.com
+# ByteDance and Pangle
 DOMAIN-SUFFIX, ibytedtos.com
 DOMAIN-SUFFIX, pangle.io
-DOMAIN-SUFFIX, ad2.plugmedia.hk
-DOMAIN-SUFFIX, collect.4gamers.com.tw
-DOMAIN-SUFFIX, ads.xfastest.com
-DOMAIN-SUFFIX, czilladx.com
-DOMAIN-SUFFIX, mobile-cleaner.net
-DOMAIN-SUFFIX, cdn.yourwebbars.com
-DOMAIN-SUFFIX, payingnoodlescam.com
-DOMAIN-SUFFIX, itadapi.ithome.com.tw
-DOMAIN-SUFFIX, isafe.pro
-DOMAIN-SUFFIX, itadstatic.ithome.com.tw
-DOMAIN-SUFFIX, tsn.baidu.com
-DOMAIN-SUFFIX, olmsoneenh.info
-DOMAIN-SUFFIX, poweredby.jads.co
-DOMAIN-SUFFIX, promo-bc.com
-DOMAIN-SUFFIX, bongacash.com
-DOMAIN-SUFFIX, adxadserv.com
 DOMAIN-SUFFIX, pglstatp-toutiao.com
+
+# 4Gamers
+DOMAIN-SUFFIX, collect.4gamers.com.tw
+
+# XFastest
+DOMAIN-SUFFIX, ads.xfastest.com
+
+# iThome
+DOMAIN-SUFFIX, itadapi.ithome.com.tw
+DOMAIN-SUFFIX, itadstatic.ithome.com.tw
+
+# Baidu
+DOMAIN-SUFFIX, tsn.baidu.com
+
+# Yahoo
 DOMAIN-SUFFIX, pr.ybp.yahoo.com
-DOMAIN-SUFFIX, x.research.qq.com
+
+# Tencent
 DOMAIN-SUFFIX, rmonitor.qq.com
+DOMAIN-SUFFIX, x.research.qq.com
+
+# Telegram Clients
 DOMAIN-SUFFIX, adsgram.ai
 DOMAIN-SUFFIX, swiftgram.app
+
+# UO Group
+DOMAIN-SUFFIX, ad-api.uogroup.com
+
+# Plug Media
+DOMAIN-SUFFIX, ad2.plugmedia.hk
+
+# Ad Networks and Malvertising
+DOMAIN-SUFFIX, adxadserv.com
+DOMAIN-SUFFIX, bongacash.com
+DOMAIN-SUFFIX, cdn.yourwebbars.com
+DOMAIN-SUFFIX, czilladx.com
+DOMAIN-SUFFIX, isafe.pro
+DOMAIN-SUFFIX, mobile-cleaner.net
+DOMAIN-SUFFIX, olmsoneenh.info
+DOMAIN-SUFFIX, payingnoodlescam.com
+DOMAIN-SUFFIX, poweredby.jads.co
+DOMAIN-SUFFIX, promo-bc.com
+DOMAIN-SUFFIX, weedbits.com
 
 #d3ward ads list
 DOMAIN-SUFFIX, pagead2.googlesyndication.com
