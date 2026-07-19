@@ -283,3 +283,8 @@ DOMAIN-SUFFIX, browser.sentry-cdn.com
 DOMAIN-SUFFIX, app.getsentry.com
 DOMAIN-SUFFIX, appmetrica.yandex.ru
 DOMAIN-SUFFIX, metrics.icloud.com
+
+#AI Generated
+DOMAIN-SUFFIX, firebase-settings.crashlytics.com
+DOMAIN-SUFFIX, sentry.dailyart.nodea.net.pl
+DOMAIN-SUFFIX, apmplus.volces.com
