@@ -279,6 +279,7 @@ DOMAIN-SUFFIX, weather-analytics-events.apple.com
 DOMAIN-SUFFIX, notes-analytics-events.apple.com
 
 #AI Generated
+DOMAIN-SUFFIX, ads.hktvmall.com
 DOMAIN-SUFFIX, apmplus.volces.com
 DOMAIN-SUFFIX, csp.withgoogle.com
 DOMAIN-SUFFIX, firebase-settings.crashlytics.com
