@@ -171,7 +171,7 @@ function rewriteLengthDelimitedField(bytes, no, rewriter) {
 }
 
 function containsRichItemAdSignal(bytes) {
-  // Match Maasea's rich-item classifier: pagead is sufficient at the known
+  // The pagead marker is sufficient at the known rich-item boundary,
   // RichItemContent boundary, while inline injection is a known ad EML. The
   // web-view marker covers newer variants which omit the other two signals.
   // Visible labels such as "Sponsored" are localized and intentionally unused.
@@ -235,7 +235,7 @@ function stripItemSectionRichAds(bytes) {
   for (const field of fields) {
     // ItemSectionRenderer.richItemContents. YouTube can place the chip row,
     // recommendations, and a Sponsored card in the same item section. Remove
-    // only the rich item carrying a known Maasea-compatible ad signal.
+    // only the rich item carrying a known ad signal.
     if (field.no === 1 && field.wire === 2 && containsRichItemAdSignal(field.value)) {
       removed++;
       continue;
@@ -417,7 +417,7 @@ function stripTimelyShoppingShelf(nextBytes) {
 
 function stripNextResponseAds(nextBytes) {
   try {
-    // Maasea walks richItemContents across the complete decoded response, not
+    // Walk richItemContents across the complete decoded response, not
     // only the initial Next.content field. A recursive protobuf walk also
     // covers continuation actions and newly introduced wrapper fields while
     // the unique ItemSectionRenderer extension keeps deletion tightly scoped.
