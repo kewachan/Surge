@@ -1,4 +1,7 @@
 const GOOGLEVIDEO_HOST = /^[a-z0-9-]+\.googlevideo\.com$/i;
+const INITIAL_UPSTREAM_PATH = "/initplayback";
+const INITIAL_UPSTREAM_PATHS = new Set([INITIAL_UPSTREAM_PATH]);
+const REDIRECTED_UPSTREAM_PATHS = new Set([INITIAL_UPSTREAM_PATH, "/videoplayback"]);
 const UMP_CONTENT_TYPE = "application/vnd.yt-ump";
 const ENCRYPTED_INNERTUBE_RESPONSE = 25;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
@@ -771,6 +774,25 @@ function upstreamHeaders(requestHeaders) {
   return headers;
 }
 
+function isAllowedGooglevideoTarget(target, paths) {
+  return target.protocol === "https:"
+    && GOOGLEVIDEO_HOST.test(target.hostname)
+    && paths.has(target.pathname)
+    && !target.port
+    && !target.username
+    && !target.password
+    && !target.hash;
+}
+
+function hasAllowedFinalUpstreamUrl(upstream) {
+  if (!upstream.url) return true;
+  try {
+    return isAllowedGooglevideoTarget(new URL(upstream.url), REDIRECTED_UPSTREAM_PATHS);
+  } catch {
+    return false;
+  }
+}
+
 function responseHeaders(upstream, result, rewritten) {
   const headers = new Headers(upstream.headers);
   headers.delete("transfer-encoding");
@@ -815,15 +837,9 @@ async function handleRequest(request) {
   } catch {
     return new Response("Invalid target or ck", { status: 400 });
   }
-  if (
-    target.protocol !== "https:"
-    || !GOOGLEVIDEO_HOST.test(target.hostname)
-    || target.pathname !== "/initplayback"
-    || target.port
-    || target.username
-    || target.password
-    || target.hash
-  ) return new Response("Target Not Allowed", { status: 403 });
+  if (!isAllowedGooglevideoTarget(target, INITIAL_UPSTREAM_PATHS)) {
+    return new Response("Target Not Allowed", { status: 403 });
+  }
   if (clientKey.length !== 32) return new Response("Invalid ck", { status: 400 });
 
   const declaredLength = Number(request.headers.get("content-length") || 0);
@@ -839,7 +855,10 @@ async function handleRequest(request) {
       method: "POST",
       headers: upstreamHeaders(request.headers),
       body: requestBytes,
-      redirect: "manual",
+      // Keep Google's 307 initplayback transition inside Cloudflare. Returning
+      // it to the app moves later videoplayback requests onto a different
+      // network path and can invalidate the IP-bound stream URL with a 403.
+      redirect: "follow",
       signal: controller.signal,
     });
   } catch (error) {
@@ -848,6 +867,14 @@ async function handleRequest(request) {
     return new Response(timedOut ? "Upstream Timeout" : "Upstream Failed", {
       status: timedOut ? 504 : 502,
       headers: {"x-youtube-adblock": timedOut ? "bypass-timeout" : "bypass-fetch-error"},
+    });
+  }
+
+  if (!hasAllowedFinalUpstreamUrl(upstream)) {
+    clearTimeout(timeout);
+    return new Response("Upstream Redirect Not Allowed", {
+      status: 502,
+      headers: {"x-youtube-adblock": "bypass-redirect-rejected"},
     });
   }
 
