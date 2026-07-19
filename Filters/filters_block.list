@@ -66,24 +66,34 @@ DOMAIN-SUFFIX, poweredby.jads.co
 DOMAIN-SUFFIX, promo-bc.com
 DOMAIN-SUFFIX, weedbits.com
 
-#d3ward ads list
+# Source: d3ward Adblock Test
+
+# Google Advertising
 DOMAIN-SUFFIX, pagead2.googlesyndication.com
 DOMAIN-SUFFIX, pagead2.googleadservices.com
 DOMAIN-SUFFIX, ads.google.com
 DOMAIN-SUFFIX, adservice.google.com
 DOMAIN-SUFFIX, googleadservices.com
+
+# Media.net
 DOMAIN-SUFFIX, static.media.net
 DOMAIN-SUFFIX, media.net
 DOMAIN-SUFFIX, adservetx.media.net
+
+# Google DoubleClick
 DOMAIN-SUFFIX, mediavisor.doubleclick.net
 DOMAIN-SUFFIX, m.doubleclick.net
 DOMAIN-SUFFIX, static.doubleclick.net
 DOMAIN-SUFFIX, doubleclick.net
 DOMAIN-SUFFIX, ad.doubleclick.net
+
+# FastClick
 DOMAIN-SUFFIX, fastclick.com
 DOMAIN-SUFFIX, fastclick.net
 DOMAIN-SUFFIX, media.fastclick.net
 DOMAIN-SUFFIX, cdn.fastclick.net
+
+# Amazon Advertising
 DOMAIN-SUFFIX, adtago.s3.amazonaws.com
 DOMAIN-SUFFIX, analyticsengine.s3.amazonaws.com
 DOMAIN-SUFFIX, advice-ads.s3.amazonaws.com
@@ -92,6 +102,8 @@ DOMAIN-SUFFIX, advertising-api-eu.amazon.com
 DOMAIN-SUFFIX, amazonaax.com
 DOMAIN-SUFFIX, amazonclix.com
 DOMAIN-SUFFIX, assoc-amazon.com
+
+# Yahoo
 DOMAIN-SUFFIX, ads.yahoo.com
 DOMAIN-SUFFIX, adserver.yahoo.com
 DOMAIN-SUFFIX, global.adserver.yahoo.com
@@ -127,6 +139,8 @@ DOMAIN-SUFFIX, bats.video.yahoo.com
 DOMAIN-SUFFIX, visit.webDOMAINing.yahoo.com
 DOMAIN-SUFFIX, ads.yap.yahoo.com
 DOMAIN-SUFFIX, partnerads.ysm.yahoo.com
+
+# Yandex
 DOMAIN-SUFFIX, appmetrica.yandex.com
 DOMAIN-SUFFIX, redirect.appmetrica.yandex.com
 DOMAIN-SUFFIX, 19534.redirect.appmetrica.yandex.com
@@ -159,15 +173,25 @@ DOMAIN-SUFFIX, click.sender.yandex.ru
 DOMAIN-SUFFIX, share.yandex.ru
 DOMAIN-SUFFIX, yandexadexchange.net
 DOMAIN-SUFFIX, mobile.yandexadexchange.net
+
+# Google Analytics
 DOMAIN-SUFFIX, google-analytics.com
 DOMAIN-SUFFIX, ssl.google-analytics.com
+
+# Hotjar
 DOMAIN-SUFFIX, api-hotjar.com
 DOMAIN-SUFFIX, hotjar-analytics.com
 DOMAIN-SUFFIX, hotjar.com
 DOMAIN-SUFFIX, static.hotjar.com
+
+# Mouseflow
 DOMAIN-SUFFIX, mouseflow.com
 DOMAIN-SUFFIX, a.mouseflow.com
+
+# Freshmarketer
 DOMAIN-SUFFIX, freshmarketer.com
+
+# Lucky Orange
 DOMAIN-SUFFIX, luckyorange.com
 DOMAIN-SUFFIX, luckyorange.net
 DOMAIN-SUFFIX, cdn.luckyorange.com
@@ -175,23 +199,37 @@ DOMAIN-SUFFIX, w1.luckyorange.com
 DOMAIN-SUFFIX, upload.luckyorange.net
 DOMAIN-SUFFIX, cs.luckyorange.net
 DOMAIN-SUFFIX, settings.luckyorange.net
+
+# WordPress
 DOMAIN-SUFFIX, stats.wp.com
+
+# Bugsnag
 DOMAIN-SUFFIX, notify.bugsnag.com
 DOMAIN-SUFFIX, sessions.bugsnag.com
 DOMAIN-SUFFIX, api.bugsnag.com
 DOMAIN-SUFFIX, app.bugsnag.com
+
+# Sentry
 DOMAIN-SUFFIX, browser.sentry-cdn.com
 DOMAIN-SUFFIX, app.getsentry.com
+
+# Facebook
 DOMAIN-SUFFIX, pixel.facebook.com
 DOMAIN-SUFFIX, analytics.facebook.com
 DOMAIN-SUFFIX, ads.facebook.com
 DOMAIN-SUFFIX, an.facebook.com
+
+# Twitter
 DOMAIN-SUFFIX, ads-api.twitter.com
 DOMAIN-SUFFIX, advertising.twitter.com
 DOMAIN-SUFFIX, ads-twitter.com
 DOMAIN-SUFFIX, static.ads-twitter.com
+
+# LinkedIn
 DOMAIN-SUFFIX, ads.linkedin.com
 DOMAIN-SUFFIX, analytics.pointdrive.linkedin.com
+
+# Pinterest
 DOMAIN-SUFFIX, ads.pinterest.com
 DOMAIN-SUFFIX, log.pinterest.com
 DOMAIN-SUFFIX, ads-dev.pinterest.com
@@ -199,23 +237,35 @@ DOMAIN-SUFFIX, analytics.pinterest.com
 DOMAIN-SUFFIX, trk.pinterest.com
 DOMAIN-SUFFIX, trk2.pinterest.com
 DOMAIN-SUFFIX, widgets.pinterest.com
+
+# Reddit
 DOMAIN-SUFFIX, ads.reddit.com
 DOMAIN-SUFFIX, rereddit.com
 DOMAIN-SUFFIX, events.redditmedia.com
 DOMAIN-SUFFIX, d.reddit.com
+
+# TikTok
 DOMAIN-SUFFIX, ads-sg.tiktok.com
 DOMAIN-SUFFIX, analytics-sg.tiktok.com
 DOMAIN-SUFFIX, ads.tiktok.com
 DOMAIN-SUFFIX, analytics.tiktok.com
+
+# YouTube
 DOMAIN-SUFFIX, ads.youtube.com
 DOMAIN-SUFFIX, youtube.cleverads.vn
+
+# Realme
 DOMAIN-SUFFIX, bdapi-in-ads.realmemobile.com
+
+# Oppo
 DOMAIN-SUFFIX, adsfs.oppomobile.com
 DOMAIN-SUFFIX, adx.ads.oppomobile.com
 DOMAIN-SUFFIX, bdapi.ads.oppomobile.com
 DOMAIN-SUFFIX, ck.ads.oppomobile.com
 DOMAIN-SUFFIX, data.ads.oppomobile.com
 DOMAIN-SUFFIX, g1.ads.oppomobile.com
+
+# Xiaomi
 DOMAIN-SUFFIX, api.ad.xiaomi.com
 DOMAIN-SUFFIX, app.chat.xiaomi.net
 DOMAIN-SUFFIX, data.mistat.xiaomi.com
@@ -231,10 +281,14 @@ DOMAIN-SUFFIX, sa.api.intl.miui.com
 DOMAIN-SUFFIX, tracking.intl.miui.com
 DOMAIN-SUFFIX, tracking.india.miui.com
 DOMAIN-SUFFIX, tracking.rus.miui.com
+
+# OnePlus
 DOMAIN-SUFFIX, analytics.oneplus.cn
 DOMAIN-SUFFIX, click.oneplus.cn
 DOMAIN-SUFFIX, click.oneplus.com
 DOMAIN-SUFFIX, open.oneplus.net
+
+# Huawei
 DOMAIN-SUFFIX, metrics.data.hicloud.com
 DOMAIN-SUFFIX, metrics1.data.hicloud.com
 DOMAIN-SUFFIX, metrics2.data.hicloud.com
@@ -245,6 +299,8 @@ DOMAIN-SUFFIX, logservice.hicloud.com
 DOMAIN-SUFFIX, logservice1.hicloud.com
 DOMAIN-SUFFIX, metrics-dra.dt.hicloud.com
 DOMAIN-SUFFIX, logbak.hicloud.com
+
+# Samsung
 DOMAIN-SUFFIX, ad.samsungadhub.com
 DOMAIN-SUFFIX, samsungadhub.com
 DOMAIN-SUFFIX, samsungads.com
@@ -256,6 +312,8 @@ DOMAIN-SUFFIX, analytics.samsungknox.com
 DOMAIN-SUFFIX, bigdata.ssp.samsung.com
 DOMAIN-SUFFIX, analytics-api.samsunghealthcn.com
 DOMAIN-SUFFIX, config.samsungads.com
+
+# Apple
 DOMAIN-SUFFIX, metrics.apple.com
 DOMAIN-SUFFIX, securemetrics.apple.com
 DOMAIN-SUFFIX, supportmetrics.apple.com
@@ -266,16 +324,26 @@ DOMAIN-SUFFIX, books-analytics-events.news.apple-dns.net
 DOMAIN-SUFFIX, books-analytics-events.apple.com
 DOMAIN-SUFFIX, stocks-analytics-events.apple.com
 DOMAIN-SUFFIX, stocks-analytics-events.news.apple-dns.net
+
+# Amazon Analytics
 DOMAIN-SUFFIX, analytics.s3.amazonaws.com
+
+# Google Advertising
 DOMAIN-SUFFIX, afs.googlesyndication.com
 DOMAIN-SUFFIX, stats.g.doubleclick.net
+
+# AdColony
 DOMAIN-SUFFIX, ads30.adcolony.com
 DOMAIN-SUFFIX, adc3-launch.adcolony.com
 DOMAIN-SUFFIX, events3alt.adcolony.com
 DOMAIN-SUFFIX, wd.adcolony.com
+
+# Google Analytics
 DOMAIN-SUFFIX, app-measurement.com
 DOMAIN-SUFFIX, analytics.google.com
 DOMAIN-SUFFIX, click.googleanalytics.com
+
+# Hotjar
 DOMAIN-SUFFIX, adm.hotjar.com
 DOMAIN-SUFFIX, identify.hotjar.com
 DOMAIN-SUFFIX, insights.hotjar.com
@@ -283,31 +351,53 @@ DOMAIN-SUFFIX, script.hotjar.com
 DOMAIN-SUFFIX, surveys.hotjar.com
 DOMAIN-SUFFIX, careers.hotjar.com
 DOMAIN-SUFFIX, events.hotjar.io
+
+# Mouseflow
 DOMAIN-SUFFIX, api.mouseflow.com
 DOMAIN-SUFFIX, tools.mouseflow.com
 DOMAIN-SUFFIX, cdn-test.mouseflow.com
+
+# Freshmarketer
 DOMAIN-SUFFIX, claritybt.freshmarketer.com
 DOMAIN-SUFFIX, fwtracks.freshmarketer.com
+
+# Lucky Orange
 DOMAIN-SUFFIX, api.luckyorange.com
 DOMAIN-SUFFIX, realtime.luckyorange.com
+
+# Reddit
 DOMAIN-SUFFIX, events.reddit.com
+
+# TikTok and ByteDance
 DOMAIN-SUFFIX, ads-api.tiktok.com
 DOMAIN-SUFFIX, business-api.tiktok.com
 DOMAIN-SUFFIX, log.byteoversea.com
+
+# Yahoo
 DOMAIN-SUFFIX, udc.yahoo.com
 DOMAIN-SUFFIX, udcm.yahoo.com
 DOMAIN-SUFFIX, adtech.yahooinc.com
+
+# Yandex
 DOMAIN-SUFFIX, appmetrica.yandex.ru
 DOMAIN-SUFFIX, adfstat.yandex.ru
 DOMAIN-SUFFIX, advertising.yandex.ru
+
+# Unity Ads
 DOMAIN-SUFFIX, auction.unityads.unity3d.com
 DOMAIN-SUFFIX, webview.unityads.unity3d.com
 DOMAIN-SUFFIX, config.unityads.unity3d.com
 DOMAIN-SUFFIX, adserver.unityads.unity3d.com
+
+# Realme
 DOMAIN-SUFFIX, iot-eu-logser.realme.com
 DOMAIN-SUFFIX, iot-logser.realme.com
 DOMAIN-SUFFIX, bdapi-ads.realmemobile.com
+
+# Huawei
 DOMAIN-SUFFIX, grs.hicloud.com
+
+# Apple
 DOMAIN-SUFFIX, advertising.apple.com
 DOMAIN-SUFFIX, tr.iadsdk.apple.com
 DOMAIN-SUFFIX, iadsdk.apple.com
