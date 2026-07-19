@@ -18,15 +18,47 @@ const BLOCKED_DOMAINS = [
   "tracking.miui.com" // Xiaomi behavioural tracking
 ];
 
-const hostname = String($request.hostname || "").toLowerCase();
 const url = String($request.url || "");
 
-const matched = BLOCKED_DOMAINS.some(
-  domain => hostname === domain || hostname.endsWith(`.${domain}`)
-);
-
-if (matched) {
-  console.log(`[General AdBlock] Blocked: ${url || hostname}`);
+if (typeof $response !== "undefined") {
+  removeResponseAds();
+} else {
+  blockDomain();
 }
 
-$done({ matched });
+function removeResponseAds() {
+  if (!url.includes("api.gamer.com.tw/mobile_app/anime/v4/token.php")) {
+    $done({});
+    return;
+  }
+
+  try {
+    const payload = JSON.parse($response.body || "{}");
+    const ad = payload?.data?.ad;
+
+    if (ad && typeof ad === "object") {
+      ad.major = [];
+      ad.minor = [];
+      ad.sponsor = {};
+      console.log("[General AdBlock] Removed Bahamut Anime pre-roll ads");
+    }
+
+    $done({ body: JSON.stringify(payload) });
+  } catch (error) {
+    console.log(`[General AdBlock] Bahamut response unchanged: ${error}`);
+    $done({});
+  }
+}
+
+function blockDomain() {
+  const hostname = String($request.hostname || "").toLowerCase();
+  const matched = BLOCKED_DOMAINS.some(
+    domain => hostname === domain || hostname.endsWith(`.${domain}`)
+  );
+
+  if (matched) {
+    console.log(`[General AdBlock] Blocked: ${url || hostname}`);
+  }
+
+  $done({ matched });
+}
