@@ -48,6 +48,10 @@ if (isGoogleSearch) {
       '[class*="B2VR9"]',
       '[class*="CJHX3e"]',
       '[aria-label*="Google app"]',
+      'promo-throttler',
+      '[data-promo-id]',
+      '[data-promoid]',
+      '[jsname="eJoPub"]',
       '[data-text="Ask and explore anything with the Google app"]',
     ];
     selectors.forEach(function(sel) {
@@ -56,12 +60,12 @@ if (isGoogleSearch) {
   }
 
   function hideGoogleAppInvite(root) {
-    var blocks = root.querySelectorAll("span,div,li,a,p,h2,h3,section,article,button");
+    var blocks = root.querySelectorAll("span,div,li,a,p,h2,h3,section,article,button, promo-throttler, [data-promo-id], [data-promoid]");
     for (var i = 0; i < blocks.length; i++) {
       var n = blocks[i];
       var t = (n.textContent || "").trim().toLowerCase();
-      if (!t) { continue; }
-      if (t.indexOf("ask and explore anything") >= 0 || t.indexOf("ask and explore") >= 0) {
+      var hasPromoAttr = (n.getAttribute && (n.getAttribute("data-promo-id") || n.getAttribute("data-promoid") || n.getAttribute("jsname") === "SgxdIe" || n.getAttribute("jsname") === "eJoPub"));
+      if (hasPromoAttr || t.indexOf("ask and explore anything") >= 0 || t.indexOf("ask and explore") >= 0) {
         var p = n;
         for (var j = 0; j < 10 && p; j++) {
           if (p.id === "rso" || (p.getAttribute && (p.getAttribute("role") === "region" || p.getAttribute("role") === "complementary"))) {
