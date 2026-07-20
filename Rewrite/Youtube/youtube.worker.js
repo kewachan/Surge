@@ -1,7 +1,7 @@
 const GOOGLEVIDEO_HOST = /^[a-z0-9-]+\.googlevideo\.com$/i;
-const ALLOWED_UPSTREAM_PATHS = new Set(["/initplayback"]);
-const REDIRECTOR_HOST = "redirector.googlevideo.com";
-const WORKER_BUILD = "init-redirector-v1";
+const INITIAL_UPSTREAM_PATH = "/initplayback";
+const INITIAL_UPSTREAM_PATHS = new Set([INITIAL_UPSTREAM_PATH]);
+const REDIRECTED_UPSTREAM_PATHS = new Set([INITIAL_UPSTREAM_PATH, "/videoplayback"]);
 const UMP_CONTENT_TYPE = "application/vnd.yt-ump";
 const ENCRYPTED_INNERTUBE_RESPONSE = 25;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
@@ -787,61 +787,10 @@ function isAllowedGooglevideoTarget(target, paths) {
 function hasAllowedFinalUpstreamUrl(upstream) {
   if (!upstream.url) return true;
   try {
-    return isAllowedGooglevideoTarget(new URL(upstream.url), ALLOWED_UPSTREAM_PATHS);
+    return isAllowedGooglevideoTarget(new URL(upstream.url), REDIRECTED_UPSTREAM_PATHS);
   } catch {
     return false;
   }
-}
-
-function redirectLocation(upstream, baseUrl) {
-  const value = upstream.headers.get("location");
-  if (!value) return null;
-  try {
-    const target = new URL(value, baseUrl);
-    return isAllowedGooglevideoTarget(target, ALLOWED_UPSTREAM_PATHS) ? target : null;
-  } catch {
-    return null;
-  }
-}
-
-async function postUpstream(target, headers, body, signal) {
-  return fetch(target, {
-    method: "POST",
-    headers,
-    body,
-    redirect: "manual",
-    signal,
-  });
-}
-
-async function resolveInitPlaybackTarget(target, signal) {
-  const redirector = new URL(target);
-  redirector.hostname = REDIRECTOR_HOST;
-  redirector.searchParams.set("cms_redirect", "yes");
-  const response = await fetch(redirector, {
-    method: "GET",
-    headers: {accept: "text/html,*/*"},
-    redirect: "manual",
-    signal,
-  });
-  return redirectLocation(response, redirector);
-}
-
-async function fetchInitPlayback(target, headers, body, signal) {
-  let upstream = await postUpstream(target, headers, body, signal);
-  if (upstream.status < 300 || upstream.status > 399) return upstream;
-
-  const standardRedirect = redirectLocation(upstream, target);
-  if (standardRedirect) return postUpstream(standardRedirect, headers, body, signal);
-
-  // Google sometimes returns an empty protocol 307 with no Location header.
-  // Resolve a fresh initplayback edge from the Worker egress, then repeat the
-  // original POST there. This keeps the IP-bound handshake on one network path.
-  if (upstream.status === 307 && target.pathname === "/initplayback") {
-    const regionalTarget = await resolveInitPlaybackTarget(target, signal);
-    if (regionalTarget) upstream = await postUpstream(regionalTarget, headers, body, signal);
-  }
-  return upstream;
 }
 
 function responseHeaders(upstream, result, rewritten) {
@@ -851,7 +800,6 @@ function responseHeaders(upstream, result, rewritten) {
     headers.delete("content-length");
     headers.delete("content-encoding");
   }
-  headers.set("x-youtube-worker-build", WORKER_BUILD);
   headers.set("x-youtube-adblock", result);
   return headers;
 }
@@ -889,7 +837,7 @@ async function handleRequest(request) {
   } catch {
     return new Response("Invalid target or ck", { status: 400 });
   }
-  if (!isAllowedGooglevideoTarget(target, ALLOWED_UPSTREAM_PATHS)) {
+  if (!isAllowedGooglevideoTarget(target, INITIAL_UPSTREAM_PATHS)) {
     return new Response("Target Not Allowed", { status: 403 });
   }
   if (clientKey.length !== 32) return new Response("Invalid ck", { status: 400 });
@@ -903,12 +851,16 @@ async function handleRequest(request) {
   const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
   let upstream;
   try {
-    upstream = await fetchInitPlayback(
-      target,
-      upstreamHeaders(request.headers),
-      requestBytes,
-      controller.signal,
-    );
+    upstream = await fetch(target, {
+      method: "POST",
+      headers: upstreamHeaders(request.headers),
+      body: requestBytes,
+      // Keep Google's 307 initplayback transition inside Cloudflare. Returning
+      // it to the app moves later videoplayback requests onto a different
+      // network path and can invalidate the IP-bound stream URL with a 403.
+      redirect: "follow",
+      signal: controller.signal,
+    });
   } catch (error) {
     const timedOut = controller.signal.aborted;
     clearTimeout(timeout);
@@ -969,7 +921,6 @@ export const __test = {
   stripOnesieResponseAds,
   stripNextResponseAds,
   stripPlayerAds,
-  fetchInitPlayback,
 };
 
 export default {
