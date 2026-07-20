@@ -45,10 +45,33 @@ if (isGoogleSearch) {
       '[aria-label="Sponsored result"]',
       '[aria-label="Ads"]',
       '[aria-label="Sponsored"]',
+      '[aria-label*="Google app"]',
+      '[data-text="Ask and explore anything with the Google app"]',
     ];
     selectors.forEach(function(sel) {
       root.querySelectorAll(sel).forEach(function(n){ n.style.display = "none"; });
     });
+  }
+
+  function hideGoogleAppInvite(root) {
+    var blocks = root.querySelectorAll("span,div,li,a,p,h2,h3,section,article,button");
+    for (var i = 0; i < blocks.length; i++) {
+      var n = blocks[i];
+      var t = (n.textContent || "").trim().toLowerCase();
+      if (!t) { continue; }
+      if (t.indexOf("ask and explore anything") >= 0 || t.indexOf("ask and explore") >= 0) {
+        var p = n;
+        for (var j = 0; j < 10 && p; j++) {
+          if (p.id === "rso" || (p.getAttribute && (p.getAttribute("role") === "region" || p.getAttribute("role") === "complementary"))) {
+            break;
+          }
+          p = p.parentElement;
+        }
+        if (p) {
+          p.style.display = "none";
+        }
+      }
+    }
   }
 
   function hideSponsoredNodes(root) {
@@ -128,11 +151,15 @@ if (isGoogleSearch) {
   function onReady() {
     injectStyle();
     hideSponsoredNodes(document);
+    hideGoogleAppInvite(document);
     patchNetwork();
   }
 
   onReady();
-  var mo = new MutationObserver(function(){ hideSponsoredNodes(document); });
+  var mo = new MutationObserver(function(){
+    hideSponsoredNodes(document);
+    hideGoogleAppInvite(document);
+  });
   mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
 })();
 </script>`;
