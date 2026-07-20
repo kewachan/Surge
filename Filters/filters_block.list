@@ -340,8 +340,19 @@ DOMAIN-SUFFIX, weedbits.com
 
 #Imported List
 #Sources:
+# anti-ad.net/surge2.txt
+# https://anti-ad.net/surge2.txt
+# Updated: 2026-07-20 03:38:22Z
 # https://raw.githubusercontent.com/limbopro/Adblock4limbo/main/Adblock4limbo_surge.list
+# Updated: 2026-07-20 00:00:00 (from list header)
 # https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Surge/BlockHttpDNS/BlockHttpDNS.list
+# Updated: 2025-06-06 09:20:00
+# https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Surge/Advertising/Advertising.list
+# Updated: 2026-07-20 02:54:41
+# https://ruleset.skk.moe/List/non_ip/reject.conf
+# Last Updated: 2026-06-30T21:42:09.474Z
+# https://ruleset.skk.moe/List/ip/reject.conf
+# Last Updated: 2026-07-06T09:11:29.708Z
 DOMAIN, 118.89.204.198
 DOMAIN, 25e87c0802f91cf8cgg.6uzxtlv.cn
 DOMAIN, ad-analysis.pconline.com.cn
