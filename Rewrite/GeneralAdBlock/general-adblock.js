@@ -45,6 +45,7 @@ if (isGoogleSearch) {
       '[aria-label="Sponsored result"]',
       '[aria-label="Ads"]',
       '[aria-label="Sponsored"]',
+      '.B2VR9.CJHX3e',
       '[aria-label*="Google app"]',
       '[data-text="Ask and explore anything with the Google app"]',
     ];
@@ -80,8 +81,10 @@ if (isGoogleSearch) {
     for (var i = 0; i < blocks.length; i++) {
       var n = blocks[i];
       var t = (n.textContent || "").trim().toLowerCase();
+      var cls = (n.getAttribute && n.getAttribute("class")) ? n.getAttribute("class") : "";
+      var isClassTarget = cls.indexOf("B2VR9") >= 0 && cls.indexOf("CJHX3e") >= 0;
       if (!t) { continue; }
-      var isSponsored = t === "sponsored result" || t === "sponsored" || t.startsWith("sponsored ");
+      var isSponsored = isClassTarget || t === "sponsored result" || t === "sponsored" || t.startsWith("sponsored ");
       if (isSponsored) {
         var p = n.parentElement;
         for (var j = 0; j < 8 && p; j++) {
