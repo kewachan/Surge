@@ -6,6 +6,7 @@ DOMAIN-SUFFIX, ads.hktvmall.com
 DOMAIN-SUFFIX, ts-analysis.shoalter.com
 
 # Google
+DOMAIN, ogads-pa.clients6.google.com
 DOMAIN-SUFFIX, ad.doubleclick.net
 DOMAIN-SUFFIX, ads.google.com
 DOMAIN-SUFFIX, ads.youtube.com
