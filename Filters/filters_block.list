@@ -8,6 +8,7 @@ DOMAIN-SUFFIX, ts-analysis.shoalter.com
 # Google
 DOMAIN-SUFFIX, ad.doubleclick.net
 DOMAIN-SUFFIX, ads.google.com
+DOMAIN, ogads-pa.clients6.google.com
 DOMAIN-SUFFIX, ads.youtube.com
 DOMAIN-SUFFIX, adservice.google.com
 DOMAIN-SUFFIX, afs.googlesyndication.com
