@@ -135,24 +135,6 @@ DOMAIN-SUFFIX, share.yandex.ru
 DOMAIN-SUFFIX, startup.mobile.yandex.net
 DOMAIN-SUFFIX, yandexadexchange.net
 
-# Xiaomi
-DOMAIN-SUFFIX, api.ad.xiaomi.com
-DOMAIN-SUFFIX, apmplus.volces.com
-DOMAIN-SUFFIX, app.chat.xiaomi.net
-DOMAIN-SUFFIX, data.mistat.india.xiaomi.com
-DOMAIN-SUFFIX, data.mistat.intl.xiaomi.com
-DOMAIN-SUFFIX, data.mistat.rus.xiaomi.com
-DOMAIN-SUFFIX, data.mistat.xiaomi.com
-DOMAIN-SUFFIX, globalapi.ad.xiaomi.com
-DOMAIN-SUFFIX, sa.api.intl.miui.com
-DOMAIN-SUFFIX, sdkconfig.ad.intl.xiaomi.com
-DOMAIN-SUFFIX, sdkconfig.ad.xiaomi.com
-DOMAIN-SUFFIX, tracking.india.miui.com
-DOMAIN-SUFFIX, tracking.intl.miui.com
-DOMAIN-SUFFIX, tracking.miui.com
-DOMAIN-SUFFIX, tracking.rus.miui.com
-DOMAIN-SUFFIX, www.cdn.ad.xiaomi.com
-
 # ByteDance and TikTok
 DOMAIN-SUFFIX, ads-api.tiktok.com
 DOMAIN-SUFFIX, ads-sg.tiktok.com
@@ -170,6 +152,10 @@ DOMAIN-SUFFIX, ads.facebook.com
 DOMAIN-SUFFIX, an.facebook.com
 DOMAIN-SUFFIX, analytics.facebook.com
 DOMAIN-SUFFIX, pixel.facebook.com
+
+# Telegram Clients
+DOMAIN-SUFFIX, adsgram.ai
+DOMAIN-SUFFIX, swiftgram.app
 
 # X (Twitter)
 DOMAIN-SUFFIX, ads-api.twitter.com
@@ -200,12 +186,37 @@ DOMAIN-SUFFIX, rereddit.com
 # XFastest
 DOMAIN-SUFFIX, ads.xfastest.com
 
-# Telegram Clients
-DOMAIN-SUFFIX, adsgram.ai
-DOMAIN-SUFFIX, swiftgram.app
-
 # 4Gamers
 DOMAIN-SUFFIX, collect.4gamers.com.tw
+
+# iThome
+DOMAIN-SUFFIX, itadapi.ithome.com.tw
+DOMAIN-SUFFIX, itadstatic.ithome.com.tw
+
+# Tencent
+DOMAIN-SUFFIX, rmonitor.qq.com
+DOMAIN-SUFFIX, x.research.qq.com
+
+# Baidu
+DOMAIN-SUFFIX, tsn.baidu.com
+
+# Xiaomi
+DOMAIN-SUFFIX, api.ad.xiaomi.com
+DOMAIN-SUFFIX, apmplus.volces.com
+DOMAIN-SUFFIX, app.chat.xiaomi.net
+DOMAIN-SUFFIX, data.mistat.india.xiaomi.com
+DOMAIN-SUFFIX, data.mistat.intl.xiaomi.com
+DOMAIN-SUFFIX, data.mistat.rus.xiaomi.com
+DOMAIN-SUFFIX, data.mistat.xiaomi.com
+DOMAIN-SUFFIX, globalapi.ad.xiaomi.com
+DOMAIN-SUFFIX, sa.api.intl.miui.com
+DOMAIN-SUFFIX, sdkconfig.ad.intl.xiaomi.com
+DOMAIN-SUFFIX, sdkconfig.ad.xiaomi.com
+DOMAIN-SUFFIX, tracking.india.miui.com
+DOMAIN-SUFFIX, tracking.intl.miui.com
+DOMAIN-SUFFIX, tracking.miui.com
+DOMAIN-SUFFIX, tracking.rus.miui.com
+DOMAIN-SUFFIX, www.cdn.ad.xiaomi.com
 
 # Oppo
 DOMAIN-SUFFIX, adsfs.oppomobile.com
@@ -313,17 +324,6 @@ DOMAIN-SUFFIX, media.net
 DOMAIN-SUFFIX, static.media.net
 DOMAIN-SUFFIX, wd.adcolony.com
 DOMAIN-SUFFIX, webview.unityads.unity3d.com
-
-# iThome
-DOMAIN-SUFFIX, itadapi.ithome.com.tw
-DOMAIN-SUFFIX, itadstatic.ithome.com.tw
-
-# Tencent
-DOMAIN-SUFFIX, rmonitor.qq.com
-DOMAIN-SUFFIX, x.research.qq.com
-
-# Baidu
-DOMAIN-SUFFIX, tsn.baidu.com
 
 # Ad Networks and Malvertising
 DOMAIN-SUFFIX, adxadserv.com
