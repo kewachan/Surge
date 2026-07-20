@@ -9,6 +9,12 @@ const isGoogleSearch = $request.url.includes("www.google.com/search");
 
 // Google Search: hide ad blocks that cannot be blocked safely by simple rules.
 if (isGoogleSearch) {
+  if (body.includes("Ask and explore anything with the Google app")) {
+    body = body
+      .replace(/class="B2VR9 CJHX3e"/g, 'class="B2VR9 CJHX3e" style="display:none!important"')
+      .replace(/class=\\"B2VR9 CJHX3e\\"/g, 'class=\\"B2VR9 CJHX3e\\" style=\\"display:none!important\\"');
+  }
+
   const inject = `
 <script>
 (function() {
