@@ -3,7 +3,7 @@
 #!system=ios
 
 [Script]
-Google Search Ads = type=http-response, pattern=^https:\/\/www\.google\.com\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/general-adblock.js?v=20260720d
+Google Search Ads = type=http-response, pattern=^https:\/\/www\.google\.com\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/general-adblock.js?v=20260720e
 
 [MITM]
 hostname = %APPEND% www.google.com
