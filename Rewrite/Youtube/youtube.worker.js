@@ -2,6 +2,7 @@ const GOOGLEVIDEO_HOST = /^[a-z0-9-]+\.googlevideo\.com$/i;
 const INITIAL_UPSTREAM_PATH = "/initplayback";
 const INITIAL_UPSTREAM_PATHS = new Set([INITIAL_UPSTREAM_PATH]);
 const REDIRECTED_UPSTREAM_PATHS = new Set([INITIAL_UPSTREAM_PATH, "/videoplayback"]);
+const REDIRECTOR_HOST = "redirector.googlevideo.com";
 const UMP_CONTENT_TYPE = "application/vnd.yt-ump";
 const ENCRYPTED_INNERTUBE_RESPONSE = 25;
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
@@ -793,6 +794,30 @@ function hasAllowedFinalUpstreamUrl(upstream) {
   }
 }
 
+function redirectLocation(upstream, baseUrl) {
+  const value = upstream.headers.get("location");
+  if (!value) return null;
+  try {
+    const target = new URL(value, baseUrl);
+    return isAllowedGooglevideoTarget(target, INITIAL_UPSTREAM_PATHS) ? target : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveRegionalInitPlaybackTarget(target, signal) {
+  const redirector = new URL(target);
+  redirector.hostname = REDIRECTOR_HOST;
+  redirector.searchParams.set("cms_redirect", "yes");
+  const response = await fetch(redirector, {
+    method: "GET",
+    headers: {accept: "text/html,*/*"},
+    redirect: "manual",
+    signal,
+  });
+  return redirectLocation(response, redirector);
+}
+
 function responseHeaders(upstream, result, rewritten) {
   const headers = new Headers(upstream.headers);
   headers.delete("transfer-encoding");
@@ -861,6 +886,23 @@ async function handleRequest(request) {
       redirect: "follow",
       signal: controller.signal,
     });
+
+    // Some Googlevideo edges answer initplayback with an empty 307 that
+    // fetch() cannot follow. Keep the normal follow path above unchanged so
+    // the iOS player metadata flow (and Enhance caption choice) is preserved;
+    // only retry through a regional edge for this exceptional empty redirect.
+    if (upstream.status === 307 && !upstream.headers.get("location")) {
+      const regionalTarget = await resolveRegionalInitPlaybackTarget(target, controller.signal);
+      if (regionalTarget) {
+        upstream = await fetch(regionalTarget, {
+          method: "POST",
+          headers: upstreamHeaders(request.headers),
+          body: requestBytes,
+          redirect: "follow",
+          signal: controller.signal,
+        });
+      }
+    }
   } catch (error) {
     const timedOut = controller.signal.aborted;
     clearTimeout(timeout);
