@@ -6,13 +6,50 @@
 
 let body = $response.body || "";
 const isGoogleSearch = $request.url.includes("www.google.com/search");
-const isGoogleShopping = isGoogleSearch && ($request.url.includes("tbm=shop") || $request.url.includes("/shopping"));
+const url = $request.url;
+const likelyShoppingFromURL = /tbm=shop|\bshopping\b/.test(url) && !/shoppingapi|shopping\.google/.test(url);
+const detectShoppingFromURL = isGoogleSearch && !/\bsearchbyimage\b/.test(url) && likelyShoppingFromURL;
 
 // Google Search & Shopping: hide ad blocks that cannot be blocked by simple rules.
-if (isGoogleSearch || isGoogleShopping) {
+if (isGoogleSearch) {
   const inject = `
 <script>
 (function() {
+  function collectShopping() {
+    var href = (location && location.href) ? location.href.toLowerCase() : "";
+    if (href.indexOf("tbm=shop") >= 0) { return true; }
+    if (href.indexOf("/shopping") >= 0) { return true; }
+    var udm = href.match(/(?:\?|&)udm=([^&]+)/);
+    if (udm && udm[1] && udm[1] !== "0") {
+      return true;
+    }
+    var tab = document.querySelector(".N54PNb, [role='tablist'] [role='tab'], .hdtb-mitem");
+    if (tab && tab.querySelector && tab.querySelector("a[aria-current='page'],a[aria-selected='true'], .YmvwI, [aria-label='Shopping']")) {
+      return true;
+    }
+    var shoppingHeading = document.querySelector("[jsname='xBNgKe'][class*='mXwfNd'], [aria-label='Shopping']");
+    if (shoppingHeading && shoppingHeading.textContent && shoppingHeading.textContent.toLowerCase().indexOf("shopping") >= 0) {
+      return true;
+    }
+    return false;
+  }
+
+  var isShoppingPage = ${detectShoppingFromURL} || collectShopping();
+
+  function injectStyle() {
+    if (document.getElementById("__googleShoppingBlockerCSS")) {
+      return;
+    }
+    var s = document.createElement("style");
+    s.id = "__googleShoppingBlockerCSS";
+    s.textContent =
+      "#tads,#tadsb,[role='region'][aria-label='Ads'],[aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],.xpdopen,.M8OgIe,.dWz1gf {display:none!important;}" +
+      "a[href*='pagead'],img[src*='pagead'],img[src*='googlesyndication'],script[src*='adservice'],script[src*='pagead'],iframe[src*='pagead']{display:none!important;}";
+    if (document.head) {
+      document.head.appendChild(s);
+    }
+  }
+
   function shouldBlockAdRequest(url) {
     if (!url) { return false; }
     return url.indexOf("ogads-pa.clients6.google.com") >= 0 ||
@@ -40,7 +77,9 @@ if (isGoogleSearch || isGoogleShopping) {
       "[data-entity='shopping-result']",
       ".sh-dgr__content",
       ".sh-dlr__content",
-      ".pla-result"
+      ".sh-sf",
+      ".pla-result",
+      ".xpdopen"
     ];
     selectors.forEach(function(sel) {
       root.querySelectorAll(sel).forEach(function(n){ n.style.display = "none"; });
@@ -121,20 +160,34 @@ if (isGoogleSearch || isGoogleShopping) {
         return oldSend.apply(this, arguments);
       };
     }
+
+    if (window.navigator && navigator.sendBeacon) {
+      var oldBeacon = navigator.sendBeacon;
+      navigator.sendBeacon = function(url, data) {
+        if (shouldBlockAdRequest(url)) {
+          return true;
+        }
+        return oldBeacon.call(navigator, url, data);
+      };
+    }
   }
 
   function onReady() {
-    hideSponsoredNodes(document, ${isGoogleShopping});
+    isShoppingPage = collectShopping() || isShoppingPage;
+    injectStyle();
+    hideSponsoredNodes(document, isShoppingPage);
     patchNetwork();
   }
 
   onReady();
-  var mo = new MutationObserver(function(){ hideSponsoredNodes(document, ${isGoogleShopping}); });
+  var mo = new MutationObserver(function(){ hideSponsoredNodes(document, isShoppingPage); });
   mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
 })();
 </script>`;
 
-  if (body.includes("</body>")) {
+  if (body.includes("</head>")) {
+    body = body.replace("</head>", inject + "</head>");
+  } else if (body.includes("</body>")) {
     body = body.replace("</body>", inject + "</body>");
   }
 }
