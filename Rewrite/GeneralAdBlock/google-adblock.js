@@ -23,11 +23,8 @@ function addHiddenStyle(tag) {
 }
 
 function isSponsoredTag(tag) {
-  return /\bid=(['"])(?:tvcap|tads|tadsb)\1/i.test(tag) ||
-    /\bjscontroller=(['"])tY2w9d\1/i.test(tag) ||
-    /\bjsname=(['"])ix0Hvc\1/i.test(tag) ||
-    /\bdata-text-ad=(['"])1\1/i.test(tag) ||
-    /\bclass=(['"])[^'"]*\b(?:qGXjvb|vbIt3d|IuoSj)\b[^'"]*\1/i.test(tag);
+  return /\bid=(['"])tads\1/i.test(tag) ||
+    /\bdata-text-ad=(['"])1\1/i.test(tag);
 }
 
 if (isGoogleSearch) {
@@ -52,9 +49,9 @@ if (isGoogleSearch) {
       );
   }
 
-  // The HAR places Sponsored Result in these server-rendered ad containers.
-  // Editing the response works even when Google's CSP blocks injected scripts.
-  if (/Sponsored result|\bid=(['"])(?:tvcap|tads|tadsb)\1/i.test(body)) {
+  // The HAR places Sponsored Result inside #tads, with data-text-ad items.
+  // Keep Google layout and pagination containers untouched.
+  if (/Sponsored result|\bid=(['"])tads\1/i.test(body)) {
     body = body.replace(/<[a-z][^>]*>/gi, function(tag) {
       return isSponsoredTag(tag) ? addHiddenStyle(tag) : tag;
     });
