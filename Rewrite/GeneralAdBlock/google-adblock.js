@@ -5,7 +5,7 @@
  */
 
 let body = $response.body || "";
-const isGoogleSearch = $request.url.includes("www.google.com/search");
+const isGoogleSearch = /https?:\/\/(www\.)?google\.[^/]+\/search/i.test($request.url);
 const url = $request.url;
 const likelyShoppingFromURL = /tbm=shop|\bshopping\b/.test(url) && !/shoppingapi|shopping\.google/.test(url);
 const detectShoppingFromURL = isGoogleSearch && !/\bsearchbyimage\b/.test(url) && likelyShoppingFromURL;
@@ -116,14 +116,21 @@ if (isGoogleSearch) {
       ".pla-result",
       ".pla-result-ads",
       ".Jbxz5",
+      ".M8OgIe",
+      ".dWz1gf",
+      ".VuuXrf",
+      ".Q2MMlc",
+      ".mnr-c",
+      ".eD6k6",
+      ".XH5mde",
+      ".A3fA7c",
+      ".nVWcKf",
       ".fPG77c",
       ".wyccme",
       ".Ww4FFb",
       ".ouy7Mc",
       ".qR29te",
       ".xpdopen",
-      ".M8OgIe",
-      ".dWz1gf",
       "[class*='B2VR9']",
       "[class*='CJHX3e']",
       "[data-text-ad='1']",
@@ -179,7 +186,7 @@ if (isGoogleSearch) {
 
   function isAdvertText(text) {
     if (!text) { return false; }
-    if (/\b(sponsored|ads?|advertisement|shopping\s+ads?|廣告|ad results?)\b/.test(text)) {
+    if (/\b(sponsored|ads?|advertisement|advertised|promoted|shopping\s+ads?|廣告|廣告內容|贊助|贊助內容|促銷|ad results?)\b/.test(text)) {
       return true;
     }
     if (text.indexOf("ask and explore anything with the google app") >= 0) {
@@ -206,7 +213,38 @@ if (isGoogleSearch) {
   function isExactSponsoredBadgeText(text) {
     if (!text) { return false; }
     var t = normalizeText(text).trim();
-    return t === "sponsored" || t === "sponsored result" || t === "sponsored results" || t === "廣告" || t === "廣告結果" || t === "贊助";
+    return t === "sponsored" || t === "sponsored result" || t === "sponsored results" || t === "廣告" || t === "廣告結果" || t === "贊助" || t === "贊助內容" || t === "sponsored links" || t === "ad";
+  }
+
+  function findResultContainerFromNode(node, allowResultItemOnly) {
+    var p = node;
+    for (var i = 0; i < 25 && p; i++) {
+      if (!p || p === document || p === null) {
+        return null;
+      }
+      var role = (p.getAttribute && p.getAttribute("role")) || "";
+      var dataHveid = p.getAttribute && p.getAttribute("data-hveid");
+      var dataVid = p.getAttribute && p.getAttribute("data-vid");
+      var dataVed = p.getAttribute && p.getAttribute("data-ved");
+      var jsaction = p.getAttribute && p.getAttribute("jsaction");
+      var cls = (p.className && p.className.toString()) || "";
+      var tag = (p.tagName || "").toUpperCase();
+
+      if (dataHveid || dataVed || dataVid) {
+        return p;
+      }
+      if (role === "listitem" || tag === "LI") {
+        return p;
+      }
+      if (jsaction && /result|click/i.test(jsaction)) {
+        return p;
+      }
+      if (!allowResultItemOnly && /\b(rSO|MjjYud|xpd|g|kCrYT|result|search-results)\b/i.test(cls)) {
+        return p;
+      }
+      p = p.parentElement;
+    }
+    return node;
   }
 
   function findSponsoredContainer(node) {
@@ -311,11 +349,18 @@ if (isGoogleSearch) {
       }
       var t = getNodeText(n);
       if (isExactSponsoredBadgeText(t)) {
-        var adContainer = findSponsoredContainer(n);
+        var adContainer = findResultContainerFromNode(n, true) || findSponsoredContainer(n);
         if (adContainer) {
           adContainer.style.display = "none";
         }
         continue;
+      }
+      if (/\b(sponsored|廣告|贊助|贊助內容)\b/.test(t)) {
+        var badgeContainer = findResultContainerFromNode(n, true);
+        if (badgeContainer && badgeContainer !== n) {
+          badgeContainer.style.display = "none";
+          continue;
+        }
       }
       if (!isSponsoredLabelText(t, isShoppingPage)) { continue; }
       if (isSponsoredClass(n)) {
