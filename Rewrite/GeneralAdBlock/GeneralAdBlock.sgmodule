@@ -3,7 +3,7 @@
 #!system=ios
 
 [Script]
-Google = type=http-response, pattern=^https?:\/\/(www\.)?google\.[^\/]+\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/google-adblock.js?v=1.0.7
+Google = type=http-response, pattern=^https?:\/\/(www\.)?google\.[^\/]+\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/google-adblock.js?v=1.0.8
 Manhuashe = type=http-response, pattern=^https?:\/\/comicapi\.manhuashe\.com\/v\d\/.+?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/manhuashe-adblock.js?v=1.0.2
 
 [MITM]

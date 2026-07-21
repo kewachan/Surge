@@ -211,9 +211,24 @@ if (isGoogleSearch) {
     return false;
   }
 
+  function isSponsoredBadgeText(text) {
+    if (!text) {
+      return false;
+    }
+    return /^(sponsored|sponsored result|sponsored results|廣告|廣告結果|贊助|贊助內容|ad|ad result|ad results|shopping ads)$/.test(text);
+  }
+
   function isSponsoredClass(node) {
     var cls = (node.className && node.className.toString()) || "";
     return /\b(qGXjvb|vbIt3d|IuoSj|B2VR9|CJHX3e|M8OgIe|xpdopen|dWz1gf|Jbxz5|fPG77c|wyccme|Ww4FFb|ouy7Mc|qR29te)\b/i.test(cls);
+  }
+
+  function hideNode(node) {
+    if (!node || !node.style) {
+      return;
+    }
+    node.style.setProperty("display", "none", "important");
+    node.style.setProperty("opacity", "0", "important");
   }
 
   function isSponsoredLabelText(text, isShoppingPage) {
@@ -224,6 +239,62 @@ if (isGoogleSearch) {
     if (!text) { return false; }
     var t = normalizeText(text).trim();
     return t === "sponsored" || t === "sponsored result" || t === "sponsored results" || t === "廣告" || t === "廣告結果" || t === "贊助" || t === "贊助內容" || t === "sponsored links" || t === "ad";
+  }
+
+  function findResultContainerByText(node) {
+    var p = node;
+    for (var i = 0; i < 30 && p; i++) {
+      if (!p || p === document || p === document.documentElement || p === document.body) {
+        return null;
+      }
+      var id = p.id || "";
+      var role = (p.getAttribute && p.getAttribute("role")) || "";
+      var cls = (p.className && p.className.toString()) || "";
+      var dataIndex = p.getAttribute && p.getAttribute("data-result-index");
+      var dataHveid = p.getAttribute && p.getAttribute("data-hveid");
+      var dataVed = p.getAttribute && p.getAttribute("data-ved");
+      var dataTextAd = p.getAttribute && p.getAttribute("data-text-ad");
+      var dataAd = p.getAttribute && p.getAttribute("data-ad");
+      var dataEntity = p.getAttribute && p.getAttribute("data-entity");
+      var tag = (p.tagName || "").toUpperCase();
+      var jsname = p.getAttribute && p.getAttribute("jsname");
+      if (id === "tvcap" || id === "tads" || id === "tadsb") {
+        return p;
+      }
+      if (dataIndex || dataHveid || dataVed || dataTextAd === "1" || dataAd === "1" || dataEntity || jsname === "ix0Hvc" || jsname === "tY2w9d") {
+        return p;
+      }
+      if (role === "listitem" || role === "region" || role === "presentation") {
+        return p;
+      }
+      if (/\b(r|g|xpd|kCrYT|MjjYud|xpdopen|mnr-c|pla-result|sh-dgr|search|result|ads?|shopping-result|sh-dlr__content)\b/i.test(cls)) {
+        return p;
+      }
+      if (tag === "LI" || tag === "ARTICLE" || tag === "SECTION") {
+        return p;
+      }
+      p = p.parentElement;
+    }
+    return node;
+  }
+
+  function hideSponsoredTextBadges(root) {
+    var nodes = root.querySelectorAll("[aria-label],[data-text],[role='heading'],[role='listitem'],span,div,p,a,h1,h2,h3,h4,h5,li");
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var txt = getNodeText(n);
+      if (!isSponsoredBadgeText(txt)) {
+        continue;
+      }
+      if (n.closest && n.closest("[data-text-ad='1'], [data-ad='1'], #tvcap, #tads, #tadsb")) {
+        hideNode(n.closest("[data-text-ad='1'], [data-ad='1'], #tvcap, #tads, #tadsb"));
+        continue;
+      }
+      var container = findResultContainerByText(n);
+      if (container) {
+        hideNode(container);
+      }
+    }
   }
 
   function findResultContainerFromNode(node, allowResultItemOnly) {
@@ -424,6 +495,7 @@ if (isGoogleSearch) {
 
   function hideSponsoredNodes(root, isShoppingPage) {
     hideAdNodes(root, isShoppingPage);
+    hideSponsoredTextBadges(root);
     hideFromNodeText(root, isShoppingPage);
   }
 
