@@ -188,6 +188,9 @@ if (isGoogleSearch) {
     if (text.indexOf("shopping\u2011ads") >= 0 || text.indexOf("shopping ads") >= 0) {
       return true;
     }
+    if (/\bsponsored result(s)?\b/.test(text)) {
+      return true;
+    }
     return false;
   }
 
@@ -198,6 +201,41 @@ if (isGoogleSearch) {
 
   function isSponsoredLabelText(text, isShoppingPage) {
     return isAdvertText(text);
+  }
+
+  function isExactSponsoredBadgeText(text) {
+    if (!text) { return false; }
+    var t = normalizeText(text).trim();
+    return t === "sponsored" || t === "sponsored result" || t === "sponsored results" || t === "廣告" || t === "廣告結果" || t === "贊助";
+  }
+
+  function findSponsoredContainer(node) {
+    var p = node;
+    for (var i = 0; i < 30 && p; i++) {
+      if (!p || p === document || p === null) {
+        return null;
+      }
+      var dataResultIndex = p.getAttribute && p.getAttribute("data-result-index");
+      var dataAsync = (p.getAttribute && p.getAttribute("data-async-context")) || "";
+      var cls = (p.className && p.className.toString()) || "";
+      var role = (p.getAttribute && p.getAttribute("role")) || "";
+      if (dataResultIndex != null && dataResultIndex !== "") {
+        return p;
+      }
+      if (dataAsync && dataAsync.toLowerCase().indexOf("sponsored") >= 0) {
+        return p;
+      }
+      if (/\b(result-item|gws-\w+|MjjYud|xpd|kCrYT|g)\b/i.test(cls) || role === "listitem" || role === "presentation") {
+        if (cls || p.tagName === "LI") {
+          return p;
+        }
+      }
+      if (p.id && /\b(rso|center_col|search)\b/i.test(p.id) && (i >= 6)) {
+        return null;
+      }
+      p = p.parentElement;
+    }
+    return findGoogleAdContainer(node);
   }
 
   function findGoogleAdContainer(node) {
@@ -272,6 +310,13 @@ if (isGoogleSearch) {
         continue;
       }
       var t = getNodeText(n);
+      if (isExactSponsoredBadgeText(t)) {
+        var adContainer = findSponsoredContainer(n);
+        if (adContainer) {
+          adContainer.style.display = "none";
+        }
+        continue;
+      }
       if (!isSponsoredLabelText(t, isShoppingPage)) { continue; }
       if (isSponsoredClass(n)) {
         n.style.display = "none";
