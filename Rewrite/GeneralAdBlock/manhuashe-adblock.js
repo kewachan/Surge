@@ -4,9 +4,10 @@
  */
 
 let body = $response.body || "";
-const url = ($request.url || "").toLowerCase();
+const url = ($request.url || "");
+const urlLower = url.toLowerCase();
 
-if (!body || !/https?:\/\/comicapi\.manhuashe\.com\//.test(url)) {
+if (!body || !/https?:\/\/comicapi\.manhuashe\.com\//.test(urlLower)) {
   $done({ body });
   return;
 }
@@ -22,64 +23,10 @@ const normalize = (value) =>
     .trim()
     .toLowerCase();
 
-function isShortDramaNode(obj) {
-  if (!obj || typeof obj !== "object") {
-    return false;
-  }
-
-  const collect = [];
-  const keys = [
-    "title",
-    "name",
-    "route_url",
-    "route",
-    "routeUrl",
-    "routepath",
-    "url",
-    "tab",
-    "icon",
-    "section_name",
-    "module",
-    "module_type",
-    "type",
-    "label",
-    "ad_text",
-    "text",
-  ];
-
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] != null) {
-      collect.push(normalize(obj[key]));
-    }
-  }
-
-  const route = normalize(obj.route_url || obj.route || obj.routeUrl || obj.path || "");
-  const type = normalize(obj.type);
-  const text = collect.join(" ");
-  const combined = `${text} ${route} ${type}`;
-
-  if (/\bshort\b|\bdrama\b|\bwebtoon\b|\bshortvideo\b/.test(combined)) {
-    // Avoid over-blocking normal manga titles; require nav-like signals too.
-    const hasNavShape =
-      Object.prototype.hasOwnProperty.call(obj, "route_url") ||
-      Object.prototype.hasOwnProperty.call(obj, "route") ||
-      Object.prototype.hasOwnProperty.call(obj, "routeUrl") ||
-      Object.prototype.hasOwnProperty.call(obj, "icon") ||
-      Object.prototype.hasOwnProperty.call(obj, "title") ||
-      Object.prototype.hasOwnProperty.call(obj, "name");
-
-    if (hasNavShape) {
-      return true;
-    }
-  }
-
-  // Keep a strict fallback for explicit short-drama labels in Chinese.
-  if (/短劇|短剧/.test(text)) {
-    return true;
-  }
-
-  return false;
-}
+const containsShortDramaKeyword = (value) => {
+  const text = normalize(value);
+  return /\bshort\b|\bdrama\b|\bshortvideo\b|\bwebtoon\b|短剧|短片|短影片|短視頻/.test(text);
+};
 
 function isAdNode(obj) {
   if (!obj || typeof obj !== "object") {
@@ -88,93 +35,164 @@ function isAdNode(obj) {
 
   if (Object.prototype.hasOwnProperty.call(obj, "ad_id")) {
     const adId = Number(obj.ad_id);
-    return Number.isNaN(adId) ? !!obj.ad_id : adId > 0;
+    return Number.isNaN(adId) ? true : adId > 0;
   }
 
   return false;
 }
 
-function setWelfareTabbarOff(obj) {
+function isShortDramaNode(obj) {
   if (!obj || typeof obj !== "object") {
     return false;
   }
 
-  if (Array.isArray(obj)) {
-    let changed = false;
-    for (let i = obj.length - 1; i >= 0; i -= 1) {
-      const item = obj[i];
-      if (isAdNode(item) || isShortDramaNode(item)) {
-        obj.splice(i, 1);
+  const hasRouteLikeKey = ["route_url", "route", "routeUrl", "path", "url"].some(
+    (key) => Object.prototype.hasOwnProperty.call(obj, key)
+  );
+
+  const collect = [
+    obj.title,
+    obj.name,
+    obj.name_short,
+    obj.section_name,
+    obj.label,
+    obj.type,
+    obj.tab,
+    obj.icon,
+    obj.module,
+    obj.module_type,
+    obj.ad_text,
+    obj.text,
+    obj.route_url,
+    obj.route,
+    obj.routeUrl,
+    obj.path,
+    obj.url,
+  ]
+    .filter((v) => v != null)
+    .map(normalize)
+    .join(" ");
+
+  const route = normalize(obj.route_url || obj.route || obj.routeUrl || obj.path || obj.url || "");
+  return (
+    containsShortDramaKeyword(collect) ||
+    (containsShortDramaKeyword(route) && hasRouteLikeKey)
+  );
+}
+
+function cleanSections(response) {
+  if (!Array.isArray(response.sections)) {
+    return false;
+  }
+
+  let changed = false;
+  for (let i = response.sections.length - 1; i >= 0; i -= 1) {
+    const section = response.sections[i];
+    if (!section || typeof section !== "object") {
+      continue;
+    }
+
+    const child = section.comic_section || section.topic_section || section.rank_section || section.banner_section;
+    const sectionTitle = normalize(
+      (section.title || section.name || section.section_name || (child && (child.title || child.name)) || "")
+    );
+
+    if (
+      isAdNode(section) ||
+      isAdNode(child) ||
+      isShortDramaNode(section) ||
+      isShortDramaNode(child) ||
+      containsShortDramaKeyword(sectionTitle)
+    ) {
+      response.sections.splice(i, 1);
+      changed = true;
+      continue;
+    }
+
+    if (Array.isArray(section.items)) {
+      section.items = section.items.filter((item) => !isAdNode(item) && !isShortDramaNode(item));
+      if (section.items.length === 0 && Object.keys(section).every((k) => k === "section_id" || k === "type" || k === "items")) {
+        response.sections.splice(i, 1);
         changed = true;
-      } else if (setWelfareTabbarOff(item)) {
+      }
+    }
+
+    for (const key of ["comic_section", "topic_section", "rank_section"]) {
+      if (section[key]) {
+        const changedChild = cleanNested(section[key]);
+        changed = changed || changedChild;
+      }
+    }
+  }
+  return changed;
+}
+
+function cleanNested(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  let changed = false;
+
+  if (Array.isArray(value)) {
+    for (let i = value.length - 1; i >= 0; i -= 1) {
+      const item = value[i];
+      if (isAdNode(item) || isShortDramaNode(item)) {
+        value.splice(i, 1);
+        changed = true;
+      } else if (cleanNested(item)) {
         changed = true;
       }
     }
     return changed;
   }
 
-  if (obj.base && typeof obj.base === "object") {
-    if (obj.base.welfare_tabbar_show === 1 || obj.base.welfare_tabbar_show === "1") {
-      obj.base.welfare_tabbar_show = 0;
-      return true;
+  if (isAdNode(value) || isShortDramaNode(value)) {
+    return true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "base") && value.base && typeof value.base === "object") {
+    if (value.base.welfare_tabbar_show === 0 || value.base.welfare_tabbar_show === "0") {
+      value.base.welfare_tabbar_show = 1;
+      changed = true;
     }
   }
 
-  let changed = false;
-  for (const key of Object.keys(obj)) {
-    const value = obj[key];
-    if (isShortDramaNode(value) || isAdNode(value)) {
-      if (Array.isArray(obj) || typeof key === "string") {
-        obj[key] = null;
-        changed = true;
-      }
-      continue;
-    }
-
-    if (typeof value === "object" && setWelfareTabbarOff(value)) {
-      changed = true;
-    }
-
-    if (Array.isArray(value)) {
-      for (let i = value.length - 1; i >= 0; i -= 1) {
-        const item = value[i];
-        if (isShortDramaNode(item) || isAdNode(item)) {
-          value.splice(i, 1);
+  for (const key of Object.keys(value)) {
+    const child = value[key];
+    if (Array.isArray(child) || (child && typeof child === "object")) {
+      if (cleanNested(child)) {
+        if (Array.isArray(value) === false && (child && typeof child === "object") && isAdNode(child)) {
+          delete value[key];
+          changed = true;
+        } else {
           changed = true;
         }
       }
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(obj, "sections") && Array.isArray(obj.sections)) {
-    for (let i = obj.sections.length - 1; i >= 0; i -= 1) {
-      const sec = obj.sections[i];
+  return changed;
+}
 
-      if (isAdNode(sec)) {
-        obj.sections.splice(i, 1);
-        changed = true;
-        continue;
-      }
+function setWelfareTabbarOff(response) {
+  let changed = false;
 
-      if (isShortDramaNode(sec)) {
-        obj.sections.splice(i, 1);
-        changed = true;
-        continue;
-      }
+  if (!response || typeof response !== "object") {
+    return false;
+  }
 
-      if (isShortDramaNode(sec?.title) || isShortDramaNode(sec?.module) || isShortDramaNode(sec?.name)) {
-        obj.sections.splice(i, 1);
-        changed = true;
-        continue;
-      }
-
-      const csec = sec.comic_section || sec.topic_section || sec.rank_section;
-      if (csec && (isShortDramaNode(csec) || isAdNode(csec))) {
-        obj.sections.splice(i, 1);
-        changed = true;
-      }
+  if (response.base && typeof response.base === "object") {
+    if (response.base.welfare_tabbar_show === 0 || response.base.welfare_tabbar_show === "0") {
+      response.base.welfare_tabbar_show = 1;
+      changed = true;
     }
   }
+
+  if (Array.isArray(response.sections)) {
+    changed = cleanSections(response) || changed;
+  }
+  changed = cleanNested(response) || changed;
 
   return changed;
 }
@@ -200,7 +218,7 @@ if (isJsonText(body)) {
 }
 
 if (!changed) {
-  body = body.replace(/("welfare_tabbar_show"\s*:\s*)1/gi, '$10');
+  body = body.replace(/("welfare_tabbar_show"\s*:\s*)0/gi, '$11');
 }
 
 $done({ body });

@@ -55,6 +55,7 @@
 
 #Manhuashe
 ^https?:\/\/comicapi\.manhuashe\.com\/v\d\/ads - reject
+^https?:\/\/comicapi\.manhuashe\.com\/v\d\/public\/homenav - reject
 ^https?:\/\/comicapi\.manhuashe\.com\/v\d\/public\/topicbytype - reject
 ^https?:\/\/comicapi\.manhuashe\.com\/v\d\/comic\/chapterendrecommend - reject
 ^https?:\/\/comicapi\.manhuashe\.com\/v\d\/public\/startupactivity - reject
