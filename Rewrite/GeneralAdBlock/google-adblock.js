@@ -6,20 +6,20 @@
 
 let body = $response.body || "";
 const isGoogleSearch = /https?:\/\/(www\.)?google\.[^/]+\/search/i.test($request.url);
-const hiddenStyle = 'style="display:none!important"';
+const sponsoredStyle = 'style="visibility:hidden!important;pointer-events:none!important"';
 
-function addHiddenStyle(tag) {
-  if (/style=(['"])[^'"]*display\s*:\s*none/i.test(tag)) {
+function addSponsoredStyle(tag) {
+  if (/style=(['"])[^'"]*visibility\s*:\s*hidden/i.test(tag)) {
     return tag;
   }
 
   if (/style=(['"])/i.test(tag)) {
     return tag.replace(/style=(['"])([^'"]*)\1/i, function(_, quote, style) {
-      return "style=" + quote + "display:none!important;" + style + quote;
+      return "style=" + quote + "visibility:hidden!important;pointer-events:none!important;" + style + quote;
     });
   }
 
-  return tag.replace(/>$/, " " + hiddenStyle + ">");
+  return tag.replace(/>$/, " " + sponsoredStyle + ">");
 }
 
 function isSponsoredTag(tag) {
@@ -53,7 +53,7 @@ if (isGoogleSearch) {
   // Keep Google layout and pagination containers untouched.
   if (/Sponsored result|\bid=(['"])tads\1/i.test(body)) {
     body = body.replace(/<[a-z][^>]*>/gi, function(tag) {
-      return isSponsoredTag(tag) ? addHiddenStyle(tag) : tag;
+      return isSponsoredTag(tag) ? addSponsoredStyle(tag) : tag;
     });
   }
 }
