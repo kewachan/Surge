@@ -1,9 +1,9 @@
 #!name=General AdBlock
-#!desc=HAR-driven general advertising blocker
+#!desc=Unified module for website/app response scripts; each target uses a dedicated JS file
 #!system=ios
 
 [Script]
-Google Search Ads = type=http-response, pattern=^https:\/\/www\.google\.com\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/google-adblock.js?v=20260721h
+Google Search Sponsored Ads = type=http-response, pattern=^https:\/\/www\.google\.com\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/google-adblock.js?v=1.0.0
 
 [MITM]
 hostname = %APPEND% www.google.com

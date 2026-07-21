@@ -1,172 +1,167 @@
 /**
- * General AdBlock for Surge
- *
- * Response modifications that cannot be handled safely by rules or URL Rewrite.
+ * Google AdBlock for Surge
+ * 
+ * Response + DOM blocking for Google Search sponsored content.
  */
 
-const requestBody = $response.body || "";
+let body = $response.body || "";
 const isGoogleSearch = $request.url.includes("www.google.com/search");
+const url = $request.url;
+const likelyShoppingFromURL = /tbm=shop|\bshopping\b/.test(url) && !/shoppingapi|shopping\.google/.test(url);
+const detectShoppingFromURL = isGoogleSearch && !/\bsearchbyimage\b/.test(url) && likelyShoppingFromURL;
 
-const AD_TEXT_MARKER = "Ask and explore anything with the Google app";
-const AD_BLOCK_SELECTORS = [
-  "#tads",
-  "#tadsb",
-  '[role="region"][aria-label="Ads"]',
-  '[aria-label="Sponsored result"]',
-  '[aria-label="Ads"]',
-  '[aria-label="Sponsored"]',
-  '[class*="B2VR9"]',
-  '[class*="CJHX3e"]',
-  '[aria-label*="Google app"]',
-  "promo-throttler",
-  "[data-promo-id]",
-  "[data-promoid]",
-  '[jsname="eJoPub"]',
-  '[data-text="Ask and explore anything with the Google app"]',
-];
-
-const AD_REQUEST_PATTERNS = [
-  "ogads-pa.clients6.google.com",
-  "/$rpc/google.internal.onegoogle.asyncdata.v1.AsyncDataService/GetAsyncData",
-  "pagead/1p-conversion",
-  "googleadservices.com/pagead/conversion",
-  "adservice.google.com",
-  "pagead2.googlesyndication.com",
-  "doubleclick.net",
-  "googlesyndication.com",
-];
-
-const AD_STYLE_TEXT =
-  "#tads,#tadsb,[role='region'][aria-label='Ads'],[aria-label='Sponsored result'],[aria-label='Ads'],[aria-label='Sponsored'],a[href*='pagead'],img[src*='pagead'],img[src*='googlesyndication'],script[src*='adservice'],script[src*='pagead'],iframe[src*='pagead']{display:none!important};";
-
-function runGoogleResponsePatcher() {
-  var body = requestBody;
-
-  if (
-    body.indexOf("B2VR9") >= 0 ||
-    body.indexOf("CJHX3e") >= 0 ||
-    body.indexOf("sponsored result") >= 0 ||
-    body.indexOf(AD_TEXT_MARKER) >= 0
-  ) {
-    body = body
-      .replace(/class="[^"]*\bB2VR9\b[^"]*\bCJHX3e\b[^"]*"/g, function(m) {
-        if (m.indexOf("display:none") >= 0) {
-          return m;
-        }
-        return m + ' style="display:none!important"';
-      })
-      .replace(/class=\\"[^\\"]*\bB2VR9\b[^\\"]*\bCJHX3e\b[^\\"]*\\"/g, function(m) {
-        if (m.indexOf("display:none") >= 0) {
-          return m;
-        }
-        return m + ' style=\\"display:none!important\\"';
-      });
-  }
-
-  function injectScript() {
-  return `
+// Google Search & Shopping: hide ad blocks that cannot be blocked by simple rules.
+if (isGoogleSearch) {
+  const inject = `
 <script>
 (function() {
-  "use strict";
-  var AD_BLOCK_SELECTORS = ${JSON.stringify(AD_BLOCK_SELECTORS)};
-  var AD_REQUEST_PATTERNS = ${JSON.stringify(AD_REQUEST_PATTERNS)};
-  var AD_STYLE_TEXT = ${JSON.stringify(AD_STYLE_TEXT)};
-
-  function shouldBlockAdRequest(url) {
-    if (!url) {
-      return false;
+  function collectShopping() {
+    var href = (location && location.href) ? location.href.toLowerCase() : "";
+    if (href.indexOf("tbm=shop") >= 0) { return true; }
+    if (href.indexOf("/shopping") >= 0) { return true; }
+    var udm = href.match(/(?:\?|&)udm=([^&]+)/);
+    if (udm && udm[1] && udm[1] !== "0") {
+      return true;
     }
-    for (var i = 0; i < AD_REQUEST_PATTERNS.length; i++) {
-      if (url.indexOf(AD_REQUEST_PATTERNS[i]) >= 0) {
-        return true;
-      }
+    var tab = document.querySelector(".N54PNb, [role='tablist'] [role='tab'], .hdtb-mitem");
+    if (tab && tab.querySelector && tab.querySelector("a[aria-current='page'],a[aria-selected='true'], .YmvwI, [aria-label='Shopping']")) {
+      return true;
+    }
+    var shoppingHeading = document.querySelector("[jsname='xBNgKe'][class*='mXwfNd'], [aria-label='Shopping']");
+    if (shoppingHeading && shoppingHeading.textContent && shoppingHeading.textContent.toLowerCase().indexOf("shopping") >= 0) {
+      return true;
     }
     return false;
   }
 
-  function injectStyle() {
-    if (document.getElementById("__googleAdBlockerCSS")) {
+  var isShoppingPage = ${detectShoppingFromURL} || collectShopping();
+
+ function injectStyle() {
+    if (document.getElementById("__googleShoppingBlockerCSS")) {
       return;
     }
     var s = document.createElement("style");
-    s.id = "__googleAdBlockerCSS";
-    s.textContent = AD_STYLE_TEXT;
+    s.id = "__googleShoppingBlockerCSS";
+    s.textContent =
+      "#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],.xpdopen,.M8OgIe,.dWz1gf {display:none!important;}" +
+      "a[href*='pagead'],img[src*='pagead'],img[src*='googlesyndication'],script[src*='adservice'],script[src*='pagead'],iframe[src*='pagead']{display:none!important;}";
     if (document.head) {
       document.head.appendChild(s);
     }
   }
 
-  function hideBySelector(root, selector) {
-    var nodes = root.querySelectorAll(selector);
-    for (var i = 0; i < nodes.length; i++) {
-      nodes[i].style.display = "none";
+  function shouldBlockAdRequest(url) {
+    if (!url) { return false; }
+    return url.indexOf("ogads-pa.clients6.google.com") >= 0 ||
+           url.indexOf("/$rpc/google.internal.onegoogle.asyncdata.v1.AsyncDataService/GetAsyncData") >= 0 ||
+           url.indexOf("pagead/1p-conversion") >= 0 ||
+           url.indexOf("googleadservices.com/pagead/conversion") >= 0 ||
+           url.indexOf("adservice.google.com") >= 0 ||
+           url.indexOf("pagead2.googlesyndication.com") >= 0 ||
+           url.indexOf("doubleclick.net") >= 0 ||
+           url.indexOf("googlesyndication.com") >= 0;
+  }
+
+  function hideAdNodes(root, isShoppingPage) {
+    var selectors = [
+      "#tads",
+      "#tadsb",
+      ".qGXjvb",
+      ".vbIt3d",
+      ".IuoSj",
+      '[role="region"][aria-label="Ads"]',
+      '[role="region"][aria-label="Shopping ads"]',
+      '[aria-label="Sponsored result"]',
+      '[aria-label="Ads"]',
+      '[aria-label="Shopping ads"]',
+      '[aria-label="Sponsored"]',
+      "[data-entity='shopping-ads']",
+      "[data-entity='pla']",
+      "[data-entity='shopping-search-results']",
+      "[data-entity='shopping-result']",
+      ".sh-dgr__content",
+      ".sh-dlr__content",
+      ".sh-sf",
+      ".pla-result",
+      ".xpdopen"
+    ];
+    selectors.forEach(function(sel) {
+      root.querySelectorAll(sel).forEach(function(n){ n.style.display = "none"; });
+    });
+
+    if (isShoppingPage) {
+      root.querySelectorAll("script,link").forEach(function(n) {
+        var src = (n.getAttribute("src") || "").toLowerCase();
+        if (src && shouldBlockAdRequest(src)) {
+          n.parentElement && n.parentElement.removeChild(n);
+        }
+      });
     }
   }
 
-  function closest(node, predicate, maxDepth) {
-    var current = node;
-    var depth = 0;
-    while (current && depth++ <= maxDepth) {
-      if (predicate(current)) {
-        return current;
+  function normalizeText(v) {
+    return (v || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  function isSponsoredLabelText(text, isShoppingPage) {
+    if (!text) { return false; }
+    if (text === "sponsored result" || text === "sponsored" || text === "ad" || text === "ads") {
+      return true;
+    }
+    if (isShoppingPage && (text === "shopping ads" || text === "shopping ad" || text === "shopping sponsored result")) {
+      return true;
+    }
+    if (/\b(sponsored|ads?|advertisement|sponsored\s+results|shopping\s+ads|廣告)\b/.test(text)) {
+      return true;
+    }
+    return false;
+  }
+
+  function findGoogleAdContainer(node) {
+    var p = node;
+    for (var i = 0; i < 20 && p; i++) {
+      if (p === document || p === null) { return null; }
+      var id = p.id || "";
+      var role = (p.getAttribute && p.getAttribute("role")) || "";
+      var aria = (p.getAttribute && p.getAttribute("aria-label")) || "";
+      var cls = (p.className && p.className.toString()) || "";
+      var jsname = (p.getAttribute && p.getAttribute("jsname")) || "";
+      if (id === "tads" || id === "tadsb") {
+        return p;
       }
-      current = current.parentElement;
+      if (role === "region" && (aria === "Ads" || aria === "Shopping ads")) {
+        return p;
+      }
+      if (cls.indexOf("qGXjvb") >= 0 || cls.indexOf("vbIt3d") >= 0 || cls.indexOf("IuoSj") >= 0) {
+        return p;
+      }
+      if (jsname === "tY2w9d" || jsname === "ix0Hvc") {
+        return p;
+      }
+      p = p.parentElement;
     }
     return null;
   }
 
-  function hideGoogleInviteNodes(root) {
-    var nodes = root.querySelectorAll("span,div,li,a,p,h2,h3,section,article,button,promo-throttler,[data-promo-id],[data-promoid]");
-    for (var i = 0; i < nodes.length; i++) {
-      var n = nodes[i];
-      var text = (n.textContent || "").trim().toLowerCase();
-      var cls = (n.getAttribute && n.getAttribute("class")) || "";
-      var hasPromoAttr =
-        n.getAttribute &&
-        (
-          n.getAttribute("data-promo-id") ||
-          n.getAttribute("data-promoid") ||
-          n.getAttribute("jsname") === "SgxdIe" ||
-          n.getAttribute("jsname") === "eJoPub" ||
-          cls.indexOf("B2VR9") >= 0 ||
-          cls.indexOf("CJHX3e") >= 0
-        );
-      if (!hasPromoAttr && text.indexOf("ask and explore anything") < 0 && text.indexOf("ask and explore") < 0) {
-        continue;
+  function hideFromNodeText(root, isShoppingPage) {
+    var targets = root.querySelectorAll("span,div,h2,h3,[role='heading'],[aria-label='Sponsored']");
+    for (var i = 0; i < targets.length; i++) {
+      var n = targets[i];
+      var t = normalizeText(n.textContent || "");
+      if (!isSponsoredLabelText(t, isShoppingPage)) { continue; }
+      var p = findGoogleAdContainer(n);
+      if (!p) {
+        p = findGoogleAdContainer(n.parentElement);
       }
-      var wrapper = closest(n, function(node) {
-        return (
-          node.id === "rso" ||
-          (node.getAttribute && (node.getAttribute("role") === "region" || node.getAttribute("role") === "complementary"))
-        );
-      }, 10);
-      if (wrapper) {
-        wrapper.style.display = "none";
+      if (p) {
+        p.style.display = "none";
       }
     }
   }
 
-  function hideSponsoredNodes(root) {
-    for (var i = 0; i < AD_BLOCK_SELECTORS.length; i++) {
-      hideBySelector(root, AD_BLOCK_SELECTORS[i]);
-    }
-    var nodes = root.querySelectorAll("span,div,li,a");
-    for (var i = 0; i < nodes.length; i++) {
-      var n = nodes[i];
-      var cls = (n.getAttribute && n.getAttribute("class")) ? n.getAttribute("class") : "";
-      var text = (n.textContent || "").trim().toLowerCase();
-      var classMatch = cls.indexOf("B2VR9") >= 0 || cls.indexOf("CJHX3e") >= 0;
-      var textMatch = text === "sponsored result" || text === "sponsored" || text.indexOf("sponsored ") === 0;
-      if (!classMatch && !textMatch) {
-        continue;
-      }
-      var wrapper = closest(n, function(node) {
-        return node.id === "tads" || (node.getAttribute && node.getAttribute("role") === "region");
-      }, 8);
-      if (wrapper) {
-        wrapper.style.display = "none";
-      }
-    }
+  function hideSponsoredNodes(root, isShoppingPage) {
+    hideAdNodes(root, isShoppingPage);
+    hideFromNodeText(root, isShoppingPage);
   }
 
   function patchNetwork() {
@@ -178,13 +173,13 @@ function runGoogleResponsePatcher() {
     var oldFetch = window.fetch;
     if (typeof oldFetch === "function") {
       window.fetch = function(input, init) {
-        var requestUrl = "";
+        var url = "";
         if (typeof input === "string") {
-          requestUrl = input;
+          url = input;
         } else if (input && input.url) {
-          requestUrl = input.url;
+          url = input.url;
         }
-        if (shouldBlockAdRequest(requestUrl)) {
+        if (shouldBlockAdRequest(url)) {
           return Promise.resolve(new Response("", { status: 204, statusText: "Blocked by Surge script" }));
         }
         return oldFetch.call(this, input, init);
@@ -198,7 +193,7 @@ function runGoogleResponsePatcher() {
         this.__adTargetUrl = url || "";
         return oldOpen.apply(this, arguments);
       };
-      XMLHttpRequest.prototype.send = function(data) {
+      XMLHttpRequest.prototype.send = function(body) {
         if (shouldBlockAdRequest(this.__adTargetUrl)) {
           try {
             this.abort();
@@ -220,37 +215,24 @@ function runGoogleResponsePatcher() {
     }
   }
 
-  function refresh() {
-    hideSponsoredNodes(document);
-    hideGoogleInviteNodes(document);
-  }
-
-  function applyRules() {
+  function onReady() {
+    isShoppingPage = collectShopping() || isShoppingPage;
     injectStyle();
-    refresh();
+    hideSponsoredNodes(document, isShoppingPage);
     patchNetwork();
   }
 
-  applyRules();
-  var observer = new MutationObserver(function() {
-    refresh();
-  });
-  observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+  onReady();
+  var mo = new MutationObserver(function(){ hideSponsoredNodes(document, isShoppingPage); });
+  mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
 })();
 </script>`;
-  }
 
-  if (body.indexOf("</head>") >= 0) {
-    body = body.replace("</head>", injectScript() + "</head>");
-  } else if (body.indexOf("</body>") >= 0) {
-    body = body.replace("</body>", injectScript() + "</body>");
+  if (body.includes("</head>")) {
+    body = body.replace("</head>", inject + "</head>");
+  } else if (body.includes("</body>")) {
+    body = body.replace("</body>", inject + "</body>");
   }
-
-  $done({ body });
 }
 
-if (isGoogleSearch) {
-  runGoogleResponsePatcher();
-} else {
-  $done({ body: requestBody });
-}
+$done({ body });
