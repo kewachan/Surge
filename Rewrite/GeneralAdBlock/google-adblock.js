@@ -6,6 +6,7 @@
 
 let body = $response.body || "";
 const isGoogleSearch = /https?:\/\/(www\.)?google\.[^/]+\/search/i.test($request.url);
+const isPaginationResponse = /[?&](?:asearch=arc|async=arc_id(?::|%3A))/i.test($request.url);
 const sponsoredStyle = 'style="visibility:hidden!important;pointer-events:none!important"';
 
 function addSponsoredStyle(tag) {
@@ -27,7 +28,7 @@ function isSponsoredTag(tag) {
     /\bdata-text-ad=(['"])1\1/i.test(tag);
 }
 
-if (isGoogleSearch) {
+if (isGoogleSearch && !isPaginationResponse) {
   // Known working response replacement for the Google app promotion.
   if (body.includes("Ask and explore anything with the Google app")) {
     body = body
@@ -56,6 +57,8 @@ if (isGoogleSearch) {
       return isSponsoredTag(tag) ? addSponsoredStyle(tag) : tag;
     });
   }
+  $done({ body: body });
+} else {
+  // Preserve Google's ARC pagination protocol and response framing.
+  $done({});
 }
-
-$done({ body: body });
