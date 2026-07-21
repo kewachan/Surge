@@ -72,7 +72,7 @@ if (isGoogleSearch) {
     var s = document.createElement("style");
     s.id = "__googleShoppingBlockerCSS";
     s.textContent =
-      "#tvcap,#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,.B2VR9,.CJHX3e,.Jbxz5,.fPG77c,.wyccme,.Ww4FFb,.ouy7Mc,.qR29te,.QzEO9c,.CqmPRe,.XDZKBc,.jnyxRd.TpRPV,[jsname='ix0Hvc'],[jsname='tY2w9d'],[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,.pla-result-ads,.xpdopen,.M8OgIe,.dWz1gf,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],[data-text-ad='1'],[data-text-ad],[data-ad='1'],[data-hveid][data-text-ad],[aria-label='Ask and explore anything with the Google app'] {display:none!important;}" +
+      "#tvcap,#tads,#tadsb,[class*='B2VR9'],[class*='CJHX3e'],.qGXjvb,.vbIt3d,.IuoSj,.Jbxz5,.fPG77c,.wyccme,.Ww4FFb,.ouy7Mc,.qR29te,.QzEO9c,.CqmPRe,.XDZKBc,.jnyxRd,.VuuXrf,.Q2MMlc,.mnr-c,.eD6k6,.XH5mde,.A3fA7c,.nVWcKf,.sh-dgr__content,.sh-dlr__content,.pla-result,.pla-result-ads,.sh-sf,.M8OgIe,.dWz1gf,.xpdopen,[jsname='ix0Hvc'],[jsname='tY2w9d'],[aria-label='Ask and explore anything with the Google app'] {display:none!important;}" +
       "a[href*='pagead'],img[src*='pagead'],img[src*='googlesyndication'],script[src*='adservice'],script[src*='pagead'],iframe[src*='pagead']{display:none!important;}";
     if (document.head) {
       document.head.appendChild(s);
@@ -95,29 +95,20 @@ if (isGoogleSearch) {
     var selectors = [
       "#tads",
       "#tadsb",
+      "#tvcap",
       ".qGXjvb",
       ".vbIt3d",
       ".IuoSj",
       ".B2VR9",
       ".CJHX3e",
-      '[role="region"][aria-label="Ads"]',
-      '[role="region"][aria-label="Shopping ads"]',
-      '[aria-label="Sponsored result"]',
-      '[aria-label="Ads"]',
-      '[aria-label="Shopping ads"]',
-      '[aria-label="Sponsored"]',
-      "[data-entity='shopping-ads']",
-      "[data-entity='pla']",
-      "[data-entity='shopping-search-results']",
-      "[data-entity='shopping-result']",
-      ".sh-dgr__content",
-      ".sh-dlr__content",
-      ".sh-sf",
-      ".pla-result",
-      ".pla-result-ads",
       ".Jbxz5",
-      ".M8OgIe",
-      ".dWz1gf",
+      ".fPG77c",
+      ".wyccme",
+      ".Ww4FFb",
+      ".ouy7Mc",
+      ".qR29te",
+      ".QzEO9c",
+      ".CqmPRe",
       ".XDZKBc",
       ".jnyxRd.TpRPV",
       ".VuuXrf",
@@ -127,23 +118,21 @@ if (isGoogleSearch) {
       ".XH5mde",
       ".A3fA7c",
       ".nVWcKf",
-      ".fPG77c",
-      ".wyccme",
-      ".Ww4FFb",
-      ".QzEO9c",
-      ".CqmPRe",
-      ".ouy7Mc",
-      ".qR29te",
-      "#tvcap",
+      ".sh-dgr__content",
+      ".sh-dlr__content",
+      ".sh-sf",
+      ".pla-result",
+      ".pla-result-ads",
+      ".M8OgIe",
+      ".dWz1gf",
       ".xpdopen",
       "[jsname='ix0Hvc']",
       "[jsname='tY2w9d']",
       "[class*='B2VR9']",
       "[class*='CJHX3e']",
-      "[data-text-ad='1']",
-      "[data-text-ad]",
-      "[data-ad='1']",
-      "[data-hveid][data-text-ad]"
+      "[class*='qGXjvb']",
+      "[class*='vbIt3d']",
+      "[class*='IuoSj']"
     ];
     selectors.forEach(function(sel) {
       root.querySelectorAll(sel).forEach(function(n){ n.style.display = "none"; });
@@ -495,8 +484,6 @@ if (isGoogleSearch) {
 
   function hideSponsoredNodes(root, isShoppingPage) {
     hideAdNodes(root, isShoppingPage);
-    hideSponsoredTextBadges(root);
-    hideFromNodeText(root, isShoppingPage);
   }
 
   function patchNetwork() {
