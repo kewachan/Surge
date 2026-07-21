@@ -72,7 +72,7 @@ if (isGoogleSearch) {
     var s = document.createElement("style");
     s.id = "__googleShoppingBlockerCSS";
     s.textContent =
-      "#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,.B2VR9,.CJHX3e,.Jbxz5,.fPG77c,.wyccme,.Ww4FFb,.ouy7Mc,.qR29te,[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,.pla-result-ads,.xpdopen,.M8OgIe,.dWz1gf,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],[data-text-ad='1'],[data-text-ad],[data-ad='1'],[data-hveid][data-text-ad],[aria-label='Ask and explore anything with the Google app'] {display:none!important;}" +
+      "#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,.B2VR9,.CJHX3e,.Jbxz5,.fPG77c,.wyccme,.Ww4FFb,.ouy7Mc,.qR29te,.QzEO9c,.CqmPRe,[jsname='ix0Hvc'],[jsname='tY2w9d'],[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,.pla-result-ads,.xpdopen,.M8OgIe,.dWz1gf,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],[data-text-ad='1'],[data-text-ad],[data-ad='1'],[data-hveid][data-text-ad],[aria-label='Ask and explore anything with the Google app'] {display:none!important;}" +
       "a[href*='pagead'],img[src*='pagead'],img[src*='googlesyndication'],script[src*='adservice'],script[src*='pagead'],iframe[src*='pagead']{display:none!important;}";
     if (document.head) {
       document.head.appendChild(s);
@@ -128,9 +128,13 @@ if (isGoogleSearch) {
       ".fPG77c",
       ".wyccme",
       ".Ww4FFb",
+      ".QzEO9c",
+      ".CqmPRe",
       ".ouy7Mc",
       ".qR29te",
       ".xpdopen",
+      "[jsname='ix0Hvc']",
+      "[jsname='tY2w9d']",
       "[class*='B2VR9']",
       "[class*='CJHX3e']",
       "[data-text-ad='1']",
@@ -187,6 +191,9 @@ if (isGoogleSearch) {
   function isAdvertText(text) {
     if (!text) { return false; }
     if (/\b(sponsored|ads?|advertisement|advertised|promoted|shopping\s+ads?|廣告|廣告內容|贊助|贊助內容|促銷|ad results?)\b/.test(text)) {
+      return true;
+    }
+    if (/\b(sponsored\s+results?|show\s+sponsored\s+result|hide\s+sponsored\s+result)\b/.test(text)) {
       return true;
     }
     if (text.indexOf("ask and explore anything with the google app") >= 0) {
@@ -318,6 +325,15 @@ if (isGoogleSearch) {
       if (jsname === "tY2w9d" || jsname === "ix0Hvc") {
         return p;
       }
+      if (/\b(qGXjvb|vbIt3d|IuoSj|B2VR9|CJHX3e|QzEO9c|CqmPRe|xpdopen|dWz1gf|M8OgIe|Jbxz5|fPG77c|wyccme|Ww4FFb|ouy7Mc|qR29te)\b/i.test(cls)) {
+        return p;
+      }
+      if (p.getAttribute && p.getAttribute("data-result-index")) {
+        return p;
+      }
+      if (dataTextAd && dataHveid) {
+        return p;
+      }
 
       if ((p.id && p.id.length > 4) && /^tadsb?$/i.test(p.id)) {
         return p;
@@ -378,7 +394,11 @@ if (isGoogleSearch) {
               fallbackRoot = maybeContainer;
               break;
             }
-            if ((maybeContainer.getAttribute && (maybeContainer.getAttribute("data-text-ad") === "1" || maybeContainer.getAttribute("data-ad") === "1" || maybeContainer.getAttribute("role") === "region" || maybeContainer.id === "tads" || maybeContainer.id === "tadsb")) {
+            if (maybeContainer.getAttribute && (maybeContainer.getAttribute("data-result-index") || maybeContainer.getAttribute("data-text-ad") === "1" || maybeContainer.getAttribute("data-ad") === "1" || maybeContainer.getAttribute("role") === "region" || maybeContainer.id === "tads" || maybeContainer.id === "tadsb")) {
+              fallbackRoot = maybeContainer;
+              break;
+            }
+            if (maybeContainer.getAttribute && maybeContainer.getAttribute("data-hveid") && maybeContainer.tagName === "DIV") {
               fallbackRoot = maybeContainer;
               break;
             }
