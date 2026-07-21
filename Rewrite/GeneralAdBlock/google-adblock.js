@@ -43,7 +43,7 @@ if (isGoogleSearch) {
     var s = document.createElement("style");
     s.id = "__googleShoppingBlockerCSS";
     s.textContent =
-      "#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,.B2VR9,.CJHX3e,[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],.xpdopen,.M8OgIe,.dWz1gf {display:none!important;}" +
+      "#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,.B2VR9,.CJHX3e,[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],.xpdopen,.M8OgIe,.dWz1gf,[data-text-ad='1'],[data-text-ad],[data-ad='1'],[data-hveid][data-text-ad],[aria-label='Ask and explore anything with the Google app'] {display:none!important;}" +
       "a[href*='pagead'],img[src*='pagead'],img[src*='googlesyndication'],script[src*='adservice'],script[src*='pagead'],iframe[src*='pagead']{display:none!important;}";
     if (document.head) {
       document.head.appendChild(s);
@@ -87,7 +87,11 @@ if (isGoogleSearch) {
       ".pla-result",
       ".xpdopen",
       "[class*='B2VR9']",
-      "[class*='CJHX3e']"
+      "[class*='CJHX3e']",
+      "[data-text-ad='1']",
+      "[data-text-ad]",
+      "[data-ad='1']",
+      "[data-hveid][data-text-ad]"
     ];
     selectors.forEach(function(sel) {
       root.querySelectorAll(sel).forEach(function(n){ n.style.display = "none"; });
@@ -113,11 +117,23 @@ if (isGoogleSearch) {
     if (node.getAttribute) {
       var aria = node.getAttribute("aria-label");
       var dataText = node.getAttribute("data-text");
+      var dataTextAd = node.getAttribute("data-text-ad");
+      var dataHveid = node.getAttribute("data-hveid");
+      var dataAd = node.getAttribute("data-ad");
       if (aria) {
         text += " " + aria;
       }
       if (dataText) {
         text += " " + dataText;
+      }
+      if (dataTextAd) {
+        text += " " + dataTextAd;
+      }
+      if (dataHveid) {
+        text += " " + dataHveid;
+      }
+      if (dataAd) {
+        text += " " + dataAd;
       }
     }
     return normalizeText(text);
@@ -147,7 +163,7 @@ if (isGoogleSearch) {
 
   function findGoogleAdContainer(node) {
     var p = node;
-    for (var i = 0; i < 20 && p; i++) {
+    for (var i = 0; i < 30 && p; i++) {
       if (p === document || p === null) { return null; }
       var id = p.id || "";
       var role = (p.getAttribute && p.getAttribute("role")) || "";
@@ -156,6 +172,9 @@ if (isGoogleSearch) {
       var cls = (p.className && p.className.toString()) || "";
       var jsname = (p.getAttribute && p.getAttribute("jsname")) || "";
       var dataText = (p.getAttribute && p.getAttribute("data-text")) || "";
+      var dataTextAd = (p.getAttribute && p.getAttribute("data-text-ad")) || "";
+      var dataHveid = (p.getAttribute && p.getAttribute("data-hveid")) || "";
+      var dataAd = (p.getAttribute && p.getAttribute("data-ad")) || "";
       var dataEntity = (p.getAttribute && p.getAttribute("data-entity")) || "";
       if (id === "tads" || id === "tadsb") {
         return p;
@@ -164,6 +183,9 @@ if (isGoogleSearch) {
         return p;
       }
       if (isSponsoredClass(p)) {
+        return p;
+      }
+      if (dataTextAd === "1" || dataAd === "1") {
         return p;
       }
       if (dataEntity === "shopping-ads" || dataEntity === "pla" || dataEntity === "shopping-search-results" || dataEntity === "shopping-result") {
@@ -175,6 +197,9 @@ if (isGoogleSearch) {
       if (dataText && dataText.toLowerCase().indexOf("sponsored") >= 0) {
         return p;
       }
+      if (dataTextAd && dataHveid) {
+        return p;
+      }
       if (jsname === "tY2w9d" || jsname === "ix0Hvc") {
         return p;
       }
@@ -184,9 +209,14 @@ if (isGoogleSearch) {
   }
 
   function hideFromNodeText(root, isShoppingPage) {
-    var targets = root.querySelectorAll("span,div,p,a,h1,h2,h3,h4,h5,li,button,[role='heading'],[role='listitem'],[aria-label],[data-text]");
+    var targets = root.querySelectorAll("span,div,p,a,h1,h2,h3,h4,h5,li,button,[role='heading'],[role='listitem'],[aria-label],[data-text],[data-text-ad],[data-ad],[data-hveid]");
     for (var i = 0; i < targets.length; i++) {
       var n = targets[i];
+      if (n.getAttribute && n.getAttribute("data-text-ad") === "1") {
+        var direct = findGoogleAdContainer(n) || n;
+        direct.style.display = "none";
+        continue;
+      }
       var t = getNodeText(n);
       if (!isSponsoredLabelText(t, isShoppingPage)) { continue; }
       if (isSponsoredClass(n)) {
