@@ -8,6 +8,7 @@ const url = $request.url || "";
 
 const isAdEndpoint =
   /manhuashe\.com\/v\d\/(?:ads|topicbytype|chapterendrecommend|homenav|startupactivity)/i.test(url);
+const isAppConfigEndpoint = /manhuashe\.com\/v\d\/public\/appConfig/i.test(url);
 
 const adKeyReg = /(?:^|[._-])(ad|ads|banner|splash|startup|startupactivity|homenav|topicbytype|recommend|interstitial)(?:[A-Za-z0-9_]{0,40})?(?:[._-].*)?$/i;
 
@@ -66,7 +67,7 @@ function stripAdNodesForHtml(text) {
   return text.replace("</head>", `${css}${script}</head>`);
 }
 
-if (!isAdEndpoint) {
+if (!isAdEndpoint && !isAppConfigEndpoint) {
   $done({ body });
 }
 
@@ -74,6 +75,12 @@ const t = body.trim();
 if (t.startsWith("{") || t.startsWith("[")) {
   try {
     const obj = JSON.parse(body);
+    if (isAppConfigEndpoint && obj && typeof obj === "object" && obj.response && typeof obj.response === "object") {
+      obj.response.base = obj.response.base || {};
+      obj.response.base.welfare_tabbar_show = 0;
+      body = JSON.stringify(obj);
+      $done({ body });
+    }
     const cleaned = scrubJsonValue(obj);
     if (cleaned !== undefined) {
       body = JSON.stringify(cleaned);
