@@ -12,6 +12,35 @@ const detectShoppingFromURL = isGoogleSearch && !/\bsearchbyimage\b/.test(url) &
 
 // Google Search & Shopping: hide ad blocks that cannot be blocked by simple rules.
 if (isGoogleSearch) {
+
+  if (body.includes("Ask and explore anything with the Google app")) {
+    body = body
+      .replaceAll(
+        'class=\\"B2VR9 CJHX3e\\"',
+        'class=\\"B2VR9 CJHX3e\\" style=\\"display:none!important\\"'
+      )
+      .replaceAll(
+        'class="B2VR9 CJHX3e"',
+        'class="B2VR9 CJHX3e" style="display:none!important"'
+      )
+      .replaceAll(
+        'class=\\"CJHX3e B2VR9\\"',
+        'class=\\"CJHX3e B2VR9\\" style=\\"display:none!important\\"'
+      )
+      .replaceAll(
+        'class="CJHX3e B2VR9"',
+        'class="CJHX3e B2VR9" style="display:none!important"'
+      )
+      .replaceAll(
+        'class=\\"B2VR9\\"',
+        'class=\\"B2VR9\\" style=\\"display:none!important\\"'
+      )
+      .replaceAll(
+        'class="B2VR9"',
+        'class="B2VR9" style="display:none!important"'
+      );
+  }
+
   const inject = `
 <script>
 (function() {
