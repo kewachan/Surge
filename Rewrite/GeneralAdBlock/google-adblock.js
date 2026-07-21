@@ -43,7 +43,7 @@ if (isGoogleSearch) {
     var s = document.createElement("style");
     s.id = "__googleShoppingBlockerCSS";
     s.textContent =
-      "#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,.B2VR9,.CJHX3e,[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],.xpdopen,.M8OgIe,.dWz1gf,[data-text-ad='1'],[data-text-ad],[data-ad='1'],[data-hveid][data-text-ad],[aria-label='Ask and explore anything with the Google app'] {display:none!important;}" +
+      "#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,.B2VR9,.CJHX3e,.Jbxz5,.fPG77c,.wyccme,.Ww4FFb,.ouy7Mc,.qR29te,[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,.pla-result-ads,.xpdopen,.M8OgIe,.dWz1gf,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],[data-text-ad='1'],[data-text-ad],[data-ad='1'],[data-hveid][data-text-ad],[aria-label='Ask and explore anything with the Google app'] {display:none!important;}" +
       "a[href*='pagead'],img[src*='pagead'],img[src*='googlesyndication'],script[src*='adservice'],script[src*='pagead'],iframe[src*='pagead']{display:none!important;}";
     if (document.head) {
       document.head.appendChild(s);
@@ -85,7 +85,16 @@ if (isGoogleSearch) {
       ".sh-dlr__content",
       ".sh-sf",
       ".pla-result",
+      ".pla-result-ads",
+      ".Jbxz5",
+      ".fPG77c",
+      ".wyccme",
+      ".Ww4FFb",
+      ".ouy7Mc",
+      ".qR29te",
       ".xpdopen",
+      ".M8OgIe",
+      ".dWz1gf",
       "[class*='B2VR9']",
       "[class*='CJHX3e']",
       "[data-text-ad='1']",
@@ -139,26 +148,27 @@ if (isGoogleSearch) {
     return normalizeText(text);
   }
 
-  function isSponsoredClass(node) {
-    var cls = (node.className && node.className.toString()) || "";
-    return /\b(qGXjvb|vbIt3d|IuoSj|B2VR9|CJHX3e|M8OgIe|xpdopen|dWz1gf)\b/.test(cls);
-  }
-
-  function isSponsoredLabelText(text, isShoppingPage) {
+  function isAdvertText(text) {
     if (!text) { return false; }
-    if (text === "sponsored result" || text === "sponsored" || text === "ad" || text === "ads") {
-      return true;
-    }
-    if (isShoppingPage && (text === "shopping ads" || text === "shopping ad" || text === "shopping sponsored result")) {
-      return true;
-    }
-    if (/\b(sponsored|ads?|advertisement|sponsored\s+results|shopping\s+ads|shopping\s+ad|廣告)\b/.test(text)) {
+    if (/\b(sponsored|ads?|advertisement|shopping\s+ads?|廣告|ad results?)\b/.test(text)) {
       return true;
     }
     if (text.indexOf("ask and explore anything with the google app") >= 0) {
       return true;
     }
+    if (text.indexOf("shopping\u2011ads") >= 0 || text.indexOf("shopping ads") >= 0) {
+      return true;
+    }
     return false;
+  }
+
+  function isSponsoredClass(node) {
+    var cls = (node.className && node.className.toString()) || "";
+    return /\b(qGXjvb|vbIt3d|IuoSj|B2VR9|CJHX3e|M8OgIe|xpdopen|dWz1gf|Jbxz5|fPG77c|wyccme|Ww4FFb|ouy7Mc|qR29te)\b/i.test(cls);
+  }
+
+  function isSponsoredLabelText(text, isShoppingPage) {
+    return isAdvertText(text);
   }
 
   function findGoogleAdContainer(node) {
@@ -203,8 +213,23 @@ if (isGoogleSearch) {
       if (jsname === "tY2w9d" || jsname === "ix0Hvc") {
         return p;
       }
+
+      if ((p.id && p.id.length > 4) && /^tadsb?$/i.test(p.id)) {
+        return p;
+      }
+
       p = p.parentElement;
     }
+
+    var fallback = node;
+    for (var j = 0; j < 15 && fallback; j++) {
+      var cls = (fallback.className && fallback.className.toString()) || "";
+      if (cls && /\b(sponsored|ad|shopping|promo|promo-item|result)\b/i.test(cls)) {
+        return fallback;
+      }
+      fallback = fallback.parentElement;
+    }
+
     return null;
   }
 
@@ -223,6 +248,28 @@ if (isGoogleSearch) {
         n.style.display = "none";
         continue;
       }
+
+      if (isAdvertText(t)) {
+        var fallbackRoot = findGoogleAdContainer(n);
+        if (!fallbackRoot) {
+          fallbackRoot = n;
+          for (var j = 0; j < 8 && fallbackRoot && fallbackRoot.parentElement; j++) {
+            var maybeContainer = fallbackRoot.parentElement;
+            if (maybeContainer && (isSponsoredClass(maybeContainer) || /\b(B2VR9|CJHX3e|qGXjvb|pla-result|sh-dg|xpdopen|dWz1gf|Ww4FFb|ouy7Mc|qR29te|fPG77c|wyccme|Jbxz5)\b/i.test((maybeContainer.className && maybeContainer.className.toString()) || ""))) {
+              fallbackRoot = maybeContainer;
+              break;
+            }
+            if ((maybeContainer.getAttribute && (maybeContainer.getAttribute("data-text-ad") === "1" || maybeContainer.getAttribute("data-ad") === "1" || maybeContainer.getAttribute("role") === "region" || maybeContainer.id === "tads" || maybeContainer.id === "tadsb")) {
+              fallbackRoot = maybeContainer;
+              break;
+            }
+            fallbackRoot = maybeContainer;
+          }
+        }
+        fallbackRoot.style.display = "none";
+        continue;
+      }
+
       var p = findGoogleAdContainer(n);
       if (!p) {
         p = findGoogleAdContainer(n.parentElement);
