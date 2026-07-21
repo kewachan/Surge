@@ -43,7 +43,7 @@ if (isGoogleSearch) {
     var s = document.createElement("style");
     s.id = "__googleShoppingBlockerCSS";
     s.textContent =
-      "#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],.xpdopen,.M8OgIe,.dWz1gf {display:none!important;}" +
+      "#tads,#tadsb,.qGXjvb,.vbIt3d,.IuoSj,.B2VR9,.CJHX3e,[role='region'][aria-label='Ads'],[role='region'][aria-label='Shopping ads'],[aria-label='Sponsored'],[aria-label='Sponsored result'],[aria-label='Ads'],.sh-dgr__content,.sh-dlr__content,.pla-result,[data-entity='shopping-ads'],[data-entity='pla'],[data-entity='shopping-search-results'],[data-entity='shopping-result'],.xpdopen,.M8OgIe,.dWz1gf {display:none!important;}" +
       "a[href*='pagead'],img[src*='pagead'],img[src*='googlesyndication'],script[src*='adservice'],script[src*='pagead'],iframe[src*='pagead']{display:none!important;}";
     if (document.head) {
       document.head.appendChild(s);
@@ -69,6 +69,8 @@ if (isGoogleSearch) {
       ".qGXjvb",
       ".vbIt3d",
       ".IuoSj",
+      ".B2VR9",
+      ".CJHX3e",
       '[role="region"][aria-label="Ads"]',
       '[role="region"][aria-label="Shopping ads"]',
       '[aria-label="Sponsored result"]',
@@ -83,7 +85,9 @@ if (isGoogleSearch) {
       ".sh-dlr__content",
       ".sh-sf",
       ".pla-result",
-      ".xpdopen"
+      ".xpdopen",
+      "[class*='B2VR9']",
+      "[class*='CJHX3e']"
     ];
     selectors.forEach(function(sel) {
       root.querySelectorAll(sel).forEach(function(n){ n.style.display = "none"; });
@@ -103,6 +107,27 @@ if (isGoogleSearch) {
     return (v || "").replace(/\s+/g, " ").trim().toLowerCase();
   }
 
+  function getNodeText(node) {
+    if (!node) { return ""; }
+    var text = node.textContent || "";
+    if (node.getAttribute) {
+      var aria = node.getAttribute("aria-label");
+      var dataText = node.getAttribute("data-text");
+      if (aria) {
+        text += " " + aria;
+      }
+      if (dataText) {
+        text += " " + dataText;
+      }
+    }
+    return normalizeText(text);
+  }
+
+  function isSponsoredClass(node) {
+    var cls = (node.className && node.className.toString()) || "";
+    return /\b(qGXjvb|vbIt3d|IuoSj|B2VR9|CJHX3e|M8OgIe|xpdopen|dWz1gf)\b/.test(cls);
+  }
+
   function isSponsoredLabelText(text, isShoppingPage) {
     if (!text) { return false; }
     if (text === "sponsored result" || text === "sponsored" || text === "ad" || text === "ads") {
@@ -111,7 +136,10 @@ if (isGoogleSearch) {
     if (isShoppingPage && (text === "shopping ads" || text === "shopping ad" || text === "shopping sponsored result")) {
       return true;
     }
-    if (/\b(sponsored|ads?|advertisement|sponsored\s+results|shopping\s+ads|廣告)\b/.test(text)) {
+    if (/\b(sponsored|ads?|advertisement|sponsored\s+results|shopping\s+ads|shopping\s+ad|廣告)\b/.test(text)) {
+      return true;
+    }
+    if (text.indexOf("ask and explore anything with the google app") >= 0) {
       return true;
     }
     return false;
@@ -124,15 +152,27 @@ if (isGoogleSearch) {
       var id = p.id || "";
       var role = (p.getAttribute && p.getAttribute("role")) || "";
       var aria = (p.getAttribute && p.getAttribute("aria-label")) || "";
+      var ariaLower = aria.toLowerCase();
       var cls = (p.className && p.className.toString()) || "";
       var jsname = (p.getAttribute && p.getAttribute("jsname")) || "";
+      var dataText = (p.getAttribute && p.getAttribute("data-text")) || "";
+      var dataEntity = (p.getAttribute && p.getAttribute("data-entity")) || "";
       if (id === "tads" || id === "tadsb") {
         return p;
       }
       if (role === "region" && (aria === "Ads" || aria === "Shopping ads")) {
         return p;
       }
-      if (cls.indexOf("qGXjvb") >= 0 || cls.indexOf("vbIt3d") >= 0 || cls.indexOf("IuoSj") >= 0) {
+      if (isSponsoredClass(p)) {
+        return p;
+      }
+      if (dataEntity === "shopping-ads" || dataEntity === "pla" || dataEntity === "shopping-search-results" || dataEntity === "shopping-result") {
+        return p;
+      }
+      if (ariaLower === "sponsored" || ariaLower === "sponsored result" || ariaLower === "shopping ads" || ariaLower === "ads") {
+        return p;
+      }
+      if (dataText && dataText.toLowerCase().indexOf("sponsored") >= 0) {
         return p;
       }
       if (jsname === "tY2w9d" || jsname === "ix0Hvc") {
@@ -144,11 +184,15 @@ if (isGoogleSearch) {
   }
 
   function hideFromNodeText(root, isShoppingPage) {
-    var targets = root.querySelectorAll("span,div,h2,h3,[role='heading'],[aria-label='Sponsored']");
+    var targets = root.querySelectorAll("span,div,p,a,h1,h2,h3,h4,h5,li,button,[role='heading'],[role='listitem'],[aria-label],[data-text]");
     for (var i = 0; i < targets.length; i++) {
       var n = targets[i];
-      var t = normalizeText(n.textContent || "");
+      var t = getNodeText(n);
       if (!isSponsoredLabelText(t, isShoppingPage)) { continue; }
+      if (isSponsoredClass(n)) {
+        n.style.display = "none";
+        continue;
+      }
       var p = findGoogleAdContainer(n);
       if (!p) {
         p = findGoogleAdContainer(n.parentElement);
