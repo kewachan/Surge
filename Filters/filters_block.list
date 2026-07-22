@@ -152,6 +152,9 @@ DOMAIN-SUFFIX, pglstatp-toutiao.com
 DOMAIN-SUFFIX, ads.facebook.com
 DOMAIN-SUFFIX, an.facebook.com
 DOMAIN-SUFFIX, analytics.facebook.com
+DOMAIN-SUFFIX, fbthirdpartypixel.com
+DOMAIN-SUFFIX, fbthirdpartypixel.net
+DOMAIN-SUFFIX, fbthirdpartypixel.org
 DOMAIN-SUFFIX, pixel.facebook.com
 
 # Telegram Clients
