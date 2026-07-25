@@ -1,7 +1,7 @@
 /**
  * LIHKG AdBlock for Surge
  *
- * Removes topic and in-thread ad definitions before the app creates ad cells.
+ * Explicitly disables every configured ad placement before ad cells are created.
  */
 
 try {
@@ -12,34 +12,66 @@ try {
     response.response.config.ios &&
     response.response.config.ios.ad_config;
 
-  if (!adConfig || !adConfig.delivery) {
+  if (!adConfig) {
     $done({});
   } else {
-    // Group 1 contains the active 300x250 MREC slot; group 3 contains
-    // alternate post-content placements.
-    adConfig.delivery["1"] = {};
-    adConfig.delivery["3"] = {};
-
-    if (adConfig.creatives) {
-      [
+    const placements = {
+      "0": [
+        "applovin_bottom_banner",
+        "applovin_bottom_banner_native",
+        "gad_bottom_banner"
+      ],
+      "1": [
         "applovin_topiclist_banner",
         "applovin_topiclist_mrec",
         "applovin_topiclist_native",
+        "direct_banner_topic",
+        "direct_native_topic",
+        "gad_topic_banner"
+      ],
+      "2": [
+        "direct_fullpage",
+        "gad_fullpage_post_back"
+      ],
+      "3": [
         "applovin_post_content",
         "applovin_post_content_dev",
         "applovin_post_content_fallback",
         "applovin_post_content_native",
         "applovin_post_content_prime",
-        "direct_banner_topic",
-        "direct_native_topic",
         "gad_post_banner",
         "gad_post_native",
-        "gad_topic_banner",
         "webview"
-      ].forEach(function(key) {
-        delete adConfig.creatives[key];
+      ],
+      "4": [
+        "applovin_support_us_fullpage",
+        "direct_fullpage",
+        "gad_fullpage_support_us",
+        "gad_reward_ad"
+      ],
+      "5": [
+        "applovin_game_reward",
+        "applovin_support_us_fullpage",
+        "gad_fullpage_support_us",
+        "gad_reward_ad"
+      ]
+    };
+
+    adConfig.available_types = [];
+    adConfig.delivery = adConfig.delivery || {};
+
+    Object.keys(placements).forEach(function(groupKey) {
+      const group = adConfig.delivery[groupKey] || {};
+
+      placements[groupKey].forEach(function(placementKey) {
+        const placement = group[placementKey] || {};
+        placement.rate = 0;
+        placement.backfill = [];
+        group[placementKey] = placement;
       });
-    }
+
+      adConfig.delivery[groupKey] = group;
+    });
 
     $done({ body: JSON.stringify(response) });
   }
