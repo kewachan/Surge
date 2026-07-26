@@ -6,6 +6,8 @@ DOMAIN-SUFFIX, ads.hktvmall.com
 DOMAIN-SUFFIX, ts-analysis.shoalter.com
 
 # Google
+DOMAIN, firebaselogging-pa.googleapis.com
+DOMAIN, imasdk.googleapis.com
 DOMAIN, ogads-pa.clients6.google.com
 DOMAIN-SUFFIX, ad.doubleclick.net
 DOMAIN-SUFFIX, ads.google.com
@@ -57,6 +59,10 @@ DOMAIN-SUFFIX, amazonclix.com
 DOMAIN-SUFFIX, analytics.s3.amazonaws.com
 DOMAIN-SUFFIX, analyticsengine.s3.amazonaws.com
 DOMAIN-SUFFIX, assoc-amazon.com
+
+# Alipay
+DOMAIN, datagw-edge.alipay.com
+DOMAIN, loggw-ex.alipay.com
 
 # Yahoo
 DOMAIN-SUFFIX, ads.yahoo.com
@@ -197,6 +203,12 @@ DOMAIN-SUFFIX, collect.4gamers.com.tw
 DOMAIN-SUFFIX, itadapi.ithome.com.tw
 DOMAIN-SUFFIX, itadstatic.ithome.com.tw
 
+# MacauPass
+DOMAIN, quicktracking-api.macaupass.com
+
+# RTHK
+DOMAIN, rthkwebapp1.datacanva.com
+
 # Tencent
 DOMAIN-SUFFIX, rmonitor.qq.com
 DOMAIN-SUFFIX, x.research.qq.com
@@ -269,6 +281,16 @@ DOMAIN-SUFFIX, samsungads.com
 DOMAIN-SUFFIX, smetrics.samsung.com
 
 # Analytics and Diagnostics
+DOMAIN, ali-stats.jpush.cn
+DOMAIN, analytics.theradioapp.com
+DOMAIN, app-analytics-services.com
+DOMAIN, cnlogs.umengcloud.com
+DOMAIN, errnewlog.umeng.com
+DOMAIN, gd-stats.jpush.cn
+DOMAIN, h-adashx.ut.taobao.com
+DOMAIN, oslogs.umeng.com
+DOMAIN, stats-ipv6.jpush.cn
+DOMAIN, stats.jpush.cn
 DOMAIN-SUFFIX, a.mouseflow.com
 DOMAIN-SUFFIX, adm.hotjar.com
 DOMAIN-SUFFIX, api-hotjar.com
@@ -311,6 +333,13 @@ DOMAIN-SUFFIX, upload.luckyorange.net
 DOMAIN-SUFFIX, w1.luckyorange.com
 
 # Advertising Platforms
+DOMAIN, config.ads.vungle.com
+DOMAIN, config.inmobi.com
+DOMAIN, d.applovin.com
+DOMAIN, ms.applovin.com
+DOMAIN, ms.applvn.com
+DOMAIN, rt.applovin.com
+DOMAIN, telemetry.sdk.inmobi.com
 DOMAIN-SUFFIX, ad-api.uogroup.com
 DOMAIN-SUFFIX, ad2.plugmedia.hk
 DOMAIN-SUFFIX, adc3-launch.adcolony.com
