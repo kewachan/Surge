@@ -282,13 +282,25 @@ DOMAIN-SUFFIX, smetrics.samsung.com
 
 # Analytics and Diagnostics
 DOMAIN, ali-stats.jpush.cn
+DOMAIN, analytics.shareaholic.com
 DOMAIN, analytics.theradioapp.com
 DOMAIN, app-analytics-services.com
+DOMAIN, astat.nikkei.com
 DOMAIN, cnlogs.umengcloud.com
+DOMAIN, d1dns4zpgsd7rz.cloudfront.net
+DOMAIN, ep1.adtrafficquality.google
+DOMAIN, ep2.adtrafficquality.google
 DOMAIN, errnewlog.umeng.com
 DOMAIN, gd-stats.jpush.cn
 DOMAIN, h-adashx.ut.taobao.com
 DOMAIN, oslogs.umeng.com
+DOMAIN, partner.shareaholic.com
+DOMAIN, sb.scorecardresearch.com
+DOMAIN, sdc.rthk.hk
+DOMAIN, snap.licdn.com
+DOMAIN, static.chartbeat.com
+DOMAIN, static.cloudflareinsights.com
+DOMAIN, static.getclicky.com
 DOMAIN, stats-ipv6.jpush.cn
 DOMAIN, stats.jpush.cn
 DOMAIN-SUFFIX, a.mouseflow.com
@@ -333,12 +345,20 @@ DOMAIN-SUFFIX, upload.luckyorange.net
 DOMAIN-SUFFIX, w1.luckyorange.com
 
 # Advertising Platforms
+DOMAIN, a.teads.tv
+DOMAIN, anymind360.com
+DOMAIN, cdn.taboola.com
 DOMAIN, config.ads.vungle.com
 DOMAIN, config.inmobi.com
 DOMAIN, d.applovin.com
+DOMAIN, get.optad360.io
+DOMAIN, img.ads.tvb.com
 DOMAIN, ms.applovin.com
 DOMAIN, ms.applvn.com
+DOMAIN, mwtw.presage.io
 DOMAIN, rt.applovin.com
+DOMAIN, servedby.revive-adserver.net
+DOMAIN, servedbyadbutler.com
 DOMAIN, telemetry.sdk.inmobi.com
 DOMAIN-SUFFIX, ad-api.uogroup.com
 DOMAIN-SUFFIX, ad2.plugmedia.hk
