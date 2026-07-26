@@ -193,6 +193,18 @@ DOMAIN-SUFFIX, events.reddit.com
 DOMAIN-SUFFIX, events.redditmedia.com
 DOMAIN-SUFFIX, rereddit.com
 
+# RedNote
+DOMAIN, ads-i2.xhscdn.com
+DOMAIN, ads-img-al.xhscdn.com
+DOMAIN, ads-img-bak.xhscdn.com
+DOMAIN, apm-fe.rnote.com
+DOMAIN, apm-native.rnote.com
+DOMAIN, crash.rnote.com
+DOMAIN, growth-img.xhscdn.com
+DOMAIN, lng.rnote.com
+DOMAIN, spider-tracker.xiaohongshu.com
+DOMAIN, t2.rnote.com
+
 # XFastest
 DOMAIN-SUFFIX, ads.xfastest.com
 
@@ -210,6 +222,7 @@ DOMAIN, quicktracking-api.macaupass.com
 DOMAIN, rthkwebapp1.datacanva.com
 
 # Tencent
+DOMAIN, otheve.beacon.qq.com
 DOMAIN-SUFFIX, rmonitor.qq.com
 DOMAIN-SUFFIX, x.research.qq.com
 
@@ -353,12 +366,18 @@ DOMAIN, config.inmobi.com
 DOMAIN, d.applovin.com
 DOMAIN, get.optad360.io
 DOMAIN, img.ads.tvb.com
+DOMAIN, js-sec.indexww.com
+DOMAIN, micro.rubiconproject.com
 DOMAIN, ms.applovin.com
 DOMAIN, ms.applvn.com
 DOMAIN, mwtw.presage.io
+DOMAIN, r.skimresources.com
 DOMAIN, rt.applovin.com
+DOMAIN, s.skimresources.com
 DOMAIN, servedby.revive-adserver.net
 DOMAIN, servedbyadbutler.com
+DOMAIN, static.adsafeprotected.com
+DOMAIN, t.skimresources.com
 DOMAIN, telemetry.sdk.inmobi.com
 DOMAIN-SUFFIX, ad-api.uogroup.com
 DOMAIN-SUFFIX, ad2.plugmedia.hk
