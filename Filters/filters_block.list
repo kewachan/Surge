@@ -2,12 +2,8 @@
 
 ##### Macau #####
 
-### Financial Services ###
-
 # MacauPass
 DOMAIN, quicktracking-api.macaupass.com
-
-### Telecommunications ###
 
 # CTM
 DOMAIN, moasocket.ctm.net
@@ -15,12 +11,8 @@ DOMAIN, tracking.ctm.net
 
 ##### Hong Kong #####
 
-### Media ###
-
 # RTHK
 DOMAIN, rthkwebapp1.datacanva.com
-
-### Retail ###
 
 # HKTVmall
 DOMAIN-SUFFIX, ad-splash.hktvmall.com
@@ -29,13 +21,9 @@ DOMAIN-SUFFIX, ts-analysis.shoalter.com
 
 ##### China #####
 
-### Financial Services ###
-
 # Alipay
 DOMAIN, datagw-edge.alipay.com
 DOMAIN, loggw-ex.alipay.com
-
-### Mobile Manufacturers ###
 
 # Huawei
 DOMAIN-SUFFIX, grs.hicloud.com
@@ -88,8 +76,6 @@ DOMAIN-SUFFIX, tracking.miui.com
 DOMAIN-SUFFIX, tracking.rus.miui.com
 DOMAIN-SUFFIX, www.cdn.ad.xiaomi.com
 
-### Publishers and Technology Media ###
-
 # 4Gamers
 DOMAIN-SUFFIX, collect.4gamers.com.tw
 
@@ -100,12 +86,8 @@ DOMAIN-SUFFIX, itadstatic.ithome.com.tw
 # XFastest
 DOMAIN-SUFFIX, ads.xfastest.com
 
-### Search and Internet Services ###
-
 # Baidu
 DOMAIN-SUFFIX, tsn.baidu.com
-
-### Social and Content Platforms ###
 
 # ByteDance and TikTok
 DOMAIN-SUFFIX, ads-api.tiktok.com
@@ -137,8 +119,6 @@ DOMAIN-SUFFIX, rmonitor.qq.com
 DOMAIN-SUFFIX, x.research.qq.com
 
 ##### International #####
-
-### Analytics and Advertising ###
 
 # Ad Networks and Malvertising
 DOMAIN-SUFFIX, adxadserv.com
@@ -282,8 +262,6 @@ DOMAIN-SUFFIX, tools.mouseflow.com
 DOMAIN-SUFFIX, upload.luckyorange.net
 DOMAIN-SUFFIX, w1.luckyorange.com
 
-### Mobile Manufacturers ###
-
 # Samsung
 DOMAIN-SUFFIX, ad.samsungadhub.com
 DOMAIN-SUFFIX, analytics-api.samsunghealthcn.com
@@ -296,8 +274,6 @@ DOMAIN-SUFFIX, samsung-com.112.2o7.net
 DOMAIN-SUFFIX, samsungadhub.com
 DOMAIN-SUFFIX, samsungads.com
 DOMAIN-SUFFIX, smetrics.samsung.com
-
-### Social and Community Platforms ###
 
 # Facebook
 DOMAIN-SUFFIX, ads.facebook.com
@@ -337,8 +313,6 @@ DOMAIN-SUFFIX, ads-api.twitter.com
 DOMAIN-SUFFIX, ads-twitter.com
 DOMAIN-SUFFIX, advertising.twitter.com
 DOMAIN-SUFFIX, static.ads-twitter.com
-
-### Technology Platforms ###
 
 # Amazon
 DOMAIN-SUFFIX, adtago.s3.amazonaws.com
