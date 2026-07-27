@@ -225,6 +225,10 @@ DOMAIN-SUFFIX, itadstatic.ithome.com.tw
 # MacauPass
 DOMAIN, quicktracking-api.macaupass.com
 
+# CTM
+DOMAIN, moasocket.ctm.net
+DOMAIN, tracking.ctm.net
+
 # RTHK
 DOMAIN, rthkwebapp1.datacanva.com
 
