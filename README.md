@@ -31,7 +31,7 @@
 - 用途：合併及維護外部作者提供的 advertising regex block。
 - 更新方法：從 README 或 module 內記錄的外部來源更新，合併後移除重複或可安全整合的 regex。
 - 同步核對 `[URL Rewrite]` 與 `[MITM]`：移除沒有 rewrite 使用的 hostname，補回 rewrite 所需 hostname。
-- 使用者 HAR 產生的個別 App 規則不要放入此檔案。
+- 由 HAR 產生的個別 App 規則不要放入此檔案。
 
 ## Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule
 
