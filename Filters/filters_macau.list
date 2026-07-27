@@ -13,13 +13,13 @@ DOMAIN, gsa.apple.com
 #DOMAIN, youtubei.googleapis.com
 
 #RandomArt
-DOMAIN-SUFFIX, randomdailyart.com
+#DOMAIN-SUFFIX, randomdailyart.com
 
 #BasaltArt
-DOMAIN-SUFFIX, basalt.yevgenglukhov.com
+#DOMAIN-SUFFIX, basalt.yevgenglukhov.com
 
 #Artvee
-DOMAIN-SUFFIX, artvee.com
+#DOMAIN-SUFFIX, artvee.com
 
 ############ China ############
 
