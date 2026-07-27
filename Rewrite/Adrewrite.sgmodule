@@ -54,6 +54,10 @@
 
 #xiaohongshu
 ^https?:\/\/.+\.xiaohongshu\.com\/.+(metrics|report|Report) - reject
+^https?:\/\/edith\.rnote\.com\/api\/sns\/v1\/note\/metrics_report - reject
+^https?:\/\/edith\.rnote\.com\/api\/usergrowth\/behavior\/report - reject
+^https?:\/\/www\.rnote\.com\/api\/sns\/v1\/ads\/apple\/record - reject
+^https?:\/\/www\.rnote\.com\/api\/sns\/v1\/tag\/ads_engage - reject
 
 #Manhuashe
 ^https?:\/\/comicapi\.manhuashe\.com\/v\d\/ads - reject
@@ -75,6 +79,8 @@
 
 #Pintrest
 ^https?:\/\/api.pinterest.com\/v3\/users\/third_party_tracking_settings\/ - reject
+^https?:\/\/api\.pinterest\.com\/log\/ - reject
+^https?:\/\/api\.pinterest\.com\/v3\/callback\/event\/ - reject
 
 #4Gamers
 ^https?:\/\/img.4gamers.com.tw\/ads-media - reject
@@ -101,9 +107,33 @@
 
 #Google
 (https?:\/\/www\.google\.com/search\?q=.+)(&client=.+) $1&gl=hk&safe=off 302
+^https?:\/\/www\.google\.com\/ads\/on-device\/conversions - reject
+^https?:\/\/play\.google\.com\/newsstand\/api\/v3\/people\/me\/analytics - reject
+^https?:\/\/cse\.google\.com\/adsense\/search\/async-ads\.js - reject
+
+#Fanpiece
+^https?:\/\/gank\.fanpiece\.com\/ad\.php - reject
+
+#Unwire
+^https?:\/\/unwire\.hk\/ads-beacon\.js - reject
+
+#iDownloadBlog
+^https?:\/\/www\.idownloadblog\.com\/ads-beacon\.js - reject
+
+#Mobile01
+^https?:\/\/attach2\.mobile01\.com\/js\/ad\/(?:adClickTracker|prebid)\.js - reject
+
+#Yahoo
+^https?:\/\/s\.yimg\.com\/aaq\/prebid\/prebid-current\.js - reject
+
+#Alibaba
+^https?:\/\/d\.alicdn\.com\/alilog\/mlog\/aplus\/ - reject
+
+#ByteDance
+^https?:\/\/sf19-static\.i18n-pglstatp\.com\/obj\/ad-pattern-sg\/3p_monitor - reject
 
 [Script]
 BahamutAnimeAds = type=http-response,pattern=^https:\/\/api\.gamer\.com\.tw\/mobile_app\/anime\/v\d/(token|m3u8).php\?,requires-body=1,max-size=0,timeout=40,script-path=https://raw.githubusercontent.com/NobyDa/Script/master/Bahamut/BahamutAnimeAds.js
 
 [MITM]
-hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, *.macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, grpc.biliapi.net, *.xiaohongshu.com, *.manhuashe.com, *.lihkg.com, *.amap.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, *.shoalter.com, api.gamer.com.tw
+hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, *.macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, grpc.biliapi.net, *.xiaohongshu.com, *.rnote.com, *.manhuashe.com, *.lihkg.com, *.amap.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, *.shoalter.com, *.fanpiece.com, unwire.hk, *.idownloadblog.com, *.mobile01.com, *.yimg.com, *.alicdn.com, *.i18n-pglstatp.com, api.gamer.com.tw

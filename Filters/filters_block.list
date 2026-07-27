@@ -21,6 +21,9 @@ DOMAIN-SUFFIX, ts-analysis.shoalter.com
 
 ##### China #####
 
+# Alibaba
+DOMAIN, client-upload.cn-shanghai.log.aliyuncs.com
+
 # Alipay
 DOMAIN, datagw-edge.alipay.com
 DOMAIN, loggw-ex.alipay.com
@@ -110,6 +113,7 @@ DOMAIN, apm-native.rnote.com
 DOMAIN, crash.rnote.com
 DOMAIN, growth-img.xhscdn.com
 DOMAIN, lng.rnote.com
+DOMAIN, referee.rnote.com
 DOMAIN, spider-tracker.xiaohongshu.com
 DOMAIN, t2.rnote.com
 
@@ -231,11 +235,14 @@ DOMAIN-SUFFIX, stats.g.doubleclick.net
 DOMAIN-SUFFIX, youtube.cleverads.vn
 
 # Yahoo
+DOMAIN, a-9c6kp.data.emb-api.com
 DOMAIN, c2shb-oao.ssp.yahoo.com
 DOMAIN, noa.yahoo.com
 DOMAIN, pbd.yahoo.com
 DOMAIN, pbs.yahoo.com
 DOMAIN, qsearch-a.akamaihd.net
+DOMAIN, w3anze.conversions.appsflyersdk.com
+DOMAIN, w3anze.dynamic-report-api.appsflyersdk.com
 DOMAIN, wnsrvbjmeprtfrnfx.ay.delivery
 DOMAIN, yads.c.yimg.jp
 DOMAIN-SUFFIX, ads.yahoo.com
@@ -384,8 +391,10 @@ DOMAIN-SUFFIX, w1.luckyorange.com
 
 # Advertising Platforms
 DOMAIN, a.teads.tv
+DOMAIN, ad2.apx.appier.net
 DOMAIN, ads.adthrive.com
 DOMAIN, ads.yieldmo.com
+DOMAIN, api.w.inmobi.com
 DOMAIN, anymind360.com
 DOMAIN, bd.raptivecdn.com
 DOMAIN, beacon.bidder.taboola.com
@@ -393,6 +402,7 @@ DOMAIN, cdn.caprofitx.com
 DOMAIN, cdn.taboola.com
 DOMAIN, config.ads.vungle.com
 DOMAIN, config.inmobi.com
+DOMAIN, cpm.bidmyqps.xyz
 DOMAIN, d.applovin.com
 DOMAIN, display.bidder.taboola.com
 DOMAIN, fastlane.rubiconproject.com
@@ -409,12 +419,16 @@ DOMAIN, ms.applovin.com
 DOMAIN, ms.applvn.com
 DOMAIN, mwtw.presage.io
 DOMAIN, prebid.a-mo.net
+DOMAIN, prebid.ad.smaato.net
 DOMAIN, r.skimresources.com
 DOMAIN, rt.applovin.com
 DOMAIN, rtb.openx.net
+DOMAIN, s.ad.smaato.net
 DOMAIN, s.skimresources.com
 DOMAIN, servedby.revive-adserver.net
 DOMAIN, servedbyadbutler.com
+DOMAIN, sync.adkernel.com
+DOMAIN, sync.inmobi.com
 DOMAIN, ssp-sync.criteo.com
 DOMAIN, static.adsafeprotected.com
 DOMAIN, static.criteo.net
@@ -424,6 +438,7 @@ DOMAIN, t.skimresources.com
 DOMAIN, tcheck.outbrainimg.com
 DOMAIN, telemetry.sdk.inmobi.com
 DOMAIN, tlx.3lift.com
+DOMAIN, trc.taboola.com
 DOMAIN, widget-pixels.outbrain.com
 DOMAIN-SUFFIX, ad-api.uogroup.com
 DOMAIN-SUFFIX, ad2.plugmedia.hk
