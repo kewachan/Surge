@@ -2,23 +2,110 @@
 
 ##### Macau #####
 
+### Financial Services ###
+
 # MacauPass
 DOMAIN, quicktracking-api.macaupass.com
+
+### Telecommunications ###
 
 # CTM
 DOMAIN, moasocket.ctm.net
 DOMAIN, tracking.ctm.net
 
-##### China #####
+##### Hong Kong #####
+
+### Media ###
+
+# RTHK
+DOMAIN, rthkwebapp1.datacanva.com
+
+### Retail ###
 
 # HKTVmall
 DOMAIN-SUFFIX, ad-splash.hktvmall.com
 DOMAIN-SUFFIX, ads.hktvmall.com
 DOMAIN-SUFFIX, ts-analysis.shoalter.com
 
+##### China #####
+
+### Financial Services ###
+
 # Alipay
 DOMAIN, datagw-edge.alipay.com
 DOMAIN, loggw-ex.alipay.com
+
+### Mobile Manufacturers ###
+
+# Huawei
+DOMAIN-SUFFIX, grs.hicloud.com
+DOMAIN-SUFFIX, logbak.hicloud.com
+DOMAIN-SUFFIX, logservice.hicloud.com
+DOMAIN-SUFFIX, logservice1.hicloud.com
+DOMAIN-SUFFIX, metrics-dra.dt.hicloud.com
+DOMAIN-SUFFIX, metrics.data.hicloud.com
+DOMAIN-SUFFIX, metrics1.data.hicloud.com
+DOMAIN-SUFFIX, metrics2.data.hicloud.com
+DOMAIN-SUFFIX, metrics3.data.hicloud.com
+DOMAIN-SUFFIX, metrics4.data.hicloud.com
+DOMAIN-SUFFIX, metrics5.data.hicloud.com
+
+# OnePlus
+DOMAIN-SUFFIX, analytics.oneplus.cn
+DOMAIN-SUFFIX, click.oneplus.cn
+DOMAIN-SUFFIX, click.oneplus.com
+DOMAIN-SUFFIX, open.oneplus.net
+
+# Oppo
+DOMAIN-SUFFIX, adsfs.oppomobile.com
+DOMAIN-SUFFIX, adx.ads.oppomobile.com
+DOMAIN-SUFFIX, bdapi.ads.oppomobile.com
+DOMAIN-SUFFIX, ck.ads.oppomobile.com
+DOMAIN-SUFFIX, data.ads.oppomobile.com
+DOMAIN-SUFFIX, g1.ads.oppomobile.com
+
+# Realme
+DOMAIN-SUFFIX, bdapi-ads.realmemobile.com
+DOMAIN-SUFFIX, bdapi-in-ads.realmemobile.com
+DOMAIN-SUFFIX, iot-eu-logser.realme.com
+DOMAIN-SUFFIX, iot-logser.realme.com
+
+# Xiaomi
+DOMAIN-SUFFIX, api.ad.xiaomi.com
+DOMAIN-SUFFIX, apmplus.volces.com
+DOMAIN-SUFFIX, app.chat.xiaomi.net
+DOMAIN-SUFFIX, data.mistat.india.xiaomi.com
+DOMAIN-SUFFIX, data.mistat.intl.xiaomi.com
+DOMAIN-SUFFIX, data.mistat.rus.xiaomi.com
+DOMAIN-SUFFIX, data.mistat.xiaomi.com
+DOMAIN-SUFFIX, globalapi.ad.xiaomi.com
+DOMAIN-SUFFIX, sa.api.intl.miui.com
+DOMAIN-SUFFIX, sdkconfig.ad.intl.xiaomi.com
+DOMAIN-SUFFIX, sdkconfig.ad.xiaomi.com
+DOMAIN-SUFFIX, tracking.india.miui.com
+DOMAIN-SUFFIX, tracking.intl.miui.com
+DOMAIN-SUFFIX, tracking.miui.com
+DOMAIN-SUFFIX, tracking.rus.miui.com
+DOMAIN-SUFFIX, www.cdn.ad.xiaomi.com
+
+### Publishers and Technology Media ###
+
+# 4Gamers
+DOMAIN-SUFFIX, collect.4gamers.com.tw
+
+# iThome
+DOMAIN-SUFFIX, itadapi.ithome.com.tw
+DOMAIN-SUFFIX, itadstatic.ithome.com.tw
+
+# XFastest
+DOMAIN-SUFFIX, ads.xfastest.com
+
+### Search and Internet Services ###
+
+# Baidu
+DOMAIN-SUFFIX, tsn.baidu.com
+
+### Social and Content Platforms ###
 
 # ByteDance and TikTok
 DOMAIN-SUFFIX, ads-api.tiktok.com
@@ -44,79 +131,243 @@ DOMAIN, lng.rnote.com
 DOMAIN, spider-tracker.xiaohongshu.com
 DOMAIN, t2.rnote.com
 
-# XFastest
-DOMAIN-SUFFIX, ads.xfastest.com
-
-# 4Gamers
-DOMAIN-SUFFIX, collect.4gamers.com.tw
-
-# iThome
-DOMAIN-SUFFIX, itadapi.ithome.com.tw
-DOMAIN-SUFFIX, itadstatic.ithome.com.tw
-
-# RTHK
-DOMAIN, rthkwebapp1.datacanva.com
-
 # Tencent
 DOMAIN, otheve.beacon.qq.com
 DOMAIN-SUFFIX, rmonitor.qq.com
 DOMAIN-SUFFIX, x.research.qq.com
 
-# Baidu
-DOMAIN-SUFFIX, tsn.baidu.com
-
-# Xiaomi
-DOMAIN-SUFFIX, api.ad.xiaomi.com
-DOMAIN-SUFFIX, apmplus.volces.com
-DOMAIN-SUFFIX, app.chat.xiaomi.net
-DOMAIN-SUFFIX, data.mistat.india.xiaomi.com
-DOMAIN-SUFFIX, data.mistat.intl.xiaomi.com
-DOMAIN-SUFFIX, data.mistat.rus.xiaomi.com
-DOMAIN-SUFFIX, data.mistat.xiaomi.com
-DOMAIN-SUFFIX, globalapi.ad.xiaomi.com
-DOMAIN-SUFFIX, sa.api.intl.miui.com
-DOMAIN-SUFFIX, sdkconfig.ad.intl.xiaomi.com
-DOMAIN-SUFFIX, sdkconfig.ad.xiaomi.com
-DOMAIN-SUFFIX, tracking.india.miui.com
-DOMAIN-SUFFIX, tracking.intl.miui.com
-DOMAIN-SUFFIX, tracking.miui.com
-DOMAIN-SUFFIX, tracking.rus.miui.com
-DOMAIN-SUFFIX, www.cdn.ad.xiaomi.com
-
-# Oppo
-DOMAIN-SUFFIX, adsfs.oppomobile.com
-DOMAIN-SUFFIX, adx.ads.oppomobile.com
-DOMAIN-SUFFIX, bdapi.ads.oppomobile.com
-DOMAIN-SUFFIX, ck.ads.oppomobile.com
-DOMAIN-SUFFIX, data.ads.oppomobile.com
-DOMAIN-SUFFIX, g1.ads.oppomobile.com
-
-# Realme
-DOMAIN-SUFFIX, bdapi-ads.realmemobile.com
-DOMAIN-SUFFIX, bdapi-in-ads.realmemobile.com
-DOMAIN-SUFFIX, iot-eu-logser.realme.com
-DOMAIN-SUFFIX, iot-logser.realme.com
-
-# OnePlus
-DOMAIN-SUFFIX, analytics.oneplus.cn
-DOMAIN-SUFFIX, click.oneplus.cn
-DOMAIN-SUFFIX, click.oneplus.com
-DOMAIN-SUFFIX, open.oneplus.net
-
-# Huawei
-DOMAIN-SUFFIX, grs.hicloud.com
-DOMAIN-SUFFIX, logbak.hicloud.com
-DOMAIN-SUFFIX, logservice.hicloud.com
-DOMAIN-SUFFIX, logservice1.hicloud.com
-DOMAIN-SUFFIX, metrics-dra.dt.hicloud.com
-DOMAIN-SUFFIX, metrics.data.hicloud.com
-DOMAIN-SUFFIX, metrics1.data.hicloud.com
-DOMAIN-SUFFIX, metrics2.data.hicloud.com
-DOMAIN-SUFFIX, metrics3.data.hicloud.com
-DOMAIN-SUFFIX, metrics4.data.hicloud.com
-DOMAIN-SUFFIX, metrics5.data.hicloud.com
-
 ##### International #####
+
+### Analytics and Advertising ###
+
+# Ad Networks and Malvertising
+DOMAIN-SUFFIX, adxadserv.com
+DOMAIN-SUFFIX, bongacash.com
+DOMAIN-SUFFIX, cdn.yourwebbars.com
+DOMAIN-SUFFIX, czilladx.com
+DOMAIN-SUFFIX, isafe.pro
+DOMAIN-SUFFIX, mobile-cleaner.net
+DOMAIN-SUFFIX, olmsoneenh.info
+DOMAIN-SUFFIX, payingnoodlescam.com
+DOMAIN-SUFFIX, poweredby.jads.co
+DOMAIN-SUFFIX, promo-bc.com
+DOMAIN-SUFFIX, weedbits.com
+
+# Advertising Platforms
+DOMAIN, a.teads.tv
+DOMAIN, ads.adthrive.com
+DOMAIN, ads.yieldmo.com
+DOMAIN, anymind360.com
+DOMAIN, bd.raptivecdn.com
+DOMAIN, beacon.bidder.taboola.com
+DOMAIN, cdn.caprofitx.com
+DOMAIN, cdn.taboola.com
+DOMAIN, config.ads.vungle.com
+DOMAIN, config.inmobi.com
+DOMAIN, d.applovin.com
+DOMAIN, display.bidder.taboola.com
+DOMAIN, fastlane.rubiconproject.com
+DOMAIN, get.optad360.io
+DOMAIN, grid-bidder.criteo.com
+DOMAIN, hbopenbid.pubmatic.com
+DOMAIN, htlb.casalemedia.com
+DOMAIN, ib.adnxs.com
+DOMAIN, img.ads.tvb.com
+DOMAIN, js-sec.indexww.com
+DOMAIN, log.outbrainimg.com
+DOMAIN, micro.rubiconproject.com
+DOMAIN, ms.applovin.com
+DOMAIN, ms.applvn.com
+DOMAIN, mwtw.presage.io
+DOMAIN, prebid.a-mo.net
+DOMAIN, r.skimresources.com
+DOMAIN, rt.applovin.com
+DOMAIN, rtb.openx.net
+DOMAIN, s.skimresources.com
+DOMAIN, servedby.revive-adserver.net
+DOMAIN, servedbyadbutler.com
+DOMAIN, ssp-sync.criteo.com
+DOMAIN, static.adsafeprotected.com
+DOMAIN, static.criteo.net
+DOMAIN, static.dable.io
+DOMAIN, stormgate.production.raptive.com
+DOMAIN, t.skimresources.com
+DOMAIN, tcheck.outbrainimg.com
+DOMAIN, telemetry.sdk.inmobi.com
+DOMAIN, tlx.3lift.com
+DOMAIN, widget-pixels.outbrain.com
+DOMAIN-SUFFIX, ad-api.uogroup.com
+DOMAIN-SUFFIX, ad2.plugmedia.hk
+DOMAIN-SUFFIX, adc3-launch.adcolony.com
+DOMAIN-SUFFIX, ads30.adcolony.com
+DOMAIN-SUFFIX, adserver.unityads.unity3d.com
+DOMAIN-SUFFIX, adservetx.media.net
+DOMAIN-SUFFIX, auction.unityads.unity3d.com
+DOMAIN-SUFFIX, cdn.fastclick.net
+DOMAIN-SUFFIX, config.unityads.unity3d.com
+DOMAIN-SUFFIX, events3alt.adcolony.com
+DOMAIN-SUFFIX, fastclick.com
+DOMAIN-SUFFIX, fastclick.net
+DOMAIN-SUFFIX, html-load.com
+DOMAIN-SUFFIX, media.fastclick.net
+DOMAIN-SUFFIX, media.net
+DOMAIN-SUFFIX, static.media.net
+DOMAIN-SUFFIX, wd.adcolony.com
+DOMAIN-SUFFIX, webview.unityads.unity3d.com
+
+# Analytics and Diagnostics
+DOMAIN, ali-stats.jpush.cn
+DOMAIN, analytics.shareaholic.com
+DOMAIN, analytics.theradioapp.com
+DOMAIN, app-analytics-services.com
+DOMAIN, astat.nikkei.com
+DOMAIN, cnlogs.umengcloud.com
+DOMAIN, d1dns4zpgsd7rz.cloudfront.net
+DOMAIN, ep1.adtrafficquality.google
+DOMAIN, ep2.adtrafficquality.google
+DOMAIN, errnewlog.umeng.com
+DOMAIN, gd-stats.jpush.cn
+DOMAIN, h-adashx.ut.taobao.com
+DOMAIN, matomo2.tdm.com.mo
+DOMAIN, oslogs.umeng.com
+DOMAIN, partner.shareaholic.com
+DOMAIN, pixel.wp.com
+DOMAIN, sb.scorecardresearch.com
+DOMAIN, sdc.rthk.hk
+DOMAIN, snap.licdn.com
+DOMAIN, static.chartbeat.com
+DOMAIN, static.cloudflareinsights.com
+DOMAIN, static.getclicky.com
+DOMAIN, statistics.tdm.com.mo
+DOMAIN, stats-ipv6.jpush.cn
+DOMAIN, stats.jpush.cn
+DOMAIN-SUFFIX, a.mouseflow.com
+DOMAIN-SUFFIX, adm.hotjar.com
+DOMAIN-SUFFIX, api-hotjar.com
+DOMAIN-SUFFIX, api.bugsnag.com
+DOMAIN-SUFFIX, api.luckyorange.com
+DOMAIN-SUFFIX, api.mouseflow.com
+DOMAIN-SUFFIX, app.bugsnag.com
+DOMAIN-SUFFIX, app.getsentry.com
+DOMAIN-SUFFIX, browser.sentry-cdn.com
+DOMAIN-SUFFIX, careers.hotjar.com
+DOMAIN-SUFFIX, cdn-test.mouseflow.com
+DOMAIN-SUFFIX, cdn.luckyorange.com
+DOMAIN-SUFFIX, cdn.mouseflow.com
+DOMAIN-SUFFIX, claritybt.freshmarketer.com
+DOMAIN-SUFFIX, cs.luckyorange.net
+DOMAIN-SUFFIX, events.hotjar.io
+DOMAIN-SUFFIX, firebase-settings.crashlytics.com
+DOMAIN-SUFFIX, freshmarketer.com
+DOMAIN-SUFFIX, fwtracks.freshmarketer.com
+DOMAIN-SUFFIX, gtm.mouseflow.com
+DOMAIN-SUFFIX, hotjar-analytics.com
+DOMAIN-SUFFIX, hotjar.com
+DOMAIN-SUFFIX, identify.hotjar.com
+DOMAIN-SUFFIX, insights.hotjar.com
+DOMAIN-SUFFIX, luckyorange.com
+DOMAIN-SUFFIX, luckyorange.net
+DOMAIN-SUFFIX, mouseflow.com
+DOMAIN-SUFFIX, notify.bugsnag.com
+DOMAIN-SUFFIX, o2.mouseflow.com
+DOMAIN-SUFFIX, realtime.luckyorange.com
+DOMAIN-SUFFIX, script.hotjar.com
+DOMAIN-SUFFIX, sentry.dailyart.nodea.net.pl
+DOMAIN-SUFFIX, sessions.bugsnag.com
+DOMAIN-SUFFIX, settings.luckyorange.net
+DOMAIN-SUFFIX, static.hotjar.com
+DOMAIN-SUFFIX, stats.wp.com
+DOMAIN-SUFFIX, surveys.hotjar.com
+DOMAIN-SUFFIX, tools.mouseflow.com
+DOMAIN-SUFFIX, upload.luckyorange.net
+DOMAIN-SUFFIX, w1.luckyorange.com
+
+### Mobile Manufacturers ###
+
+# Samsung
+DOMAIN-SUFFIX, ad.samsungadhub.com
+DOMAIN-SUFFIX, analytics-api.samsunghealthcn.com
+DOMAIN-SUFFIX, analytics.samsungknox.com
+DOMAIN-SUFFIX, bigdata.ssp.samsung.com
+DOMAIN-SUFFIX, business.samsungusa.com
+DOMAIN-SUFFIX, config.samsungads.com
+DOMAIN-SUFFIX, nmetrics.samsung.com
+DOMAIN-SUFFIX, samsung-com.112.2o7.net
+DOMAIN-SUFFIX, samsungadhub.com
+DOMAIN-SUFFIX, samsungads.com
+DOMAIN-SUFFIX, smetrics.samsung.com
+
+### Social and Community Platforms ###
+
+# Facebook
+DOMAIN-SUFFIX, ads.facebook.com
+DOMAIN-SUFFIX, an.facebook.com
+DOMAIN-SUFFIX, analytics.facebook.com
+DOMAIN-SUFFIX, fbthirdpartypixel.com
+DOMAIN-SUFFIX, fbthirdpartypixel.net
+DOMAIN-SUFFIX, fbthirdpartypixel.org
+DOMAIN-SUFFIX, pixel.facebook.com
+
+# LinkedIn
+DOMAIN-SUFFIX, ads.linkedin.com
+DOMAIN-SUFFIX, analytics.pointdrive.linkedin.com
+
+# Pinterest
+DOMAIN-SUFFIX, ads-dev.pinterest.com
+DOMAIN-SUFFIX, ads.pinterest.com
+DOMAIN-SUFFIX, analytics.pinterest.com
+DOMAIN-SUFFIX, log.pinterest.com
+DOMAIN-SUFFIX, trk.pinterest.com
+DOMAIN-SUFFIX, trk2.pinterest.com
+DOMAIN-SUFFIX, widgets.pinterest.com
+
+# Reddit
+DOMAIN-SUFFIX, ads.reddit.com
+DOMAIN-SUFFIX, d.reddit.com
+DOMAIN-SUFFIX, events.reddit.com
+DOMAIN-SUFFIX, events.redditmedia.com
+DOMAIN-SUFFIX, rereddit.com
+
+# Telegram Clients
+DOMAIN-SUFFIX, adsgram.ai
+DOMAIN-SUFFIX, swiftgram.app
+
+# X (Twitter)
+DOMAIN-SUFFIX, ads-api.twitter.com
+DOMAIN-SUFFIX, ads-twitter.com
+DOMAIN-SUFFIX, advertising.twitter.com
+DOMAIN-SUFFIX, static.ads-twitter.com
+
+### Technology Platforms ###
+
+# Amazon
+DOMAIN-SUFFIX, adtago.s3.amazonaws.com
+DOMAIN-SUFFIX, advertising-api-eu.amazon.com
+DOMAIN-SUFFIX, advice-ads.s3.amazonaws.com
+DOMAIN-SUFFIX, affiliationjs.s3.amazonaws.com
+DOMAIN-SUFFIX, amazonaax.com
+DOMAIN-SUFFIX, amazonclix.com
+DOMAIN-SUFFIX, analytics.s3.amazonaws.com
+DOMAIN-SUFFIX, analyticsengine.s3.amazonaws.com
+DOMAIN-SUFFIX, assoc-amazon.com
+
+# Apple
+DOMAIN-SUFFIX, advertising.apple.com
+DOMAIN-SUFFIX, api-adservices.apple.com
+DOMAIN-SUFFIX, books-analytics-events.apple.com
+DOMAIN-SUFFIX, books-analytics-events.news.apple-dns.net
+DOMAIN-SUFFIX, dzc-metrics.mzstatic.com
+DOMAIN-SUFFIX, iadsdk.apple.com
+DOMAIN-SUFFIX, metrics.apple.com
+DOMAIN-SUFFIX, metrics.icloud.com
+DOMAIN-SUFFIX, metrics.mzstatic.com
+DOMAIN-SUFFIX, notes-analytics-events.apple.com
+DOMAIN-SUFFIX, securemetrics.apple.com
+DOMAIN-SUFFIX, stocks-analytics-events.apple.com
+DOMAIN-SUFFIX, stocks-analytics-events.news.apple-dns.net
+DOMAIN-SUFFIX, supportmetrics.apple.com
+DOMAIN-SUFFIX, tr.iadsdk.apple.com
+DOMAIN-SUFFIX, weather-analytics-events.apple.com
 
 # Google
 DOMAIN, firebaselogging-pa.googleapis.com
@@ -143,35 +394,6 @@ DOMAIN-SUFFIX, ssl.google-analytics.com
 DOMAIN-SUFFIX, static.doubleclick.net
 DOMAIN-SUFFIX, stats.g.doubleclick.net
 DOMAIN-SUFFIX, youtube.cleverads.vn
-
-# Apple
-DOMAIN-SUFFIX, advertising.apple.com
-DOMAIN-SUFFIX, api-adservices.apple.com
-DOMAIN-SUFFIX, books-analytics-events.apple.com
-DOMAIN-SUFFIX, books-analytics-events.news.apple-dns.net
-DOMAIN-SUFFIX, dzc-metrics.mzstatic.com
-DOMAIN-SUFFIX, iadsdk.apple.com
-DOMAIN-SUFFIX, metrics.apple.com
-DOMAIN-SUFFIX, metrics.icloud.com
-DOMAIN-SUFFIX, metrics.mzstatic.com
-DOMAIN-SUFFIX, notes-analytics-events.apple.com
-DOMAIN-SUFFIX, securemetrics.apple.com
-DOMAIN-SUFFIX, stocks-analytics-events.apple.com
-DOMAIN-SUFFIX, stocks-analytics-events.news.apple-dns.net
-DOMAIN-SUFFIX, supportmetrics.apple.com
-DOMAIN-SUFFIX, tr.iadsdk.apple.com
-DOMAIN-SUFFIX, weather-analytics-events.apple.com
-
-# Amazon
-DOMAIN-SUFFIX, adtago.s3.amazonaws.com
-DOMAIN-SUFFIX, advertising-api-eu.amazon.com
-DOMAIN-SUFFIX, advice-ads.s3.amazonaws.com
-DOMAIN-SUFFIX, affiliationjs.s3.amazonaws.com
-DOMAIN-SUFFIX, amazonaax.com
-DOMAIN-SUFFIX, amazonclix.com
-DOMAIN-SUFFIX, analytics.s3.amazonaws.com
-DOMAIN-SUFFIX, analyticsengine.s3.amazonaws.com
-DOMAIN-SUFFIX, assoc-amazon.com
 
 # Yahoo
 DOMAIN, c2shb-oao.ssp.yahoo.com
@@ -257,200 +479,6 @@ DOMAIN-SUFFIX, report.appmetrica.yandex.net
 DOMAIN-SUFFIX, share.yandex.ru
 DOMAIN-SUFFIX, startup.mobile.yandex.net
 DOMAIN-SUFFIX, yandexadexchange.net
-
-# Facebook
-DOMAIN-SUFFIX, ads.facebook.com
-DOMAIN-SUFFIX, an.facebook.com
-DOMAIN-SUFFIX, analytics.facebook.com
-DOMAIN-SUFFIX, fbthirdpartypixel.com
-DOMAIN-SUFFIX, fbthirdpartypixel.net
-DOMAIN-SUFFIX, fbthirdpartypixel.org
-DOMAIN-SUFFIX, pixel.facebook.com
-
-# Telegram Clients
-DOMAIN-SUFFIX, adsgram.ai
-DOMAIN-SUFFIX, swiftgram.app
-
-# X (Twitter)
-DOMAIN-SUFFIX, ads-api.twitter.com
-DOMAIN-SUFFIX, ads-twitter.com
-DOMAIN-SUFFIX, advertising.twitter.com
-DOMAIN-SUFFIX, static.ads-twitter.com
-
-# LinkedIn
-DOMAIN-SUFFIX, ads.linkedin.com
-DOMAIN-SUFFIX, analytics.pointdrive.linkedin.com
-
-# Pinterest
-DOMAIN-SUFFIX, ads-dev.pinterest.com
-DOMAIN-SUFFIX, ads.pinterest.com
-DOMAIN-SUFFIX, analytics.pinterest.com
-DOMAIN-SUFFIX, log.pinterest.com
-DOMAIN-SUFFIX, trk.pinterest.com
-DOMAIN-SUFFIX, trk2.pinterest.com
-DOMAIN-SUFFIX, widgets.pinterest.com
-
-# Reddit
-DOMAIN-SUFFIX, ads.reddit.com
-DOMAIN-SUFFIX, d.reddit.com
-DOMAIN-SUFFIX, events.reddit.com
-DOMAIN-SUFFIX, events.redditmedia.com
-DOMAIN-SUFFIX, rereddit.com
-
-# Samsung
-DOMAIN-SUFFIX, ad.samsungadhub.com
-DOMAIN-SUFFIX, analytics-api.samsunghealthcn.com
-DOMAIN-SUFFIX, analytics.samsungknox.com
-DOMAIN-SUFFIX, bigdata.ssp.samsung.com
-DOMAIN-SUFFIX, business.samsungusa.com
-DOMAIN-SUFFIX, config.samsungads.com
-DOMAIN-SUFFIX, nmetrics.samsung.com
-DOMAIN-SUFFIX, samsung-com.112.2o7.net
-DOMAIN-SUFFIX, samsungadhub.com
-DOMAIN-SUFFIX, samsungads.com
-DOMAIN-SUFFIX, smetrics.samsung.com
-
-# Analytics and Diagnostics
-DOMAIN, ali-stats.jpush.cn
-DOMAIN, analytics.shareaholic.com
-DOMAIN, analytics.theradioapp.com
-DOMAIN, app-analytics-services.com
-DOMAIN, astat.nikkei.com
-DOMAIN, cnlogs.umengcloud.com
-DOMAIN, d1dns4zpgsd7rz.cloudfront.net
-DOMAIN, ep1.adtrafficquality.google
-DOMAIN, ep2.adtrafficquality.google
-DOMAIN, errnewlog.umeng.com
-DOMAIN, gd-stats.jpush.cn
-DOMAIN, h-adashx.ut.taobao.com
-DOMAIN, matomo2.tdm.com.mo
-DOMAIN, oslogs.umeng.com
-DOMAIN, partner.shareaholic.com
-DOMAIN, pixel.wp.com
-DOMAIN, sb.scorecardresearch.com
-DOMAIN, sdc.rthk.hk
-DOMAIN, snap.licdn.com
-DOMAIN, static.chartbeat.com
-DOMAIN, static.cloudflareinsights.com
-DOMAIN, static.getclicky.com
-DOMAIN, statistics.tdm.com.mo
-DOMAIN, stats-ipv6.jpush.cn
-DOMAIN, stats.jpush.cn
-DOMAIN-SUFFIX, a.mouseflow.com
-DOMAIN-SUFFIX, adm.hotjar.com
-DOMAIN-SUFFIX, api-hotjar.com
-DOMAIN-SUFFIX, api.bugsnag.com
-DOMAIN-SUFFIX, api.luckyorange.com
-DOMAIN-SUFFIX, api.mouseflow.com
-DOMAIN-SUFFIX, app.bugsnag.com
-DOMAIN-SUFFIX, app.getsentry.com
-DOMAIN-SUFFIX, browser.sentry-cdn.com
-DOMAIN-SUFFIX, careers.hotjar.com
-DOMAIN-SUFFIX, cdn-test.mouseflow.com
-DOMAIN-SUFFIX, cdn.luckyorange.com
-DOMAIN-SUFFIX, cdn.mouseflow.com
-DOMAIN-SUFFIX, claritybt.freshmarketer.com
-DOMAIN-SUFFIX, cs.luckyorange.net
-DOMAIN-SUFFIX, events.hotjar.io
-DOMAIN-SUFFIX, firebase-settings.crashlytics.com
-DOMAIN-SUFFIX, freshmarketer.com
-DOMAIN-SUFFIX, fwtracks.freshmarketer.com
-DOMAIN-SUFFIX, gtm.mouseflow.com
-DOMAIN-SUFFIX, hotjar-analytics.com
-DOMAIN-SUFFIX, hotjar.com
-DOMAIN-SUFFIX, identify.hotjar.com
-DOMAIN-SUFFIX, insights.hotjar.com
-DOMAIN-SUFFIX, luckyorange.com
-DOMAIN-SUFFIX, luckyorange.net
-DOMAIN-SUFFIX, mouseflow.com
-DOMAIN-SUFFIX, notify.bugsnag.com
-DOMAIN-SUFFIX, o2.mouseflow.com
-DOMAIN-SUFFIX, realtime.luckyorange.com
-DOMAIN-SUFFIX, script.hotjar.com
-DOMAIN-SUFFIX, sentry.dailyart.nodea.net.pl
-DOMAIN-SUFFIX, sessions.bugsnag.com
-DOMAIN-SUFFIX, settings.luckyorange.net
-DOMAIN-SUFFIX, static.hotjar.com
-DOMAIN-SUFFIX, stats.wp.com
-DOMAIN-SUFFIX, surveys.hotjar.com
-DOMAIN-SUFFIX, tools.mouseflow.com
-DOMAIN-SUFFIX, upload.luckyorange.net
-DOMAIN-SUFFIX, w1.luckyorange.com
-
-# Advertising Platforms
-DOMAIN, a.teads.tv
-DOMAIN, ads.adthrive.com
-DOMAIN, ads.yieldmo.com
-DOMAIN, anymind360.com
-DOMAIN, bd.raptivecdn.com
-DOMAIN, beacon.bidder.taboola.com
-DOMAIN, cdn.caprofitx.com
-DOMAIN, cdn.taboola.com
-DOMAIN, config.ads.vungle.com
-DOMAIN, config.inmobi.com
-DOMAIN, d.applovin.com
-DOMAIN, display.bidder.taboola.com
-DOMAIN, fastlane.rubiconproject.com
-DOMAIN, get.optad360.io
-DOMAIN, grid-bidder.criteo.com
-DOMAIN, hbopenbid.pubmatic.com
-DOMAIN, htlb.casalemedia.com
-DOMAIN, ib.adnxs.com
-DOMAIN, img.ads.tvb.com
-DOMAIN, js-sec.indexww.com
-DOMAIN, log.outbrainimg.com
-DOMAIN, micro.rubiconproject.com
-DOMAIN, ms.applovin.com
-DOMAIN, ms.applvn.com
-DOMAIN, mwtw.presage.io
-DOMAIN, prebid.a-mo.net
-DOMAIN, r.skimresources.com
-DOMAIN, rt.applovin.com
-DOMAIN, rtb.openx.net
-DOMAIN, s.skimresources.com
-DOMAIN, servedby.revive-adserver.net
-DOMAIN, servedbyadbutler.com
-DOMAIN, ssp-sync.criteo.com
-DOMAIN, static.adsafeprotected.com
-DOMAIN, static.criteo.net
-DOMAIN, static.dable.io
-DOMAIN, stormgate.production.raptive.com
-DOMAIN, t.skimresources.com
-DOMAIN, tcheck.outbrainimg.com
-DOMAIN, telemetry.sdk.inmobi.com
-DOMAIN, tlx.3lift.com
-DOMAIN, widget-pixels.outbrain.com
-DOMAIN-SUFFIX, ad-api.uogroup.com
-DOMAIN-SUFFIX, ad2.plugmedia.hk
-DOMAIN-SUFFIX, adc3-launch.adcolony.com
-DOMAIN-SUFFIX, ads30.adcolony.com
-DOMAIN-SUFFIX, adserver.unityads.unity3d.com
-DOMAIN-SUFFIX, adservetx.media.net
-DOMAIN-SUFFIX, auction.unityads.unity3d.com
-DOMAIN-SUFFIX, cdn.fastclick.net
-DOMAIN-SUFFIX, config.unityads.unity3d.com
-DOMAIN-SUFFIX, events3alt.adcolony.com
-DOMAIN-SUFFIX, fastclick.com
-DOMAIN-SUFFIX, fastclick.net
-DOMAIN-SUFFIX, html-load.com
-DOMAIN-SUFFIX, media.fastclick.net
-DOMAIN-SUFFIX, media.net
-DOMAIN-SUFFIX, static.media.net
-DOMAIN-SUFFIX, wd.adcolony.com
-DOMAIN-SUFFIX, webview.unityads.unity3d.com
-
-# Ad Networks and Malvertising
-DOMAIN-SUFFIX, adxadserv.com
-DOMAIN-SUFFIX, bongacash.com
-DOMAIN-SUFFIX, cdn.yourwebbars.com
-DOMAIN-SUFFIX, czilladx.com
-DOMAIN-SUFFIX, isafe.pro
-DOMAIN-SUFFIX, mobile-cleaner.net
-DOMAIN-SUFFIX, olmsoneenh.info
-DOMAIN-SUFFIX, payingnoodlescam.com
-DOMAIN-SUFFIX, poweredby.jads.co
-DOMAIN-SUFFIX, promo-bc.com
-DOMAIN-SUFFIX, weedbits.com
 
 # Imported List
 # Source: https://raw.githubusercontent.com/limbopro/Adblock4limbo/main/Adblock4limbo_surge.list
