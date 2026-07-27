@@ -201,6 +201,9 @@ DOMAIN-SUFFIX, supportmetrics.apple.com
 DOMAIN-SUFFIX, tr.iadsdk.apple.com
 DOMAIN-SUFFIX, weather-analytics-events.apple.com
 
+# Clouder
+DOMAIN, clouder-analytics.jeanrobert-nino-layton.workers.dev
+
 # Google
 DOMAIN, firebaselogging-pa.googleapis.com
 DOMAIN, imasdk.googleapis.com
