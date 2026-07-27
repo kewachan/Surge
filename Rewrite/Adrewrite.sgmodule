@@ -11,7 +11,9 @@
 
 #CTMbuddy
 ^https?:\/\/www.ctm.net\/crm_api\/crm-cms-server\/\w\/advertise\/by\/adv - reject
+^https?:\/\/www\.ctm\.net\/crm_api\/crm-cms-server\/g\/advertise\/by\/buddyConf - reject
 ^https?:\/\/www.ctm.net\/crm_api\/crm-cms-server\/\w\/advertise\/by\/openingAdv - reject
+^https?:\/\/www\.ctm\.net\/crm_api\/crm-cluster-server\/p\/by\/v2\/advertise\/bdayBanner - reject
 ^https?:\/\/www.ctm.net\/crm_api\/crm-portal-server\/\w\/by\/loyalty\/member\/ads\? - reject
 
 #Macau Movie
