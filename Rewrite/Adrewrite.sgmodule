@@ -50,7 +50,7 @@
 ##### Others #####
 
 #BiliBili
-^https:\/\/grpc\.biliapi\.net\/bilibili\.app\.viewunite\.v1\.View\/PlayPause$ - reject
+^https:\/\/grpc\.biliapi\.net\/bilibili\.app\.(view|viewunite)\.v1\.View\/PlayPause$ - reject
 
 #xiaohongshu
 ^https?:\/\/.+\.xiaohongshu\.com\/.+(metrics|report|Report) - reject
