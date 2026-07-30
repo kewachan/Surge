@@ -345,7 +345,9 @@ DOMAIN-SUFFIX, yandexadexchange.net
 DOMAIN, ali-stats.jpush.cn
 DOMAIN, analytics.shareaholic.com
 DOMAIN, analytics.theradioapp.com
+DOMAIN, api3.branch.io
 DOMAIN, app-analytics-services.com
+DOMAIN, assets.adobedtm.com
 DOMAIN, astat.nikkei.com
 DOMAIN, cdn-settings.segment.com
 DOMAIN, cnlogs.umengcloud.com
@@ -355,6 +357,7 @@ DOMAIN, ep2.adtrafficquality.google
 DOMAIN, errnewlog.umeng.com
 DOMAIN, gd-stats.jpush.cn
 DOMAIN, h-adashx.ut.taobao.com
+DOMAIN, logx.optimizely.com
 DOMAIN, matomo2.tdm.com.mo
 DOMAIN, oslogs.umeng.com
 DOMAIN, partner.shareaholic.com
@@ -368,6 +371,7 @@ DOMAIN, static.getclicky.com
 DOMAIN, statistics.tdm.com.mo
 DOMAIN, stats-ipv6.jpush.cn
 DOMAIN, stats.jpush.cn
+DOMAIN, tags.tiqcdn.com
 DOMAIN-SUFFIX, a.mouseflow.com
 DOMAIN-SUFFIX, adm.hotjar.com
 DOMAIN-SUFFIX, api-hotjar.com
