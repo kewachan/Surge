@@ -147,6 +147,8 @@ DOMAIN-SUFFIX, fbthirdpartypixel.org
 DOMAIN-SUFFIX, pixel.facebook.com
 
 # LinkedIn
+DOMAIN, cs.ns1p.net
+DOMAIN, s2s.singular.net
 DOMAIN-SUFFIX, ads.linkedin.com
 DOMAIN-SUFFIX, analytics.pointdrive.linkedin.com
 
