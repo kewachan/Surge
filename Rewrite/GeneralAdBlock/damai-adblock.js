@@ -1,9 +1,10 @@
 /**
  * Damai splash ad blocker for Surge.
  *
- * Preserve the successful MTop response envelope while removing its splash
- * payload. Damai falls back to a cached splash ad when the request fails, so
- * the upstream request must be allowed to complete normally.
+ * Preserve the successful MTop response envelope while removing both the
+ * welcome payload and the logged-in user's preloaded splash ad list. Damai
+ * falls back to a cached splash ad when the request fails, so the upstream
+ * request must be allowed to complete normally.
  */
 
 try {
