@@ -2,6 +2,12 @@
 #!desc=Unified module for website/app response scripts; each target uses a dedicated JS file
 #!system=ios
 
+[URL Rewrite]
+# Damai cached splash media observed in the preload-ad response.
+^https?:\/\/cloud\.video\.taobao\.com\/vod\/EvmD0on5cPmA6XBTnWFCfKEcVGvnP0PacVvI95wwWH8\.mp4(?:\?.*)?$ - reject
+^https?:\/\/tbexpand\.alicdn\.com\/avpl\/publish\/copy\/019f-b6ee08c0-8b8f3082-9f8cf347-0514\/d516acea143b3154\.mp4(?:\?.*)?$ - reject
+^https?:\/\/(?:img|gw)\.alicdn\.com\/imgextra\/i3\/O1CN011noiIf20Q9R0wZQiz_!!6000000006843-0-tps-1080-1920\.jpg(?:_.*)?$ - reject
+
 [Script]
 Damai = type=http-response, pattern=^https?:\/\/acs\.m\.taobao\.com\/gw\/(?:mtop\.damai\.wireless\.home\.welcome|mtop\.film\.independentadvertiseapi\.querypreloadadvlist)\/[^?]*(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/damai-adblock.js?v=1.0.3
 Google = type=http-response, pattern=^https?:\/\/(www\.)?google\.[^\/]+\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/google-adblock.js?v=1.0.17
@@ -11,4 +17,4 @@ Yahoo Finance Request = type=http-request, pattern=^https:\/\/config\.mobile\.ya
 Yahoo Finance = type=http-response, pattern=^https:\/\/config\.mobile\.yahoo\.com\/V3\/getconfig(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/yahoo-finance-adblock.js?v=1.0.0
 
 [MITM]
-hostname = %APPEND% *.manhuashe.com, acs.m.taobao.com, config.mobile.yahoo.com, meta.wikimedia.org, www.google.com, zh.wikipedia.org
+hostname = %APPEND% *.manhuashe.com, acs.m.taobao.com, cloud.video.taobao.com, config.mobile.yahoo.com, gw.alicdn.com, img.alicdn.com, meta.wikimedia.org, tbexpand.alicdn.com, www.google.com, zh.wikipedia.org
