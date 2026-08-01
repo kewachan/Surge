@@ -1,24 +1,20 @@
 /**
  * Damai splash ad blocker for Surge.
  *
- * Return a successful empty MTop payload instead of rejecting the request.
- * Damai falls back to a previously cached splash ad when the request fails.
+ * Preserve the successful MTop response envelope while removing its splash
+ * payload. Damai falls back to a cached splash ad when the request fails, so
+ * the upstream request must be allowed to complete normally.
  */
 
-const body = JSON.stringify({
-  api: "mtop.damai.wireless.home.welcome",
-  data: {},
-  ret: ["SUCCESS::调用成功"],
-  v: "1.3"
-});
+try {
+  const response = JSON.parse($response.body || "{}");
 
-$done({
-  response: {
-    status: 200,
-    headers: {
-      "Cache-Control": "no-store",
-      "Content-Type": "application/json; charset=utf-8"
-    },
-    body: body
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    $done({});
+  } else {
+    response.data = {};
+    $done({ body: JSON.stringify(response) });
   }
-});
+} catch (_) {
+  $done({});
+}
