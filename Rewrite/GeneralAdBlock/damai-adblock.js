@@ -1,25 +1,30 @@
 /**
- * Damai splash ad blocker for Surge.
- *
- * Preserve the successful MTop response envelope while removing both the
- * welcome payload and the logged-in user's preloaded splash ad list. Damai
- * falls back to a cached splash ad when the request fails, so the upstream
- * request must be allowed to complete normally.
+ * Return an immediate successful MTop response before Damai can show its
+ * bundled fallback splash or download a logged-in user's preload ad list.
  */
 
-try {
-  const response = JSON.parse($response.body || "{}");
+const isPreloadedAdList = ($request.url || "").includes(
+  "mtop.film.independentadvertiseapi.querypreloadadvlist"
+);
 
-  if (!response || typeof response !== "object" || Array.isArray(response)) {
-    $done({});
-  } else {
-    const isPreloadedAdList = ($request.url || "").includes(
-      "mtop.film.independentadvertiseapi.querypreloadadvlist"
-    );
+const body = JSON.stringify({
+  api: isPreloadedAdList
+    ? "mtop.film.independentadvertiseapi.querypreloadadvlist"
+    : "mtop.damai.wireless.home.welcome",
+  data: isPreloadedAdList ? { adList: [] } : {},
+  ret: ["SUCCESS::调用成功"],
+  v: isPreloadedAdList ? "1.0" : "1.3"
+});
 
-    response.data = isPreloadedAdList ? { adList: [] } : {};
-    $done({ body: JSON.stringify(response) });
+$done({
+  response: {
+    status: 200,
+    headers: {
+      "Cache-Control": "no-cache, no-store",
+      "Content-Type": "application/json;charset=UTF-8",
+      "Pragma": "no-cache",
+      "x-retcode": "SUCCESS"
+    },
+    body: body
   }
-} catch (_) {
-  $done({});
-}
+});
