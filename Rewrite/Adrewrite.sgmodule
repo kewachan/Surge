@@ -59,9 +59,6 @@
 ^https?:\/\/www\.rnote\.com\/api\/sns\/v1\/ads\/apple\/record - reject
 ^https?:\/\/www\.rnote\.com\/api\/sns\/v1\/tag\/ads_engage - reject
 
-#Damai
-^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.damai\.wireless\.home\.welcome\/ - reject
-
 #Manhuashe
 ^https?:\/\/comicapi\.manhuashe\.com\/v\d\/ads - reject
 ^https?:\/\/comicapi\.manhuashe\.com\/v\d\/public\/homenav - reject
@@ -139,4 +136,4 @@
 BahamutAnimeAds = type=http-response,pattern=^https:\/\/api\.gamer\.com\.tw\/mobile_app\/anime\/v\d/(token|m3u8).php\?,requires-body=1,max-size=0,timeout=40,script-path=https://raw.githubusercontent.com/NobyDa/Script/master/Bahamut/BahamutAnimeAds.js
 
 [MITM]
-hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, *.macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, grpc.biliapi.net, *.xiaohongshu.com, *.rnote.com, *.manhuashe.com, *.lihkg.com, *.amap.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, *.shoalter.com, *.fanpiece.com, unwire.hk, *.idownloadblog.com, *.mobile01.com, *.yimg.com, *.alicdn.com, *.i18n-pglstatp.com, api.gamer.com.tw, acs.m.taobao.com
+hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, *.macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, grpc.biliapi.net, *.xiaohongshu.com, *.rnote.com, *.manhuashe.com, *.lihkg.com, *.amap.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, *.shoalter.com, *.fanpiece.com, unwire.hk, *.idownloadblog.com, *.mobile01.com, *.yimg.com, *.alicdn.com, *.i18n-pglstatp.com, api.gamer.com.tw
