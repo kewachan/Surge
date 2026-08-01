@@ -13,7 +13,11 @@ try {
   if (!response || typeof response !== "object" || Array.isArray(response)) {
     $done({});
   } else {
-    response.data = {};
+    const isPreloadedAdList = ($request.url || "").includes(
+      "mtop.film.independentadvertiseapi.querypreloadadvlist"
+    );
+
+    response.data = isPreloadedAdList ? { adList: [] } : {};
     $done({ body: JSON.stringify(response) });
   }
 } catch (_) {

@@ -3,7 +3,7 @@
 #!system=ios
 
 [Script]
-Damai = type=http-response, pattern=^https?:\/\/acs\.m\.taobao\.com\/gw\/(?:mtop\.damai\.wireless\.home\.welcome|mtop\.film\.independentadvertiseapi\.querypreloadadvlist)\/[^?]*(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/damai-adblock.js?v=1.0.2
+Damai = type=http-response, pattern=^https?:\/\/acs\.m\.taobao\.com\/gw\/(?:mtop\.damai\.wireless\.home\.welcome|mtop\.film\.independentadvertiseapi\.querypreloadadvlist)\/[^?]*(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/damai-adblock.js?v=1.0.3
 Google = type=http-response, pattern=^https?:\/\/(www\.)?google\.[^\/]+\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/google-adblock.js?v=1.0.17
 Manhuashe = type=http-response, pattern=^https?:\/\/comicapi\.manhuashe\.com\/v\d\/.+?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/manhuashe-adblock.js?v=1.0.2
 Wikipedia = type=http-response, pattern=^https?:\/\/(?:zh\.wikipedia\.org\/w\/load\.php\?.*modules=ext\.gadget\.VariantAllyDialog(?:&.*)?|zh\.wikipedia\.org\/w\/api\.php\?.*page=Template(?:%3A|:)AdvancedSiteNotices(?:%2F|\/)ajax(?:&.*)?|meta\.wikimedia\.org\/w\/index\.php\?.*title=Special(?:%3A|:)BannerLoader(?:&.*)?)$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/wikipedia-adblock.js?v=1.0.1
