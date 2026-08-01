@@ -29,6 +29,11 @@ DOMAIN, event-cep.dfiretailgroup.com
 DOMAIN, client-upload.cn-shanghai.log.aliyuncs.com
 DOMAIN, poplayer.template.alibaba.com
 
+# Damai
+DOMAIN, h-adashx.ut.hzshudian.com
+DOMAIN, log.mmstat.com
+DOMAIN, px.effirst.com
+
 # Alipay
 DOMAIN, datagw-edge.alipay.com
 DOMAIN, loggw-ex.alipay.com
