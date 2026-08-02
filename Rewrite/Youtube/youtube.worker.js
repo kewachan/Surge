@@ -14,6 +14,8 @@ const UPSTREAM_TIMEOUT_MS = 25000;
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const PAGEAD_MARKER = TEXT_ENCODER.encode("pagead");
+const ADVIEW_MARKER = TEXT_ENCODER.encode("adview");
+const GOOGLEADS_MARKER = TEXT_ENCODER.encode("googleads");
 const YT_ADS_WEBVIEW_MARKER = TEXT_ENCODER.encode("yt-ads-web-view-id");
 const INLINE_INJECTION_ENTRYPOINT_MARKER = TEXT_ENCODER.encode("inline_injection_entrypoint_layout.eml");
 const SHOPPING_TIMELY_SHELF_MARKER = TEXT_ENCODER.encode("shopping_timely_shelf.eml-fe");
@@ -227,6 +229,78 @@ function isWatchNextChipRow(bytes) {
   }
 }
 
+function isMoreVideosItemContainer(bytes) {
+  try {
+    const filterShelf = firstLengthDelimitedValue(bytes, 1);
+    const content = filterShelf && firstLengthDelimitedValue(filterShelf, 188360221);
+    const chipContent = content && firstLengthDelimitedValue(content, 1);
+    const chipList = chipContent && firstLengthDelimitedValue(chipContent, 90823135);
+    if (!chipList) return false;
+
+    return parseProto(chipList).filter((field) => (
+      field.no === 1
+      && field.wire === 2
+      && parseProto(field.value).some((child) => child.no === 91394224 && child.wire === 2)
+    )).length >= 2;
+  } catch {
+    return false;
+  }
+}
+
+function containsMoreVideosAdSignal(bytes) {
+  return containsBytes(bytes, PAGEAD_MARKER)
+    && (containsBytes(bytes, ADVIEW_MARKER) || containsBytes(bytes, GOOGLEADS_MARKER));
+}
+
+function stripMoreVideosItemContainer(bytes) {
+  if (!isMoreVideosItemContainer(bytes)) return { bytes, removed: 0 };
+
+  const output = [];
+  let removed = 0;
+  for (const field of parseProto(bytes)) {
+    if (field.no === 2 && field.wire === 2 && containsMoreVideosAdSignal(field.value)) {
+      removed++;
+      continue;
+    }
+    output.push(field.raw);
+  }
+  return { bytes: removed > 0 ? concatBytes(...output) : bytes, removed };
+}
+
+function stripMoreVideosAds(bytes, depth = 0) {
+  if (!containsBytes(bytes, PAGEAD_MARKER) || depth > 16) return { bytes, removed: 0 };
+
+  let fields;
+  try {
+    fields = parseProto(bytes);
+  } catch {
+    return { bytes, removed: 0 };
+  }
+
+  const output = [];
+  let removed = 0;
+  let changed = false;
+  for (const field of fields) {
+    if (field.wire !== 2 || !containsBytes(field.value, PAGEAD_MARKER)) {
+      output.push(field.raw);
+      continue;
+    }
+
+    const result = field.no === 29209665
+      ? stripMoreVideosItemContainer(field.value)
+      : stripMoreVideosAds(field.value, depth + 1);
+    removed += result.removed;
+    if (result.removed > 0) {
+      changed = true;
+      output.push(encodeLengthDelimitedField(field.no, result.bytes));
+    } else {
+      output.push(field.raw);
+    }
+  }
+
+  return { bytes: changed ? concatBytes(...output) : bytes, removed };
+}
+
 function stripItemSectionRichAds(bytes) {
   let fields;
   try {
@@ -427,10 +501,11 @@ function stripNextResponseAds(nextBytes) {
     // covers continuation actions and newly introduced wrapper fields while
     // the unique ItemSectionRenderer extension keeps deletion tightly scoped.
     const adResult = stripCommentAreaAdRenderers(nextBytes);
-    const shoppingResult = stripTimelyShoppingShelf(adResult.bytes);
+    const moreVideosResult = stripMoreVideosAds(adResult.bytes);
+    const shoppingResult = stripTimelyShoppingShelf(moreVideosResult.bytes);
     return {
       bytes: shoppingResult.bytes,
-      removed: adResult.removed + shoppingResult.removed,
+      removed: adResult.removed + moreVideosResult.removed + shoppingResult.removed,
     };
   } catch (error) {
     console.error("YouTube NextResponse ad content was left unchanged:", error);
