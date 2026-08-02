@@ -245,6 +245,7 @@ DOMAIN-SUFFIX, analytics.google.com
 DOMAIN-SUFFIX, app-measurement.com
 DOMAIN-SUFFIX, click.googleanalytics.com
 DOMAIN-SUFFIX, csp.withgoogle.com
+DOMAIN-SUFFIX, doubleclick.net
 DOMAIN-SUFFIX, google-analytics.com
 DOMAIN-SUFFIX, googleadservices.com
 DOMAIN-SUFFIX, googletagmanager.com
