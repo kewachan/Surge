@@ -1,13 +1,16 @@
 /**
  * Bahamut Anime ad bypass for Surge.
  *
- * Bahamut validates the ad viewing interval server-side. Hide the ad payload,
- * wait for the legacy validation window, report completion, then retry the
- * playback-source request. Supports both the legacy m3u8.php endpoint and the
- * current video_src.php endpoint used by the iOS app.
+ * Bahamut validates the ad viewing interval server-side. Start that interval
+ * on the detail-page token request so it can finish before playback begins.
+ * The playback-source handler retains the original wait-and-retry fallback.
+ * Supports both the legacy m3u8.php endpoint and the current video_src.php.
  */
 
 const AD_WAIT_MS = 25000;
+const PREWARM_TTL_MS = 120000;
+const PREWARM_STALE_MS = AD_WAIT_MS + 10000;
+const PREWARM_KEY = "bahamut_ad_prewarm_v1";
 const requestURL = $request.url || "";
 let responseJSON;
 
@@ -30,10 +33,21 @@ if (responseJSON) {
 async function run() {
   if (requestURL.includes("/token.php")) {
     clearAdSlots(responseJSON);
+
+    const videoSn = getVideoSn(requestURL);
+    if (videoSn) {
+      try {
+        await prewarmAdValidation(videoSn);
+      } catch (error) {
+        clearPrewarmState(videoSn);
+        console.log(`[BahamutAnimeAds] Prewarm failed: ${error.message || error}`);
+      }
+    }
+
     return;
   }
 
-  if (!isPlaybackSource(requestURL) || !hasPlaybackError(responseJSON)) {
+  if (!isPlaybackSource(requestURL)) {
     return;
   }
 
@@ -42,14 +56,82 @@ async function run() {
     throw new Error("Missing video serial number");
   }
 
-  await reportAdProgress("", videoSn);
-  await sleep(AD_WAIT_MS);
-  await reportAdProgress("end", videoSn);
+  if (!hasPlaybackError(responseJSON)) {
+    clearPrewarmState(videoSn);
+    return;
+  }
+
+  clearPrewarmState(videoSn);
+  await completeAdValidation(videoSn);
 
   const retriedResponse = await fetchJSON(requestURL, $request.headers || {});
   if (retriedResponse) {
     responseJSON = retriedResponse;
   }
+
+  clearPrewarmState(videoSn);
+}
+
+async function prewarmAdValidation(videoSn) {
+  const state = readPrewarmState();
+  const now = Date.now();
+
+  if (
+    state &&
+    state.videoSn === videoSn &&
+    state.status === "complete" &&
+    now - state.completedAt < PREWARM_TTL_MS
+  ) {
+    console.log(`[BahamutAnimeAds] Prewarm ready for ${videoSn}`);
+    return;
+  }
+
+  if (
+    state &&
+    state.videoSn === videoSn &&
+    state.status === "pending" &&
+    now - state.startedAt < PREWARM_STALE_MS
+  ) {
+    const remaining = Math.max(0, AD_WAIT_MS - (now - state.startedAt));
+    await sleep(remaining + 500);
+
+    const refreshedState = readPrewarmState();
+    if (
+      refreshedState &&
+      refreshedState.videoSn === videoSn &&
+      refreshedState.status === "complete"
+    ) {
+      return;
+    }
+
+    await reportAdProgress("end", videoSn);
+    writePrewarmState({
+      videoSn,
+      status: "complete",
+      completedAt: Date.now()
+    });
+    return;
+  }
+
+  await reportAdProgress("", videoSn);
+  writePrewarmState({
+    videoSn,
+    status: "pending",
+    startedAt: Date.now()
+  });
+  await sleep(AD_WAIT_MS);
+  await reportAdProgress("end", videoSn);
+  writePrewarmState({
+    videoSn,
+    status: "complete",
+    completedAt: Date.now()
+  });
+}
+
+async function completeAdValidation(videoSn) {
+  await reportAdProgress("", videoSn);
+  await sleep(AD_WAIT_MS);
+  await reportAdProgress("end", videoSn);
 }
 
 function clearAdSlots(body) {
@@ -75,6 +157,27 @@ function hasPlaybackError(body) {
 function getVideoSn(url) {
   const match = url.match(/[?&](?:videoSn|sn)=(\d+)/i);
   return match ? match[1] : "";
+}
+
+function readPrewarmState() {
+  try {
+    const value = $persistentStore.read(PREWARM_KEY);
+    return value ? JSON.parse(value) : null;
+  } catch (error) {
+    console.log(`[BahamutAnimeAds] Invalid prewarm state: ${error.message || error}`);
+    return null;
+  }
+}
+
+function writePrewarmState(state) {
+  $persistentStore.write(JSON.stringify(state), PREWARM_KEY);
+}
+
+function clearPrewarmState(videoSn) {
+  const state = readPrewarmState();
+  if (!videoSn || !state || state.videoSn === videoSn) {
+    $persistentStore.write(null, PREWARM_KEY);
+  }
 }
 
 function reportAdProgress(stage, videoSn) {
