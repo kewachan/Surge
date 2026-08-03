@@ -10,6 +10,7 @@ DOMAIN-SUFFIX, cdn-apple.com
 DOMAIN, gsa.apple.com
 
 #Youtube EI
+URL-REGEX,^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/browse(?:\?.*)?$
 URL-REGEX,^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/offline(?:\/[^?]*)?(?:\?.*)?$
 URL-REGEX,^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/player(?:\/[^?]*)?(?:\?.*)?$
 URL-REGEX,^https:\/\/[^\/]+\.googlevideo\.com\/videoplayback\?.*(?:\?|&)itag=
