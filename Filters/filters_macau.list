@@ -13,6 +13,7 @@ DOMAIN, gsa.apple.com
 URL-REGEX,^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/offline(?:\/[^?]*)?(?:\?.*)?$
 URL-REGEX,^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/player(?:\?.*)?$
 URL-REGEX,^https:\/\/[^\/]+\.googlevideo\.com\/videoplayback\?.*(?:\?|&)itag=
+URL-REGEX,^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/browse(?:\?.*)?$
 
 #RandomArt
 DOMAIN-SUFFIX, randomdailyart.com
