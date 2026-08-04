@@ -3,7 +3,7 @@
  *
  * Intercept requests before the real advertising payload reaches the app,
  * with a response-stage fallback for already-started requests. The splash
- * compressed banner endpoints use base64-encoded zlib data, most ad lists use
+ * endpoint uses base64-encoded zlib data, most ad lists use
  * JSON arrays, and special/floating-banner endpoints use an empty body when no
  * ad exists.
  */
@@ -11,9 +11,7 @@
 const EMPTY_COMPRESSED_LIST = "eJyLjgUAARUAuQ==";
 const requestURL = $request.url || "";
 const requestMethod = ($request.method || "").toUpperCase();
-const isCompressedList =
-  requestURL.includes("/_list_spread-compress") ||
-  requestURL.includes("/orgs/basic/banner/_list-compress");
+const isCompressedList = requestURL.includes("/_list_spread-compress");
 const isJSONList =
   requestURL.includes("/_comprehensive_pop_list") ||
   requestURL.includes("/getGroupPopList") ||
