@@ -1,11 +1,18 @@
 /**
- * Remove mFood launch-screen advertisements.
+ * Remove mFood launch-screen and popup advertisements.
  *
- * The endpoint returns base64-encoded zlib data rather than plain JSON.
- * This is the compressed representation of an empty JSON array, allowing
- * the app to receive a valid response and replace any cached splash list.
+ * The splash endpoint returns base64-encoded zlib data rather than plain
+ * JSON. The popup endpoint returns JSON directly. In both cases, respond
+ * with a valid empty list so the app can clear cached advertising data.
  */
 
 const EMPTY_COMPRESSED_LIST = "eJyLjgUAARUAuQ==";
+const requestURL = $request.url || "";
 
-$done({ body: EMPTY_COMPRESSED_LIST });
+if (requestURL.includes("/_list_spread-compress")) {
+  $done({ body: EMPTY_COMPRESSED_LIST });
+} else if (requestURL.includes("/_comprehensive_pop_list")) {
+  $done({ body: "[]" });
+} else {
+  $done({});
+}
