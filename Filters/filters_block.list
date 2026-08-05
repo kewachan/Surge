@@ -170,6 +170,7 @@ DOMAIN-SUFFIX, fbthirdpartypixel.com
 DOMAIN-SUFFIX, fbthirdpartypixel.net
 DOMAIN-SUFFIX, fbthirdpartypixel.org
 DOMAIN-SUFFIX, pixel.facebook.com
+URL-REGEX,^https:\/\/connect\.facebook\.net\/(?:(?:[^\/]+\/)?fbevents\.js|signals\/config\/[^\/?]+)(?:\?.*)?$
 
 # LinkedIn
 DOMAIN, cs.ns1p.net
@@ -202,6 +203,7 @@ DOMAIN-SUFFIX, ads-api.twitter.com
 DOMAIN-SUFFIX, ads-twitter.com
 DOMAIN-SUFFIX, advertising.twitter.com
 DOMAIN-SUFFIX, static.ads-twitter.com
+URL-REGEX,^https:\/\/syndication\.x\.com\/i\/jot\/embeds(?:\?.*)?$
 
 # Amazon
 DOMAIN, api.mshop.bdtelemetry.amazon
@@ -268,6 +270,8 @@ DOMAIN-SUFFIX, ssl.google-analytics.com
 DOMAIN-SUFFIX, static.doubleclick.net
 DOMAIN-SUFFIX, stats.g.doubleclick.net
 DOMAIN-SUFFIX, youtube.cleverads.vn
+URL-REGEX,^https:\/\/cdn\.ampproject\.org\/(?:rtv\/[^\/]+\/)?v0\/(?:amp-ad(?:-network-doubleclick-impl)?|amp-analytics)-0\.1\.(?:js|mjs)(?:\?.*)?$
+URL-REGEX,^https:\/\/play\.google\.com\/newsstand\/api\/v3\/people\/me\/analytics(?:\?.*)?$
 URL-REGEX,^https:\/\/play\.googleapis\.com\/log\/batch(?:\?.*)?$
 
 # Yahoo
@@ -389,7 +393,11 @@ DOMAIN, statistics.tdm.com.mo
 DOMAIN, stats-ipv6.jpush.cn
 DOMAIN, stats.jpush.cn
 DOMAIN, tags.tiqcdn.com
+URL-REGEX,^https:\/\/app\.termly\.io\/api\/v1\/snippets\/websites\/[^\/]+\/statistics(?:\?.*)?$
 URL-REGEX,^https:\/\/[^\/]+\.device\.marketingcloudapis\.com\/device\/v1\/event\/analytic(?:\?.*)?$
+URL-REGEX,^https:\/\/s0\.wp\.com\/wp-content\/js\/bilmur\.min\.js(?:\?.*)?$
+URL-REGEX,^https:\/\/www\.spill\.hk\/cdn-cgi\/zaraz\/(?:s\.js|t)(?:\?.*)?$
+URL-REGEX,^https:\/\/zjapi\.bauhk\.com\/(?:gougc\/userSurfInfo\/save|hlxStatistics\/currency)(?:\?.*)?$
 DOMAIN-SUFFIX, a.mouseflow.com
 DOMAIN-SUFFIX, adm.hotjar.com
 DOMAIN-SUFFIX, api-hotjar.com
@@ -435,11 +443,16 @@ DOMAIN-SUFFIX, w1.luckyorange.com
 
 # Advertising Platforms
 DOMAIN, a.teads.tv
+DOMAIN, abc.hkepc.net
 DOMAIN, ad2.apx.appier.net
+DOMAIN, ad-specs.guoshipartners.com
 DOMAIN, ads.adthrive.com
 DOMAIN, ads.yieldmo.com
+DOMAIN, api.permutive.com
 DOMAIN, api.w.inmobi.com
+DOMAIN, app.rybbit.io
 DOMAIN, anymind360.com
+DOMAIN, au.adhacker.online
 DOMAIN, bd.raptivecdn.com
 DOMAIN, beacon.bidder.taboola.com
 DOMAIN, cdn.caprofitx.com
@@ -447,7 +460,9 @@ DOMAIN, cdn.taboola.com
 DOMAIN, config.ads.vungle.com
 DOMAIN, config.inmobi.com
 DOMAIN, cpm.bidmyqps.xyz
+DOMAIN, currency.prebid.org
 DOMAIN, d.applovin.com
+DOMAIN, dmp.im-apps.net
 DOMAIN, display.bidder.taboola.com
 DOMAIN, fastlane.rubiconproject.com
 DOMAIN, get.optad360.io
@@ -457,34 +472,48 @@ DOMAIN, htlb.casalemedia.com
 DOMAIN, ib.adnxs.com
 DOMAIN, img.ads.tvb.com
 DOMAIN, js-sec.indexww.com
+DOMAIN, jwpltx.com
+DOMAIN, l.logly.co.jp
 DOMAIN, log.outbrainimg.com
 DOMAIN, micro.rubiconproject.com
 DOMAIN, ms.applovin.com
 DOMAIN, ms.applvn.com
 DOMAIN, mwtw.presage.io
+DOMAIN, nt.compass-fit.jp
 DOMAIN, prebid.a-mo.net
 DOMAIN, prebid.ad.smaato.net
+DOMAIN, pv.ltn.com.tw
+DOMAIN, qcloud20.qno.com.tw
 DOMAIN, r.skimresources.com
 DOMAIN, rt.applovin.com
 DOMAIN, rt.applvn.com
 DOMAIN, rtb.openx.net
 DOMAIN, s.ad.smaato.net
 DOMAIN, s.skimresources.com
+DOMAIN, server.punwave.com
 DOMAIN, servedby.revive-adserver.net
 DOMAIN, servedbyadbutler.com
 DOMAIN, sync.adkernel.com
 DOMAIN, sync.inmobi.com
+DOMAIN, sync.logly.co.jp
 DOMAIN, ssp-sync.criteo.com
 DOMAIN, static.adsafeprotected.com
 DOMAIN, static.criteo.net
 DOMAIN, static.dable.io
 DOMAIN, stormgate.production.raptive.com
 DOMAIN, t.skimresources.com
+DOMAIN, t.ssp.hinet.net
+DOMAIN, tag.adbro.me
 DOMAIN, tcheck.outbrainimg.com
 DOMAIN, telemetry.sdk.inmobi.com
 DOMAIN, tlx.3lift.com
 DOMAIN, trc.taboola.com
 DOMAIN, widget-pixels.outbrain.com
+URL-REGEX,^https:\/\/cache\.ltn\.com\.tw\/(?:css|js)\/cache_ads_h1(?:\.min)?\.(?:css|js)(?:\?.*)?$
+URL-REGEX,^https:\/\/cds\.connatix\.com\/p\/plugins\/prebid-cache-scraper-[^\/?]+\.js(?:\?.*)?$
+URL-REGEX,^https:\/\/pansci\.asia\/wp-content\/plugins\/advanced-ads\/admin\/assets\/js\/advertisement\.js(?:\?.*)?$
+URL-REGEX,^https:\/\/www\.pcmarket\.com\.hk\/wp-content\/plugins\/ad-invalid-click-protector\/
+URL-REGEX,^https:\/\/(?:cdn\.)?unwire\.hk\/(?:ads-beacon\.js|wp-content\/plugins\/google-analytics-premium\/assets\/js\/frontend-gtag\.min\.js|wp-content\/themes\/unwire\/static\/js\/unwire-gpt-manager\.js)(?:\?.*)?$
 DOMAIN-SUFFIX, ad-api.uogroup.com
 DOMAIN-SUFFIX, ad2.plugmedia.hk
 DOMAIN-SUFFIX, adc3-launch.adcolony.com
