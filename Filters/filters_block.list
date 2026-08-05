@@ -199,11 +199,11 @@ DOMAIN-SUFFIX, adsgram.ai
 DOMAIN-SUFFIX, swiftgram.app
 
 # X (Twitter)
+DOMAIN, syndication.x.com
 DOMAIN-SUFFIX, ads-api.twitter.com
 DOMAIN-SUFFIX, ads-twitter.com
 DOMAIN-SUFFIX, advertising.twitter.com
 DOMAIN-SUFFIX, static.ads-twitter.com
-URL-REGEX,^https:\/\/syndication\.x\.com\/i\/jot\/embeds(?:\?.*)?$
 
 # Amazon
 DOMAIN, api.mshop.bdtelemetry.amazon
