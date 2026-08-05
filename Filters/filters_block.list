@@ -220,6 +220,7 @@ DOMAIN-SUFFIX, analyticsengine.s3.amazonaws.com
 DOMAIN-SUFFIX, assoc-amazon.com
 DOMAIN-SUFFIX, minerva.devices.a2z.com
 DOMAIN-SUFFIX, mshopbugsnag.irm.amazon.dev
+URL-REGEX,^https:\/\/www\.amazon\.co\.jp\/(?:rd\/uedata|prime-ajax\/acquisition\/metrics)(?:\?.*)?$
 
 # Apple
 DOMAIN-SUFFIX, advertising.apple.com
@@ -267,6 +268,7 @@ DOMAIN-SUFFIX, ssl.google-analytics.com
 DOMAIN-SUFFIX, static.doubleclick.net
 DOMAIN-SUFFIX, stats.g.doubleclick.net
 DOMAIN-SUFFIX, youtube.cleverads.vn
+URL-REGEX,^https:\/\/play\.googleapis\.com\/log\/batch(?:\?.*)?$
 
 # Yahoo
 DOMAIN, a-9c6kp.data.emb-api.com
@@ -387,6 +389,7 @@ DOMAIN, statistics.tdm.com.mo
 DOMAIN, stats-ipv6.jpush.cn
 DOMAIN, stats.jpush.cn
 DOMAIN, tags.tiqcdn.com
+URL-REGEX,^https:\/\/[^\/]+\.device\.marketingcloudapis\.com\/device\/v1\/event\/analytic(?:\?.*)?$
 DOMAIN-SUFFIX, a.mouseflow.com
 DOMAIN-SUFFIX, adm.hotjar.com
 DOMAIN-SUFFIX, api-hotjar.com
