@@ -50,7 +50,7 @@
 ##### Others #####
 
 #BiliBili
-^https:\/\/grpc\.biliapi\.net\/bilibili\.app\.(view|viewunite)\.v1\.View\/PlayPause$ - reject
+^https:\/\/(?:app\.bilibili\.com|grpc\.biliapi\.net)\/bilibili\.app\.(view|viewunite)\.v1\.View\/PlayPause$ - reject
 
 #xiaohongshu
 ^https?:\/\/.+\.xiaohongshu\.com\/.+(metrics|report|Report) - reject
@@ -133,4 +133,4 @@
 ^https?:\/\/sf19-static\.i18n-pglstatp\.com\/obj\/ad-pattern-sg\/3p_monitor - reject
 
 [MITM]
-hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, *.macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, grpc.biliapi.net, *.xiaohongshu.com, *.rnote.com, *.manhuashe.com, *.lihkg.com, *.amap.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, *.shoalter.com, *.fanpiece.com, unwire.hk, *.idownloadblog.com, *.mobile01.com, *.yimg.com, *.alicdn.com, *.i18n-pglstatp.com
+hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, *.macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, app.bilibili.com, grpc.biliapi.net, *.xiaohongshu.com, *.rnote.com, *.manhuashe.com, *.lihkg.com, *.amap.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, *.shoalter.com, *.fanpiece.com, unwire.hk, *.idownloadblog.com, *.mobile01.com, *.yimg.com, *.alicdn.com, *.i18n-pglstatp.com
