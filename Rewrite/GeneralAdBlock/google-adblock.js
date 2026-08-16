@@ -32,17 +32,75 @@ function addSponsoredStyle(tag) {
   return tag.replace(/>$/, " " + sponsoredStyle + ">");
 }
 
+function getElementInnerHtmlById(html, id) {
+  const openingTag = new RegExp(
+    "<([a-z][\\w:-]*)\\b[^>]*\\bid=(['\"])" + id + "\\2[^>]*>",
+    "i"
+  ).exec(html);
+  if (!openingTag) {
+    return null;
+  }
+
+  const tagName = openingTag[1];
+  const contentStart = openingTag.index + openingTag[0].length;
+  const tagPattern = new RegExp("<\\/?" + tagName + "\\b[^>]*>", "gi");
+  tagPattern.lastIndex = contentStart;
+  let depth = 1;
+  let match;
+
+  while ((match = tagPattern.exec(html)) !== null) {
+    if (/^<\//.test(match[0])) {
+      depth -= 1;
+    } else if (!/\/>$/.test(match[0])) {
+      depth += 1;
+    }
+
+    if (depth === 0) {
+      return html.slice(contentStart, match.index);
+    }
+  }
+
+  return null;
+}
+
+function hasMeaningfulSponsoredContainer(html) {
+  for (const id of ["tads", "tadsb"]) {
+    const innerHtml = getElementInnerHtmlById(html, id);
+    if (innerHtml === null) {
+      continue;
+    }
+
+    if (/<(?:a|button|iframe|img|picture|svg|video)\b/i.test(innerHtml)) {
+      return true;
+    }
+
+    const visibleText = innerHtml
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<(?:script|style)\b[\s\S]*?<\/(?:script|style)>/gi, "")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&(?:nbsp|#160|#xA0);/gi, "")
+      .trim();
+    if (visibleText) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function isSponsoredTag(tag) {
-  return /\bid=(['"])tads\1/i.test(tag) ||
+  return /\bid=(['"])tadsb?\1/i.test(tag) ||
     /\bjscontroller=(['"])tY2w9d\1/i.test(tag) ||
     /\bjsname=(['"])ix0Hvc\1/i.test(tag) ||
     /\bdata-text-ad=(['"])1\1/i.test(tag);
 }
 
 function hideSponsoredHtml(html) {
-  const hasSponsoredContent = /Sponsored result/i.test(html) ||
-    /\bid=(['"])tads\1/i.test(html) ||
-    /\bdata-text-ad=(['"])1\1/i.test(html);
+  const hasSponsoredContent = /\bdata-text-ad=(['"])1\1/i.test(html) ||
+    /\bjscontroller=(['"])tY2w9d\1/i.test(html) ||
+    /\bjsname=(['"])ix0Hvc\1/i.test(html) ||
+    /(?:\/|\\x2f)(?:pagead(?:\/|\\x2f))?aclk(?:\?|\\x3f)/i.test(html) ||
+    hasMeaningfulSponsoredContainer(html);
   if (!hasSponsoredContent) {
     return html;
   }
