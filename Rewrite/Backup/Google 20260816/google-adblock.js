@@ -4,19 +4,10 @@
  * Directly hides ad containers in Google Search HTML responses.
  */
 
-const originalBody = $response.body || "";
-let body = originalBody;
+let body = $response.body || "";
 const isGoogleSearch = /https?:\/\/(www\.)?google\.[^/]+\/search/i.test($request.url);
 const isPaginationResponse = /[?&](?:asearch=arc|async=arc_id(?::|%3A))/i.test($request.url);
 const sponsoredStyle = 'style="display:none!important"';
-
-function getResponseStatusCode() {
-  const rawStatus = $response.statusCode || $response.status || "";
-  const match = String(rawStatus).match(/\b(\d{3})\b/);
-
-  // Keep compatibility with engines that do not expose the response status.
-  return match ? parseInt(match[1], 10) : 200;
-}
 
 function addSponsoredStyle(tag) {
   if (/style=(['"])[^'"]*display\s*:\s*none/i.test(tag)) {
@@ -78,17 +69,14 @@ function rewriteArcResponse(text) {
   return output;
 }
 
-const responseStatusCode = getResponseStatusCode();
-const canRewriteResponse = isGoogleSearch && responseStatusCode === 200;
-
-if (canRewriteResponse && isPaginationResponse) {
+if (isGoogleSearch && isPaginationResponse) {
   const rewritten = rewriteArcResponse(body);
   if (rewritten !== null && rewritten !== body) {
     $done({ body: rewritten });
   } else {
     $done({});
   }
-} else if (canRewriteResponse) {
+} else if (isGoogleSearch) {
   // Known working response replacement for the Google app promotion.
   if (body.includes("Ask and explore anything with the Google app")) {
     body = body
@@ -112,13 +100,7 @@ if (canRewriteResponse && isPaginationResponse) {
 
   // Hide the complete Sponsored Result header and content without leaving gaps.
   body = hideSponsoredHtml(body);
-  if (body !== originalBody) {
-    $done({ body: body });
-  } else {
-    // Preserve the original response and all duplicate Set-Cookie fields when
-    // there is nothing to rewrite. This also avoids touching redirects/challenges.
-    $done({});
-  }
+  $done({ body: body });
 } else {
   $done({});
 }
