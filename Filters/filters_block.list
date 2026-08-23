@@ -247,7 +247,6 @@ DOMAIN, clouder-analytics.jeanrobert-nino-layton.workers.dev
 
 # Google
 DOMAIN, firebaselogging-pa.googleapis.com
-DOMAIN, imasdk.googleapis.com
 DOMAIN, ogads-pa.clients6.google.com
 DOMAIN-SUFFIX, ad.doubleclick.net
 DOMAIN-SUFFIX, ads.google.com
