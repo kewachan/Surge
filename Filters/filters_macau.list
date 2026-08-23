@@ -16,7 +16,7 @@ URL-REGEX,^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/player(?:\/[^?]*)?
 URL-REGEX,^https:\/\/[^\/]+\.googlevideo\.com\/videoplayback\?.*(?:\?|&)itag=
 
 #Google
-DOMAIN-SUFFIC, imasdk.googleapis.com
+DOMAIN-SUFFIX, imasdk.googleapis.com
 
 #RandomArt
 DOMAIN-SUFFIX, randomdailyart.com
