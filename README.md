@@ -49,42 +49,36 @@
 ### Architecture
 
 - Domain／URL 規則優先；需要改 body 時，由現有 GeneralAdBlock module 呼叫每個 App 的獨立 JS。
-- QQ Reader：指定 ZIP response → 解開外層 ZIP → 修改內層 bundle 的單一推廣分支 → 更新 CRC 並重壓外層。
 
 ### Key Files
 
 - `Filters/filters_block.list` — domain 封鎖。
 - `Rewrite/Adrewrite.sgmodule` — 自行維護的 URL rewrite。
+- `Rewrite/Advertising.sgmodule` — 外部廣告 regex 資源。
 - `Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule` — 統一 script 與 MITM 設定。
-- `Rewrite/GeneralAdBlock/qq-browser-adblock.js` — QQ 閱讀器底部會員／工具推廣移除；內嵌 MIT 授權 fflate 0.8.3。
-- `tests/qq-browser-adblock.test.cjs` — 記憶體內 ZIP、失敗放行、顯示分支及可選 HAR 回歸測試。
 
 ### Core Logic
 
-- QQ 只攔截指定 Shiply CDN 的正式版 `novelReader.zip.zip`；request script 只移除完整下載的條件快取 headers，Range request 不改。
-- response script 只處理 HTTP 200 binary body，輸入上限 8 MiB、解壓上限 12 MiB，驗證 ZIP 結構及目標 CRC。
-- 根據 Qq.har 的 reader VC=2517 程式特徵，把 `renderBottomAd` 內會員／工具推廣分支改為 `null`；保留 bundle 長度及其他內層檔案。
-- 不改正常廣告分支、章節內容或 VIP 狀態；未知特徵、重複匹配或無效 ZIP 原樣放行。
+- 先以 HAR 確認目標 request 及是否與核心功能共用。
+- 按 domain、URL rewrite、response script 的優先次序選擇處理方式。
+- Script 只改目標 response，並同步核對 URL pattern、MITM hostname 及 JS 版本。
 
 ### Important Decisions
 
-- 沿用 `GeneralAdBlock.sgmodule` 及 `*-adblock.js` 命名，不另建 QQ module。
-- 底部會員推廣是 reader 程式內的 fallback，不能靠封鎖圖片或整個 `pbprx.qq.com` 精確移除。
-- Codec 已內嵌，執行時無需下載依賴或啟動 Worker。
+- 沿用 `GeneralAdBlock.sgmodule` 及 `*-adblock.js` 命名，每個 App 使用獨立 JS。
+- 不封鎖登入、付款、風控、推送或核心 API。
 
 ### Recent Significant Changes
 
-- `2026-08-31` — 新增 QQ binary rewrite；11 項測試通過，實際 HAR 內僅 index bundle 改動，其餘 84 檔保留，兩層 ZIP 通過獨立 CRC 驗證。
+- `2026-08-31` — 按要求移除 QQ Browser AdBlock 的 JS、request／response 規則、專用 MITM hostname 及測試；其他規則保留。
 
 ### Watch Out
 
-- HAR 測試不等於真機驗收：QQ 的離線資源快取、原生完整性校驗及 iOS 執行限制仍須實機確認；request header 修改不會清除 App 既有資源。
 - Module 使用 GitHub raw JS URL；修改本機工作檔不會自動發佈，發佈時須同步 JS 與 module 版本。
-- 測試：`node tests/qq-browser-adblock.test.cjs`；可加 HAR 路徑作參數，測試不會儲存解包內容或 HAR 個人資料。
 
 ### Start Here
 
 - `README.md`
+- `Filters/filters_block.list`
+- `Rewrite/Adrewrite.sgmodule`
 - `Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule`
-- `Rewrite/GeneralAdBlock/qq-browser-adblock.js`
-- `tests/qq-browser-adblock.test.cjs`
