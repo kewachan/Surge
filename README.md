@@ -49,6 +49,7 @@
 ### Architecture
 
 - Domain／URL 規則優先；需要改 body 時，由現有 GeneralAdBlock module 呼叫每個 App 的獨立 JS。
+- THIM Home：`exclusive-banners` response → 清空 `data` → App 隱藏 Privilege Offers carousel。
 
 ### Key Files
 
@@ -56,25 +57,30 @@
 - `Rewrite/Adrewrite.sgmodule` — 自行維護的 URL rewrite。
 - `Rewrite/Advertising.sgmodule` — 外部廣告 regex 資源。
 - `Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule` — 統一 script 與 MITM 設定。
+- `Rewrite/GeneralAdBlock/thim-adblock.js` — 只移除 THIM Home 的 Privilege Offers placement。
 
 ### Core Logic
 
 - 先以 HAR 確認目標 request 及是否與核心功能共用。
 - 按 domain、URL rewrite、response script 的優先次序選擇處理方式。
 - Script 只改目標 response，並同步核對 URL pattern、MITM hostname 及 JS 版本。
+- THIM script 驗證成功 envelope 後只將 `data` 改成空陣列；其他 API 或未知格式原樣放行。
 
 ### Important Decisions
 
 - 沿用 `GeneralAdBlock.sgmodule` 及 `*-adblock.js` 命名，每個 App 使用獨立 JS。
 - 不封鎖登入、付款、風控、推送或核心 API。
+- THIM 不封鎖共用圖片 CDN，只攔截獨立 `exclusive-banners` endpoint。
 
 ### Recent Significant Changes
 
+- `2026-09-06` — 新增 THIM Privilege Offers response rewrite；THIM.har 證實該 endpoint 獨立提供 5 個下方 banners。
 - `2026-08-31` — 按要求移除 QQ Browser AdBlock 的 JS、request／response 規則、專用 MITM hostname 及測試；其他規則保留。
 
 ### Watch Out
 
 - Module 使用 GitHub raw JS URL；修改本機工作檔不會自動發佈，發佈時須同步 JS 與 module 版本。
+- HAR 可驗證 API 已清空；整個 section 是否收合仍須以 THIM 真機 UI 驗收。
 
 ### Start Here
 
@@ -82,3 +88,4 @@
 - `Filters/filters_block.list`
 - `Rewrite/Adrewrite.sgmodule`
 - `Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule`
+- `Rewrite/GeneralAdBlock/thim-adblock.js`
