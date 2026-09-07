@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.3.1
+ * Node Offline Monitor for Surge — v1.3.2
  * Discovers custom proxy policies from the active profile and notifies when
  * their offline state changes.
  */
@@ -44,8 +44,7 @@
     });
     return {
       testUrl: values.test_url || "auto",
-      notifyRecovery: values.notify_recovery !== "false",
-      notifyHealthy: values.notify_healthy === "true"
+      notifyRecovery: values.notify_recovery !== "false"
     };
   }
 
@@ -431,8 +430,6 @@
     if (!previous) {
       if (offline.length) {
         notify("Proxy Node Monitor", `${nodeCount(offline.length)} offline`, formatNames(offline));
-      } else if (options.notifyHealthy || manual) {
-        notify("Proxy Node Monitor", "All nodes online", `Tested ${nodeCount(policies.length)}`);
       }
     } else if (newlyOffline.length || recovered.length) {
       const sections = [];
@@ -445,13 +442,11 @@
           sections.join("\n\n")
         );
       }
-    } else if (offline.length === 0 && options.notifyHealthy) {
-      notify("Proxy Node Monitor", "All nodes online", `Tested ${nodeCount(policies.length)}`);
-    } else if (manual) {
+    } else if (manual && offline.length) {
       notify(
         "Proxy Node Monitor",
-        offline.length ? `${nodeCount(offline.length)} still offline` : "All nodes online",
-        offline.length ? formatNames(offline) : `Tested ${nodeCount(policies.length)}`
+        `${nodeCount(offline.length)} still offline`,
+        formatNames(offline)
       );
     }
 
