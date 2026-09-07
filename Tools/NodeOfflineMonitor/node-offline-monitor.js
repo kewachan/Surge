@@ -1,7 +1,7 @@
 /**
- * Node Offline Monitor for Surge — v1.0.0
- * Discovers custom proxy policies from the active profile and notifies only
- * when their offline state changes.
+ * Node Offline Monitor for Surge — v1.1.0
+ * Discovers custom proxy policies from the active profile and reports
+ * persistent offline states on every scheduled check by default.
  */
 
 (function () {
@@ -43,7 +43,8 @@
     return {
       testUrl: values.test_url || "auto",
       notifyRecovery: values.notify_recovery !== "false",
-      notifyHealthy: values.notify_healthy === "true"
+      notifyHealthy: values.notify_healthy === "true",
+      repeatOffline: values.repeat_offline !== "false"
     };
   }
 
@@ -117,7 +118,7 @@
   function namesFromContainer(container, rejectGroups) {
     if (Array.isArray(container)) {
       return container.map(item => {
-        if (rejectGroups && GROUP_TYPES.has(itemType(item))) return "";
+        if (rejectGroups && (GROUP_TYPES.has(itemType(item)) || NON_PROXY_TYPES.has(itemType(item)))) return "";
         return itemName(item);
       }).filter(Boolean);
     }
@@ -166,19 +167,19 @@
   function discoverPolicies(profileResult, callback) {
     const profileText = extractProfileText(profileResult);
     const parsed = parseProfile(profileText);
-    if (parsed.policies.length) {
-      callback(null, parsed.policies, parsed.testUrl);
-      return;
-    }
-
     api("GET", "v1/policies", {}, (policyError, policyResult) => {
       if (policyError) {
-        callback(policyError);
+        if (parsed.policies.length) {
+          callback(null, parsed.policies, parsed.testUrl);
+        } else {
+          callback(policyError);
+        }
         return;
       }
       api("GET", "v1/policy_groups", {}, (_groupError, groupResult) => {
         const groups = new Set(extractGroupNames(groupResult));
-        const policies = uniqueNames(extractPolicyNames(policyResult).filter(name => !groups.has(name)));
+        const livePolicies = extractPolicyNames(policyResult).filter(name => !groups.has(name));
+        const policies = uniqueNames(parsed.policies.concat(livePolicies));
         if (!policies.length) {
           callback(new Error("目前 Profile 找不到可測試的自定義節點"));
           return;
@@ -331,6 +332,12 @@
           sections.join("\n\n")
         );
       }
+    } else if (offline.length && options.repeatOffline) {
+      notify(
+        "節點離線監察",
+        `仍有 ${offline.length} 個離線節點`,
+        formatNames(offline)
+      );
     } else if (offline.length === 0 && options.notifyHealthy) {
       notify("節點離線監察", "全部節點正常", `已測試 ${policies.length} 個自定義節點`);
     } else if (manual) {
