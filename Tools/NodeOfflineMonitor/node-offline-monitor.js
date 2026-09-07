@@ -1,7 +1,7 @@
 /**
- * Node Offline Monitor for Surge — v1.1.0
- * Discovers custom proxy policies from the active profile and reports
- * persistent offline states on every scheduled check by default.
+ * Node Offline Monitor for Surge — v1.2.0
+ * Discovers custom proxy policies from the active profile and notifies when
+ * their offline state changes.
  */
 
 (function () {
@@ -43,8 +43,7 @@
     return {
       testUrl: values.test_url || "auto",
       notifyRecovery: values.notify_recovery !== "false",
-      notifyHealthy: values.notify_healthy === "true",
-      repeatOffline: values.repeat_offline !== "false"
+      notifyHealthy: values.notify_healthy === "true"
     };
   }
 
@@ -332,12 +331,6 @@
           sections.join("\n\n")
         );
       }
-    } else if (offline.length && options.repeatOffline) {
-      notify(
-        "節點離線監察",
-        `仍有 ${offline.length} 個離線節點`,
-        formatNames(offline)
-      );
     } else if (offline.length === 0 && options.notifyHealthy) {
       notify("節點離線監察", "全部節點正常", `已測試 ${policies.length} 個自定義節點`);
     } else if (manual) {

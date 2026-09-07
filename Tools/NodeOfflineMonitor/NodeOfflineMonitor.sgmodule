@@ -1,8 +1,8 @@
 #!name=Node Offline Monitor
 #!desc=Alerts when profile proxies go offline or recover
 #!system=ios
-#!arguments=cronexp:*/5 * * * *,test_url:auto,notify_recovery:true,notify_healthy:false,repeat_offline:true,wake_system:true
-#!arguments-desc=Defaults: every 5 minutes with repeat offline alerts
+#!arguments=cronexp:*/15 * * * *,test_url:auto,notify_recovery:true,notify_healthy:false,wake_system:true
+#!arguments-desc=Defaults: every 15 minutes with status-change alerts
 
 [Script]
-Node Offline Monitor = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=60, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.1.0, argument="test_url={{{test_url}}}&notify_recovery={{{notify_recovery}}}&notify_healthy={{{notify_healthy}}}&repeat_offline={{{repeat_offline}}}"
+Node Offline Monitor = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=60, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.2.0, argument="test_url={{{test_url}}}&notify_recovery={{{notify_recovery}}}&notify_healthy={{{notify_healthy}}}"
