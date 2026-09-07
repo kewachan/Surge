@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.3.4
+ * Node Offline Monitor for Surge — v1.4.0
  * Discovers custom proxy policies from the active profile and notifies once
  * when a node goes offline.
  */
@@ -11,6 +11,8 @@
   const FALLBACK_TEST_URL = "http://www.gstatic.com/generate_204";
   const PROBE_CONCURRENCY = 16;
   const PROBE_TIMEOUT = 8;
+  const CONFIRMATION_DELAY_MS = 5000;
+  const REQUIRED_FAILURES = 3;
   const BUILT_INS = new Set([
     "DIRECT", "REJECT", "REJECT-DROP", "REJECT-NO-DROP", "REJECT-TINYGIF",
     "PROXY", "GLOBAL", "FINAL"
@@ -24,6 +26,8 @@
 
   const options = parseArguments(typeof $argument === "string" ? $argument : "");
   let completed = false;
+  let unsupportedResultLogged = false;
+  let directFallbackUsed = false;
 
   function finish() {
     if (!completed) {
@@ -384,6 +388,55 @@
     pump();
   }
 
+  function testPolicySet(policies, url, callback) {
+    api("POST", "v1/policies/test", { policy_names: policies, url }, (testError, result) => {
+      if (testError) {
+        callback(testError);
+        return;
+      }
+      const available = availabilityFromResult(result, policies);
+      if (available) {
+        callback(null, available);
+        return;
+      }
+      if (!unsupportedResultLogged) {
+        unsupportedResultLogged = true;
+        log(`Unsupported policy test response; using direct probes. Shape: ${resultShape(result, 0)}`);
+      }
+      directFallbackUsed = true;
+      probePolicies(policies, url, callback);
+    });
+  }
+
+  function confirmOffline(policies, url, callback) {
+    let candidates = policies.slice();
+    let attempt = 1;
+
+    function complete() {
+      if (directFallbackUsed) log("Direct policy probe fallback completed");
+      callback(null, candidates);
+    }
+
+    function runAttempt() {
+      testPolicySet(candidates, url, (error, available) => {
+        if (error) {
+          callback(error);
+          return;
+        }
+        candidates = candidates.filter(name => !available.has(name));
+        log(`Offline confirmation ${attempt}/${REQUIRED_FAILURES}: ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}`);
+        if (!candidates.length || attempt === REQUIRED_FAILURES) {
+          complete();
+          return;
+        }
+        attempt++;
+        setTimeout(runAttempt, CONFIRMATION_DELAY_MS);
+      });
+    }
+
+    runAttempt();
+  }
+
   function readState() {
     try {
       const value = $persistentStore.read(STORE_KEY);
@@ -467,26 +520,12 @@
       const testUrl = options.testUrl === "auto"
         ? (profileTestUrl || FALLBACK_TEST_URL)
         : options.testUrl;
-      api("POST", "v1/policies/test", { policy_names: policies, url: testUrl }, (testError, result) => {
+      confirmOffline(policies, testUrl, (testError, offline) => {
         if (testError) {
           reportError(testError);
           return;
         }
-        const available = availabilityFromResult(result, policies);
-        if (!available) {
-          log(`Unsupported policy test response; using direct probes. Shape: ${resultShape(result, 0)}`);
-          probePolicies(policies, testUrl, (probeError, probedAvailable) => {
-            if (probeError) {
-              reportError(probeError);
-              return;
-            }
-            log("Direct policy probe fallback completed");
-            saveResult(policies, policies.filter(name => !probedAvailable.has(name)));
-            finish();
-          });
-          return;
-        }
-        saveResult(policies, policies.filter(name => !available.has(name)));
+        saveResult(policies, offline);
         finish();
       });
     });
