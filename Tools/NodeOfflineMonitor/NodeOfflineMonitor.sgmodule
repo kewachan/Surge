@@ -5,4 +5,4 @@
 #!arguments-desc=Defaults: every 15 minutes with status-change alerts
 
 [Script]
-Node Offline Monitor = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=60, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.2.0, argument="test_url={{{test_url}}}&notify_recovery={{{notify_recovery}}}&notify_healthy={{{notify_healthy}}}"
+Node Offline Monitor = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=120, ability=http-client-policy, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.3.0, argument="test_url={{{test_url}}}&notify_recovery={{{notify_recovery}}}&notify_healthy={{{notify_healthy}}}"

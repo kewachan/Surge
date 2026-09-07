@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.2.0
+ * Node Offline Monitor for Surge — v1.3.0
  * Discovers custom proxy policies from the active profile and notifies when
  * their offline state changes.
  */
@@ -9,6 +9,8 @@
 
   const STORE_KEY = "node_offline_monitor_state_v1";
   const FALLBACK_TEST_URL = "http://www.gstatic.com/generate_204";
+  const PROBE_CONCURRENCY = 16;
+  const PROBE_TIMEOUT = 8;
   const BUILT_INS = new Set([
     "DIRECT", "REJECT", "REJECT-DROP", "REJECT-NO-DROP", "REJECT-TINYGIF",
     "PROXY", "GLOBAL", "FINAL"
@@ -180,7 +182,7 @@
         const livePolicies = extractPolicyNames(policyResult).filter(name => !groups.has(name));
         const policies = uniqueNames(parsed.policies.concat(livePolicies));
         if (!policies.length) {
-          callback(new Error("目前 Profile 找不到可測試的自定義節點"));
+          callback(new Error("No testable custom proxy policies were found in the current profile"));
           return;
         }
         callback(null, policies, parsed.testUrl);
@@ -276,6 +278,78 @@
     return new Set(policies.filter(name => statusIsAvailable(statusMap[name])));
   }
 
+  function resultShape(value, depth) {
+    if (value === null) return "null";
+    if (Array.isArray(value)) {
+      if (depth >= 2 || value.length === 0) return `array(${value.length})`;
+      return `array(${value.length})<${resultShape(value[0], depth + 1)}>`;
+    }
+    if (typeof value !== "object") return typeof value;
+    const keys = Object.keys(value).slice(0, 20);
+    if (depth >= 1) return `object(${Object.keys(value).length} keys)`;
+    return `{${keys.map(key => `${key}:${resultShape(value[key], depth + 1)}`).join(",")}}`;
+  }
+
+  function probePolicies(policies, url, callback) {
+    if (typeof $httpClient !== "object" || typeof $httpClient.head !== "function") {
+      callback(new Error("Direct policy probing is unavailable"));
+      return;
+    }
+
+    const available = new Set();
+    const permissionErrors = [];
+    let cursor = 0;
+    let active = 0;
+    let settled = 0;
+    let finished = false;
+
+    function completeIfReady() {
+      if (finished || settled !== policies.length) return false;
+      finished = true;
+      if (permissionErrors.length === policies.length) {
+        callback(new Error("Surge rejected direct policy probing; check the http-client-policy ability"));
+      } else {
+        callback(null, available);
+      }
+      return true;
+    }
+
+    function settle(policy, error, response) {
+      active--;
+      settled++;
+      const status = Number(response && response.status);
+      if (!error && Number.isFinite(status) && status > 0) {
+        available.add(policy);
+      } else if (/ability|permission|not allowed|not permitted/i.test(String(error || ""))) {
+        permissionErrors.push(policy);
+      }
+      if (!completeIfReady()) pump();
+    }
+
+    function pump() {
+      while (!finished && active < PROBE_CONCURRENCY && cursor < policies.length) {
+        const policy = policies[cursor++];
+        active++;
+        try {
+          $httpClient.head({
+            url,
+            policy,
+            timeout: PROBE_TIMEOUT,
+            "auto-redirect": true
+          }, (error, response) => settle(policy, error, response));
+        } catch (error) {
+          settle(policy, error, null);
+        }
+      }
+    }
+
+    if (!policies.length) {
+      callback(null, available);
+      return;
+    }
+    pump();
+  }
+
   function readState() {
     try {
       const value = $persistentStore.read(STORE_KEY);
@@ -289,7 +363,11 @@
   function formatNames(names) {
     const shown = names.slice(0, 20);
     const extra = names.length - shown.length;
-    return shown.map(name => `• ${name}`).join("\n") + (extra > 0 ? `\n…另有 ${extra} 個` : "");
+    return shown.map(name => `• ${name}`).join("\n") + (extra > 0 ? `\n…and ${extra} more` : "");
+  }
+
+  function nodeCount(count) {
+    return `${count} node${count === 1 ? "" : "s"}`;
   }
 
   function notify(title, subtitle, body) {
@@ -316,28 +394,28 @@
 
     if (!previous) {
       if (offline.length) {
-        notify("節點離線監察", `發現 ${offline.length} 個離線節點`, formatNames(offline));
+        notify("Proxy Node Monitor", `${nodeCount(offline.length)} offline`, formatNames(offline));
       } else if (options.notifyHealthy || manual) {
-        notify("節點離線監察", "全部節點正常", `已測試 ${policies.length} 個自定義節點`);
+        notify("Proxy Node Monitor", "All nodes online", `Tested ${nodeCount(policies.length)}`);
       }
     } else if (newlyOffline.length || recovered.length) {
       const sections = [];
-      if (newlyOffline.length) sections.push(`新離線：\n${formatNames(newlyOffline)}`);
-      if (recovered.length && options.notifyRecovery) sections.push(`已恢復：\n${formatNames(recovered)}`);
+      if (newlyOffline.length) sections.push(`Newly offline:\n${formatNames(newlyOffline)}`);
+      if (recovered.length && options.notifyRecovery) sections.push(`Recovered:\n${formatNames(recovered)}`);
       if (sections.length) {
         notify(
-          "節點狀態更新",
-          `離線 ${offline.length}/${policies.length}`,
+          "Proxy Node Status",
+          `${offline.length}/${policies.length} offline`,
           sections.join("\n\n")
         );
       }
     } else if (offline.length === 0 && options.notifyHealthy) {
-      notify("節點離線監察", "全部節點正常", `已測試 ${policies.length} 個自定義節點`);
+      notify("Proxy Node Monitor", "All nodes online", `Tested ${nodeCount(policies.length)}`);
     } else if (manual) {
       notify(
-        "節點離線監察",
-        offline.length ? `仍有 ${offline.length} 個離線節點` : "全部節點正常",
-        offline.length ? formatNames(offline) : `已測試 ${policies.length} 個自定義節點`
+        "Proxy Node Monitor",
+        offline.length ? `${nodeCount(offline.length)} still offline` : "All nodes online",
+        offline.length ? formatNames(offline) : `Tested ${nodeCount(policies.length)}`
       );
     }
 
@@ -348,19 +426,19 @@
       checkedAt: Date.now(),
       lastError: ""
     }), STORE_KEY);
-    log(`已測試 ${policies.length} 個 Profile 自定義節點；離線 ${offline.length} 個`);
+    log(`Tested ${nodeCount(policies.length)} from the current profile; ${offline.length} offline`);
   }
 
   function reportError(error) {
-    const message = error && error.message ? error.message : String(error || "未知錯誤");
+    const message = error && error.message ? error.message : String(error || "Unknown error");
     const previous = readState();
     if (!previous || previous.lastError !== message || typeof $trigger !== "undefined") {
-      notify("節點離線監察失敗", "未有改動上次狀態", message);
+      notify("Proxy Node Monitor Failed", "Previous state was preserved", message);
     }
     const state = previous || { version: 1, policies: [], offline: [], checkedAt: 0 };
     state.lastError = message;
     $persistentStore.write(JSON.stringify(state), STORE_KEY);
-    log(`監察失敗：${message}`);
+    log(`Monitor failed: ${message}`);
     finish();
   }
 
@@ -384,7 +462,16 @@
         }
         const available = availabilityFromResult(result, policies);
         if (!available) {
-          reportError(new Error("Surge 未回傳可識別的節點測試結果"));
+          log(`Unsupported policy test response; using direct probes. Shape: ${resultShape(result, 0)}`);
+          probePolicies(policies, testUrl, (probeError, probedAvailable) => {
+            if (probeError) {
+              reportError(probeError);
+              return;
+            }
+            log("Direct policy probe fallback completed");
+            saveResult(policies, policies.filter(name => !probedAvailable.has(name)));
+            finish();
+          });
           return;
         }
         saveResult(policies, policies.filter(name => !available.has(name)));
