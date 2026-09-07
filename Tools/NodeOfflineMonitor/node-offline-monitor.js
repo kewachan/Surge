@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.3.2
+ * Node Offline Monitor for Surge — v1.3.3
  * Discovers custom proxy policies from the active profile and notifies when
  * their offline state changes.
  */
@@ -429,25 +429,15 @@
 
     if (!previous) {
       if (offline.length) {
-        notify("Proxy Node Monitor", `${nodeCount(offline.length)} offline`, formatNames(offline));
+        notify("Proxy Nodes Offline", "", formatNames(offline));
       }
     } else if (newlyOffline.length || recovered.length) {
-      const sections = [];
-      if (newlyOffline.length) sections.push(`Newly offline:\n${formatNames(newlyOffline)}`);
-      if (recovered.length && options.notifyRecovery) sections.push(`Recovered:\n${formatNames(recovered)}`);
-      if (sections.length) {
-        notify(
-          "Proxy Node Status",
-          `${offline.length}/${policies.length} offline`,
-          sections.join("\n\n")
-        );
+      if (newlyOffline.length) notify("Proxy Nodes Offline", "", formatNames(newlyOffline));
+      if (recovered.length && options.notifyRecovery) {
+        notify("Proxy Nodes Recovered", "", formatNames(recovered));
       }
     } else if (manual && offline.length) {
-      notify(
-        "Proxy Node Monitor",
-        `${nodeCount(offline.length)} still offline`,
-        formatNames(offline)
-      );
+      notify("Proxy Nodes Offline", "", formatNames(offline));
     }
 
     $persistentStore.write(JSON.stringify({
