@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.3.0
+ * Node Offline Monitor for Surge — v1.3.1
  * Discovers custom proxy policies from the active profile and notifies when
  * their offline state changes.
  */
@@ -135,20 +135,56 @@
   function extractPolicyNames(result) {
     if (Array.isArray(result)) return namesFromContainer(result, true);
     if (!result || typeof result !== "object") return [];
-    const containers = [result.policies, result.policy_names, result.policyNames, result.items];
-    if (result.data && result.data !== result) containers.push(result.data.policies, result.data.items, result.data);
+    const containers = [
+      result.proxies,
+      result["proxy-policies"],
+      result.proxy_policies,
+      result.policies,
+      result.policy_names,
+      result.policyNames,
+      result.items
+    ];
+    if (result.data && result.data !== result) {
+      containers.push(
+        result.data.proxies,
+        result.data["proxy-policies"],
+        result.data.proxy_policies,
+        result.data.policies,
+        result.data.items,
+        result.data
+      );
+    }
     for (const container of containers) {
       const names = namesFromContainer(container, true);
       if (names.length) return names;
     }
+    const structuralKeys = [
+      "proxies", "proxy-policies", "proxy_policies", "policies",
+      "policy-groups", "policy_groups", "policyGroups", "groups", "items", "data"
+    ];
+    if (structuralKeys.some(key => Object.prototype.hasOwnProperty.call(result, key))) return [];
     return namesFromContainer(result, true);
   }
 
   function extractGroupNames(result) {
     if (Array.isArray(result)) return namesFromContainer(result, false);
     if (!result || typeof result !== "object") return [];
-    const containers = [result.groups, result.policy_groups, result.policyGroups, result.items];
-    if (result.data && result.data !== result) containers.push(result.data.groups, result.data.items);
+    const containers = [
+      result["policy-groups"],
+      result.policy_groups,
+      result.policyGroups,
+      result.groups,
+      result.items
+    ];
+    if (result.data && result.data !== result) {
+      containers.push(
+        result.data["policy-groups"],
+        result.data.policy_groups,
+        result.data.policyGroups,
+        result.data.groups,
+        result.data.items
+      );
+    }
     for (const container of containers) {
       const names = namesFromContainer(container, false);
       if (names.length) return names;
