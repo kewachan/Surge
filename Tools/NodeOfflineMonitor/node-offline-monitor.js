@@ -1,7 +1,7 @@
 /**
- * Node Offline Monitor for Surge — v1.3.3
- * Discovers custom proxy policies from the active profile and notifies when
- * their offline state changes.
+ * Node Offline Monitor for Surge — v1.3.4
+ * Discovers custom proxy policies from the active profile and notifies once
+ * when a node goes offline.
  */
 
 (function () {
@@ -43,8 +43,7 @@
       values[key] = value;
     });
     return {
-      testUrl: values.test_url || "auto",
-      notifyRecovery: values.notify_recovery !== "false"
+      testUrl: values.test_url || "auto"
     };
   }
 
@@ -419,23 +418,15 @@
   function saveResult(policies, offline) {
     const previous = readState();
     const previousOffline = new Set(previous && Array.isArray(previous.offline) ? previous.offline : []);
-    const currentPolicies = new Set(policies);
-    const currentOffline = new Set(offline);
     const newlyOffline = offline.filter(name => !previousOffline.has(name));
-    const recovered = Array.from(previousOffline).filter(name =>
-      currentPolicies.has(name) && !currentOffline.has(name)
-    );
     const manual = typeof $trigger !== "undefined";
 
     if (!previous) {
       if (offline.length) {
         notify("Proxy Nodes Offline", "", formatNames(offline));
       }
-    } else if (newlyOffline.length || recovered.length) {
-      if (newlyOffline.length) notify("Proxy Nodes Offline", "", formatNames(newlyOffline));
-      if (recovered.length && options.notifyRecovery) {
-        notify("Proxy Nodes Recovered", "", formatNames(recovered));
-      }
+    } else if (newlyOffline.length) {
+      notify("Proxy Nodes Offline", "", formatNames(newlyOffline));
     } else if (manual && offline.length) {
       notify("Proxy Nodes Offline", "", formatNames(offline));
     }
