@@ -1,0 +1,8 @@
+#!name=Node Offline Monitor
+#!desc=定時測試目前 Profile [Proxy] 內全部自定義節點，只在離線清單改變、節點恢復或監察失敗時通知
+#!system=ios
+#!arguments=cronexp:*/10 * * * *,test_url:auto,notify_recovery:true,notify_healthy:false,wake_system:true
+#!arguments-desc=test_url 設為 auto 會沿用 Profile 的 proxy-test-url；預設每 10 分鐘檢查一次
+
+[Script]
+Node Offline Monitor = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=60, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.0.0, argument="test_url={{{test_url}}}&notify_recovery={{{notify_recovery}}}&notify_healthy={{{notify_healthy}}}"
