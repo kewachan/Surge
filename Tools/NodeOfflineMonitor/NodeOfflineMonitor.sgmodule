@@ -1,8 +1,8 @@
 #!name=Node Offline Monitor
-#!desc=Alerts after three consecutive offline checks
+#!desc=Alerts after confirmed proxy outages and resumptions
 #!system=ios
 #!arguments=cronexp:*/15 * * * *,test_url:auto,wake_system:true
 #!arguments-desc=Defaults: every 15 minutes with two 5-second confirmation retries
 
 [Script]
-Node Offline Monitor = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=180, ability=http-client-policy, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.4.0, argument="test_url={{{test_url}}}"
+Node Offline Monitor = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=180, ability=http-client-policy, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.4.1, argument="test_url={{{test_url}}}"

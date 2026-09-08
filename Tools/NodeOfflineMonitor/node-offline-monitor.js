@@ -1,7 +1,7 @@
 /**
- * Node Offline Monitor for Surge — v1.4.0
+ * Node Offline Monitor for Surge — v1.4.1
  * Discovers custom proxy policies from the active profile and notifies once
- * when a node goes offline.
+ * when a node goes offline or resumes.
  */
 
 (function () {
@@ -471,17 +471,28 @@
   function saveResult(policies, offline) {
     const previous = readState();
     const previousOffline = new Set(previous && Array.isArray(previous.offline) ? previous.offline : []);
+    const currentPolicies = new Set(policies);
+    const currentOffline = new Set(offline);
     const newlyOffline = offline.filter(name => !previousOffline.has(name));
+    const resumed = Array.from(previousOffline).filter(name =>
+      currentPolicies.has(name) && !currentOffline.has(name)
+    );
     const manual = typeof $trigger !== "undefined";
 
     if (!previous) {
       if (offline.length) {
         notify("Proxy Nodes Offline", "", formatNames(offline));
       }
-    } else if (newlyOffline.length) {
-      notify("Proxy Nodes Offline", "", formatNames(newlyOffline));
-    } else if (manual && offline.length) {
-      notify("Proxy Nodes Offline", "", formatNames(offline));
+    } else {
+      if (newlyOffline.length) {
+        notify("Proxy Nodes Offline", "", formatNames(newlyOffline));
+      }
+      if (resumed.length) {
+        notify("Proxy Nodes Resumed", "", formatNames(resumed));
+      }
+      if (manual && offline.length && !newlyOffline.length) {
+        notify("Proxy Nodes Offline", "", formatNames(offline));
+      }
     }
 
     $persistentStore.write(JSON.stringify({
