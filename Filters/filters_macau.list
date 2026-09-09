@@ -43,6 +43,9 @@ DOMAIN-SUFFIX, tplinkcloud.com.cn
 #Netease
 DOMAIN-SUFFIX, easebar.com
 
+#Manhuashe
+DOMAIN-SUFFIX, manhuashe.com
+
 #xiaoyakankan
 DOMAIN-KEYWORD,kkzycdn
 DOMAIN-KEYWORD,bfikuncdn
