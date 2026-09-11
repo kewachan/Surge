@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.4.1
+ * Node Offline Monitor for Surge — v1.5.0
  * Discovers custom proxy policies from the active profile and notifies once
  * when a node goes offline or resumes.
  */
@@ -12,7 +12,7 @@
   const PROBE_CONCURRENCY = 16;
   const PROBE_TIMEOUT = 8;
   const CONFIRMATION_DELAY_MS = 5000;
-  const REQUIRED_FAILURES = 3;
+  const REQUIRED_CONFIRMATIONS = 5;
   const BUILT_INS = new Set([
     "DIRECT", "REJECT", "REJECT-DROP", "REJECT-NO-DROP", "REJECT-TINYGIF",
     "PROXY", "GLOBAL", "FINAL"
@@ -408,24 +408,55 @@
     });
   }
 
-  function confirmOffline(policies, url, callback) {
-    let candidates = policies.slice();
+  function confirmStatusChanges(policies, url, callback) {
+    const previous = readState();
+    const previousOffline = new Set(previous && Array.isArray(previous.offline) ? previous.offline : []);
+    const currentPolicies = new Set(policies);
+    let offlineCandidates = [];
+    let resumeCandidates = [];
     let attempt = 1;
 
     function complete() {
       if (directFallbackUsed) log("Direct policy probe fallback completed");
-      callback(null, candidates);
+      const confirmedOffline = new Set(
+        Array.from(previousOffline).filter(name => currentPolicies.has(name))
+      );
+      offlineCandidates.forEach(name => confirmedOffline.add(name));
+      resumeCandidates.forEach(name => confirmedOffline.delete(name));
+      callback(null, policies.filter(name => confirmedOffline.has(name)));
+    }
+
+    function candidateCountText() {
+      const offlineCount = offlineCandidates.length;
+      const resumeCount = resumeCandidates.length;
+      return `${offlineCount} offline candidate${offlineCount === 1 ? "" : "s"}, ` +
+        `${resumeCount} resume candidate${resumeCount === 1 ? "" : "s"}`;
     }
 
     function runAttempt() {
-      testPolicySet(candidates, url, (error, available) => {
+      const targets = attempt === 1
+        ? policies
+        : uniqueNames(offlineCandidates.concat(resumeCandidates));
+      testPolicySet(targets, url, (error, available) => {
         if (error) {
           callback(error);
           return;
         }
-        candidates = candidates.filter(name => !available.has(name));
-        log(`Offline confirmation ${attempt}/${REQUIRED_FAILURES}: ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}`);
-        if (!candidates.length || attempt === REQUIRED_FAILURES) {
+
+        if (attempt === 1) {
+          offlineCandidates = policies.filter(name =>
+            !previousOffline.has(name) && !available.has(name)
+          );
+          resumeCandidates = policies.filter(name =>
+            previousOffline.has(name) && available.has(name)
+          );
+        } else {
+          offlineCandidates = offlineCandidates.filter(name => !available.has(name));
+          resumeCandidates = resumeCandidates.filter(name => available.has(name));
+        }
+
+        log(`Status confirmation ${attempt}/${REQUIRED_CONFIRMATIONS}: ${candidateCountText()}`);
+        if ((!offlineCandidates.length && !resumeCandidates.length) || attempt === REQUIRED_CONFIRMATIONS) {
           complete();
           return;
         }
@@ -477,8 +508,6 @@
     const resumed = Array.from(previousOffline).filter(name =>
       currentPolicies.has(name) && !currentOffline.has(name)
     );
-    const manual = typeof $trigger !== "undefined";
-
     if (!previous) {
       if (offline.length) {
         notify("Proxy Nodes Offline", "", formatNames(offline));
@@ -489,9 +518,6 @@
       }
       if (resumed.length) {
         notify("Proxy Nodes Resumed", "", formatNames(resumed));
-      }
-      if (manual && offline.length && !newlyOffline.length) {
-        notify("Proxy Nodes Offline", "", formatNames(offline));
       }
     }
 
@@ -531,7 +557,7 @@
       const testUrl = options.testUrl === "auto"
         ? (profileTestUrl || FALLBACK_TEST_URL)
         : options.testUrl;
-      confirmOffline(policies, testUrl, (testError, offline) => {
+      confirmStatusChanges(policies, testUrl, (testError, offline) => {
         if (testError) {
           reportError(testError);
           return;

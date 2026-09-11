@@ -50,7 +50,7 @@
 
 - Domain／URL 規則優先；需要改 body 時，由現有 GeneralAdBlock module 呼叫每個 App 的獨立 JS。
 - THIM Home：`exclusive-banners` response → 清空 `data` → App 隱藏 Privilege Offers carousel。
-- Node Offline Monitor：cron → active Profile `[Proxy]` → policy test → 狀態轉變通知。
+- Node Offline Monitor：cron → active Profile `[Proxy]` → policy test → 5 次狀態確認 → 狀態轉變通知。
 
 ### Key Files
 
@@ -68,7 +68,7 @@
 - 按 domain、URL rewrite、response script 的優先次序選擇處理方式。
 - Script 只改目標 response，並同步核對 URL pattern、MITM hostname 及 JS 版本。
 - THIM script 驗證成功 envelope 後只將 `data` 改成空陣列；其他 API 或未知格式原樣放行。
-- 節點監察從 active Profile `[Proxy]` 動態發現節點，狀態不變時不重複通知。
+- 節點監察從 active Profile `[Proxy]` 動態發現節點；offline／resume 均須連續 5 次一致，每次相隔 5 秒，狀態不變時不重複通知。
 
 ### Important Decisions
 
@@ -79,6 +79,7 @@
 
 ### Recent Significant Changes
 
+- `2026-09-11` — 節點 offline／resume 改為連續 5 次確認後才更新狀態及通知。
 - `2026-09-07` — 新增 active Profile 自定義節點離線監察 module，支援離線／恢復通知。
 - `2026-09-06` — 新增 THIM Privilege Offers response rewrite；THIM.har 證實該 endpoint 獨立提供 5 個下方 banners。
 - `2026-08-31` — 按要求移除 QQ Browser AdBlock 的 JS、request／response 規則、專用 MITM hostname 及測試；其他規則保留。
