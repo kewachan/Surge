@@ -1,5 +1,5 @@
 /**
- * Proxy Daily Traffic for Surge — v1.0.0
+ * Proxy Daily Traffic for Surge — v1.0.1
  * Samples per-policy engine counters and displays local-calendar-day totals.
  */
 
@@ -45,8 +45,9 @@
       values[key] = value;
     });
     const port = Number(values.api_port || 6171);
+    const apiKey = String(values.api_key || "").trim();
     return {
-      apiKey: values.api_key || "",
+      apiKey: apiKey.toLowerCase() === "none" ? "" : apiKey,
       apiPort: Number.isInteger(port) && port > 0 && port <= 65535 ? port : 6171
     };
   }

@@ -1,12 +1,12 @@
 #!name=Proxy Daily Traffic
 #!desc=Displays daily traffic for each custom proxy
 #!system=ios
-#!arguments=cronexp:*/15 * * * *,update_interval:60,wake_system:true,api_port:6171,api_key
+#!arguments=cronexp:*/15 * * * *,update_interval:60,wake_system:true,api_port:6171,api_key:none
 #!arguments-desc=Defaults: sample every 15 minutes and refresh on view every 60 seconds
 
 [Panel]
 Proxy Daily Traffic = title="Proxy Daily Traffic", content="Waiting for first sample", style=info, script-name=Proxy Daily Traffic Panel, update-interval={{{update_interval}}}
 
 [Script]
-Proxy Daily Traffic Panel = type=generic, timeout=15, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/ProxyTrafficPanel/proxy-traffic-panel.js?v=1.0.0, argument="api_port={{{api_port}}}&api_key={{{api_key}}}"
-Proxy Daily Traffic Sampler = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=15, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/ProxyTrafficPanel/proxy-traffic-panel.js?v=1.0.0, argument="api_port={{{api_port}}}&api_key={{{api_key}}}"
+Proxy Daily Traffic Panel = type=generic, timeout=15, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/ProxyTrafficPanel/proxy-traffic-panel.js?v=1.0.1, argument="api_port={{{api_port}}}&api_key={{{api_key}}}"
+Proxy Daily Traffic Sampler = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=15, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/ProxyTrafficPanel/proxy-traffic-panel.js?v=1.0.1, argument="api_port={{{api_port}}}&api_key={{{api_key}}}"
