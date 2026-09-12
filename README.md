@@ -50,7 +50,7 @@
 ### Architecture
 
 - Domain／URL 規則優先；需要改 body 時，由現有 GeneralAdBlock module 呼叫每個 App 的獨立 JS。
-- Bilibili：合併 BiliUniverse Enhanced／ADBlock → 共用參數化 module → 額外 PlayPause reject。
+- Bilibili：合併 BiliUniverse Enhanced／ADBlock → 本地 fail-closed feed 過濾 → 其餘功能使用固定上游版本 → 額外 PlayPause reject。
 - THIM Home：`exclusive-banners` response → 清空 `data` → App 隱藏 Privilege Offers carousel。
 - Node Offline Monitor：cron → active Profile `[Proxy]` → policy test → 5 次狀態確認 → 狀態轉變通知。
 
@@ -61,7 +61,7 @@
 - `Rewrite/Advertising.sgmodule` — 外部廣告 regex 資源。
 - `Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule` — 統一 script 與 MITM 設定。
 - `Rewrite/Bilibili/Bilibili.Enhance.sgmodule` — Bilibili 功能增強、廣告移除及 PlayPause reject。
-- `Rewrite/GeneralAdBlock/thim-adblock.js` — 只移除 THIM Home 的 Privilege Offers placement。
+- `Rewrite/Bilibili/bilibili.feed.response.js` — 無網絡補位、失敗時不回退廣告內容的首頁 feed 過濾。
 - `Tools/NodeOfflineMonitor/NodeOfflineMonitor.sgmodule` — 自定義節點離線監察設定。
 - `Tools/NodeOfflineMonitor/node-offline-monitor.js` — 節點發現、測試及狀態通知。
 
@@ -70,7 +70,7 @@
 - 先以 HAR 確認目標 request 及是否與核心功能共用。
 - 按 domain、URL rewrite、response script 的優先次序選擇處理方式。
 - Script 只改目標 response，並同步核對 URL pattern、MITM hostname 及 JS 版本。
-- Bilibili module 合併兩份上游 release，保留 script 所需固定選項 ID，描述及註解使用繁體中文。
+- Bilibili 首頁 feed 由本地 response script 直接移除廣告及可選活動大圖，不改 request、亦不發補位 request；其他功能保留固定上游 script。
 - THIM script 驗證成功 envelope 後只將 `data` 改成空陣列；其他 API 或未知格式原樣放行。
 - 節點監察從 active Profile `[Proxy]` 動態發現節點；offline／resume 均須連續 5 次一致，每次相隔 5 秒，狀態不變時不重複通知。
 
@@ -79,11 +79,12 @@
 - 沿用 `GeneralAdBlock.sgmodule` 及 `*-adblock.js` 命名，每個 App 使用獨立 JS。
 - 不封鎖登入、付款、風控、推送或核心 API。
 - THIM 不封鎖共用圖片 CDN，只攔截獨立 `exclusive-banners` endpoint。
+- Bilibili feed 採用 fail-closed 過濾；網絡異常不得令廣告補位或原始廣告 response 回流。
 - Surge module 不可修改 `[Proxy Group]`；節點監察使用 `$httpAPI`，不硬編碼節點名。
 
 ### Recent Significant Changes
 
-- `2026-09-12` — 新增單一 Bilibili Enhance module，合併 Enhanced v0.5.13、ADBlock v0.6.24 及 PlayPause reject。
+- `2026-09-12` — Bilibili 首頁 feed 改用本地純過濾 script，移除上游補位 request、5 秒 timeout 及原始廣告 fallback 路徑。
 - `2026-09-11` — 節點 offline／resume 改為連續 5 次確認後才更新狀態及通知。
 - `2026-09-07` — 新增 active Profile 自定義節點離線監察 module，支援離線／恢復通知。
 - `2026-09-06` — 新增 THIM Privilege Offers response rewrite；THIM.har 證實該 endpoint 獨立提供 5 個下方 banners。
@@ -94,7 +95,7 @@
 - Module 使用 GitHub raw JS URL；修改本機工作檔不會自動發佈，發佈時須同步 JS 與 module 版本。
 - HAR 可驗證 API 已清空；整個 section 是否收合仍須以 THIM 真機 UI 驗收。
 - Node Offline Monitor 預設沿用 Profile `proxy-test-url`，未設定時才使用內置 fallback URL。
-- Bilibili module 的上游 script URL 固定於已驗證 release；更新上游時須重新合併及檢查參數。
+- Bilibili 非 feed 功能的上游 script URL 固定於已驗證 release；更新時不可把首頁 feed 重新併回有網絡補位的上游流程。
 
 ### Start Here
 
@@ -103,4 +104,5 @@
 - `Rewrite/Adrewrite.sgmodule`
 - `Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule`
 - `Rewrite/Bilibili/Bilibili.Enhance.sgmodule`
+- `Rewrite/Bilibili/bilibili.feed.response.js`
 - `Tools/NodeOfflineMonitor/NodeOfflineMonitor.sgmodule`
