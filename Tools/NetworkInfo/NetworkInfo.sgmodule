@@ -4,8 +4,8 @@
 #!homepage=https://github.com/kewachan/Surge
 #!category=Tools
 #!date=2026-09-12
-#!version=1.1.0
-#!arguments=proxy_endpoint:https://api-ipv4.ip.sb/ip,timeout:5,retries:1,retry_delay:1,update_interval:-1,icon:network,icon_color:#6699FF
+#!version=1.1.1
+#!arguments=proxy_endpoint:https://api-ipv4.ip.sb/ip,timeout:5,retries:1,retry_delay:1,update_interval:1,icon:network,icon_color:#6699FF
 #!arguments-desc=Proxy Endpoint: URL used to retrieve the public IPv4 address.\n\nTimeout: Request timeout in seconds.\n\nRetries: Retry attempts after a failed request.\n\nRetry Delay: Delay between retries in seconds.\n\nUpdate Interval: Panel refresh interval in seconds. Use -1 for manual refresh or 1 to refresh whenever the panel opens.\n\nIcon: SF Symbol name.\n\nIcon Color: Icon color in HEX format.
 
 [Script]

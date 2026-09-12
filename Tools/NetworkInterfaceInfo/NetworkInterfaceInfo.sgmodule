@@ -1,0 +1,13 @@
+#!name=Network Interface Info
+#!desc=Displays traffic and maximum speed for Wifi and Cellular interfaces
+#!category=Tools
+#!date=2026-09-12
+#!version=1.0.0
+#!arguments=style:compact,update_interval:1,icon:wifi.router,icon_color:#6699FF
+#!arguments-desc=Style: Use compact for grouped values or normal for one value per line.\n\nUpdate Interval: Panel refresh interval in seconds. Use 1 to refresh whenever the panel opens.\n\nIcon: SF Symbol name.\n\nIcon Color: Icon color in HEX format.
+
+[Script]
+Network Interface Info = type=generic,timeout=30,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NetworkInterfaceInfo/network-interface-info.js?v=1.0.0,argument="style={{{style}}}&icon={{{icon}}}&icon_color={{{icon_color}}}"
+
+[Panel]
+Network Interface Info = script-name=Network Interface Info,update-interval={{{update_interval}}}
