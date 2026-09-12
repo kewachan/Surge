@@ -1,6 +1,6 @@
 #!name=Network Info
 #!desc=Displays the proxy country, provider, and public IPv4 address
-#!author=xream[https://github.com/xream],kewachan[https://github.com/kewachan]
+#!author=kewachan
 #!homepage=https://github.com/kewachan/Surge
 #!category=Tools
 #!date=2026-09-12
