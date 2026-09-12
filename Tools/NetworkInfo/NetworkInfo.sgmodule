@@ -1,0 +1,19 @@
+#!name=Network Info
+#!desc=Displays the proxy country, provider, and public IPv4 address
+#!author=xream[https://github.com/xream],kewachan[https://github.com/kewachan]
+#!homepage=https://github.com/kewachan/Surge
+#!category=Tools
+#!date=2026-09-12
+#!version=1.1.0
+#!arguments=proxy_endpoint:https://api-ipv4.ip.sb/ip,timeout:5,retries:1,retry_delay:1,update_interval:-1,icon:network,icon_color:#6699FF
+#!arguments-desc=Proxy Endpoint: URL used to retrieve the public IPv4 address.\n\nTimeout: Request timeout in seconds.\n\nRetries: Retry attempts after a failed request.\n\nRetry Delay: Delay between retries in seconds.\n\nUpdate Interval: Panel refresh interval in seconds. Use -1 for manual refresh or 1 to refresh whenever the panel opens.\n\nIcon: SF Symbol name.\n\nIcon Color: Icon color in HEX format.
+
+# Based on Network Info Lite by xream.
+# Source: https://github.com/xream/scripts/tree/main/surge/modules/network-info
+# License: GPL-3.0
+
+[Script]
+Network Info = type=generic,timeout=120,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NetworkInfo/network-info.js?v=1.1.0,argument="proxy_endpoint={{{proxy_endpoint}}}&timeout={{{timeout}}}&retries={{{retries}}}&retry_delay={{{retry_delay}}}&icon={{{icon}}}&icon_color={{{icon_color}}}"
+
+[Panel]
+Network Info = script-name=Network Info,update-interval={{{update_interval}}}
