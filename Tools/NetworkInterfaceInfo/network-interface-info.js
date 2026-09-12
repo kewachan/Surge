@@ -2,43 +2,59 @@
   "use strict";
 
   const NAME = "Network Interface Info";
-  const METRICS = [
-    "out",
-    "in",
-    "outMaxSpeed",
-    "inMaxSpeed"
-  ];
+  const STORE_KEY = "network_interface_info_daily_v1";
+  const SECTION_KEYS = ["wifi", "cellular"];
+  const METRICS = ["out", "in", "outCurrentSpeed", "inCurrentSpeed"];
   const options = parseArguments(
     typeof $argument === "string" ? $argument : ""
   );
 
   run()
-    .then($done)
+    .then(result => {
+      if (options.mode === "panel") {
+        $done(result);
+      } else {
+        $done();
+      }
+    })
     .catch(error => {
       console.log(`[${NAME}] ${messageFor(error)}`);
-      $done({
-        title: NAME,
-        content: `Traffic data unavailable.\n${messageFor(error)}`,
-        style: "error"
-      });
+      if (options.mode === "panel") {
+        $done({
+          title: NAME,
+          content: `Traffic data unavailable.\n${messageFor(error)}`,
+          style: "error"
+        });
+      } else {
+        $done();
+      }
     });
 
   async function run() {
     const interfaces = await getInterfaces();
-    const sections = [
-      {
-        name: "Wifi",
-        value: selectWifi(interfaces)
-      },
-      {
-        name: "Cellular",
-        value: aggregateMatching(interfaces, /^pdp_ip\d+$/)
-      }
-    ];
+    const snapshot = createSnapshot(interfaces);
+    const today = dateKey(new Date());
+
+    if (options.mode === "reset") {
+      saveState(createState(today, snapshot, false));
+      console.log(`[${NAME}] Daily statistics reset for ${today}`);
+      return null;
+    }
+
+    const state = updateState(loadState(), today, snapshot);
+    saveState(state);
+
+    if (options.mode === "sample") {
+      console.log(`[${NAME}] Daily speed sample recorded for ${today}`);
+      return null;
+    }
 
     return {
       title: NAME,
-      content: sections.map(formatSection).join("\n\n"),
+      content: [
+        formatSection("Wi-Fi", "wifi", state),
+        formatSection("Cellular", "cellular", state)
+      ].join("\n\n"),
       icon: options.icon,
       "icon-color": options.iconColor
     };
@@ -60,6 +76,9 @@
     });
 
     return {
+      mode: values.mode === "sample" || values.mode === "reset"
+        ? values.mode
+        : "panel",
       style: values.style === "normal" ? "normal" : "compact",
       icon: values.icon || "wifi.router",
       iconColor: /^#[0-9a-f]{6}$/i.test(values.icon_color || "")
@@ -92,6 +111,13 @@
     });
   }
 
+  function createSnapshot(interfaces) {
+    return {
+      wifi: selectWifi(interfaces),
+      cellular: aggregateMatching(interfaces, /^pdp_ip\d+$/)
+    };
+  }
+
   function selectWifi(interfaces) {
     if (isMetricObject(interfaces.en0)) return normalize(interfaces.en0);
 
@@ -111,11 +137,7 @@
 
     return matches.reduce((total, item) => {
       METRICS.forEach(metric => {
-        if (metric === "outMaxSpeed" || metric === "inMaxSpeed") {
-          total[metric] = Math.max(total[metric], item[metric]);
-        } else {
-          total[metric] += item[metric];
-        }
+        total[metric] += item[metric];
       });
       return total;
     }, emptyMetrics());
@@ -134,36 +156,135 @@
 
   function normalize(value) {
     return METRICS.reduce((result, metric) => {
-      const number = Number(value[metric]);
-      result[metric] = Number.isFinite(number) && number > 0 ? number : 0;
+      result[metric] = safeNumber(value[metric]);
       return result;
     }, {});
   }
 
-  function formatSection(section) {
-    if (!section.value) return `${section.name}\nUnavailable`;
+  function createState(day, snapshot, captureSpeed) {
+    const state = {
+      version: 1,
+      day,
+      seen: { wifi: false, cellular: false },
+      last: { wifi: null, cellular: null },
+      traffic: { wifi: emptyPair(), cellular: emptyPair() },
+      max: { wifi: emptyPair(), cellular: emptyPair() }
+    };
 
-    const item = section.value;
+    SECTION_KEYS.forEach(key => {
+      const item = snapshot[key];
+      if (!item) return;
+      state.seen[key] = true;
+      state.last[key] = counterPair(item);
+      if (captureSpeed) captureMaximum(state.max[key], item);
+    });
+
+    return state;
+  }
+
+  function updateState(existingState, day, snapshot) {
+    if (!isValidState(existingState) || existingState.day !== day) {
+      return createState(day, snapshot, true);
+    }
+
+    SECTION_KEYS.forEach(key => {
+      const item = snapshot[key];
+      if (!item) return;
+
+      const current = counterPair(item);
+      const previous = existingState.last[key];
+      existingState.seen[key] = true;
+
+      if (previous) {
+        existingState.traffic[key].out += counterDelta(current.out, previous.out);
+        existingState.traffic[key].in += counterDelta(current.in, previous.in);
+      }
+
+      existingState.last[key] = current;
+      captureMaximum(existingState.max[key], item);
+    });
+
+    return existingState;
+  }
+
+  function counterDelta(current, previous) {
+    return current >= previous ? current - previous : current;
+  }
+
+  function captureMaximum(maximum, item) {
+    maximum.out = Math.max(maximum.out, item.outCurrentSpeed);
+    maximum.in = Math.max(maximum.in, item.inCurrentSpeed);
+  }
+
+  function counterPair(item) {
+    return { out: item.out, in: item.in };
+  }
+
+  function emptyPair() {
+    return { out: 0, in: 0 };
+  }
+
+  function loadState() {
+    const stored = $persistentStore.read(STORE_KEY);
+    if (!stored) return null;
+
+    try {
+      return JSON.parse(stored);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveState(state) {
+    const saved = $persistentStore.write(JSON.stringify(state), STORE_KEY);
+    if (saved === false) throw new Error("Unable to save daily statistics");
+  }
+
+  function isValidState(state) {
+    if (!state || state.version !== 1 || typeof state.day !== "string") return false;
+    if (!state.seen || !state.last || !state.traffic || !state.max) return false;
+
+    return SECTION_KEYS.every(key => {
+      const last = state.last[key];
+      return typeof state.seen[key] === "boolean" &&
+        (last === null || isPair(last)) &&
+        isPair(state.traffic[key]) &&
+        isPair(state.max[key]);
+    });
+  }
+
+  function isPair(value) {
+    return Boolean(value &&
+      Number.isFinite(value.out) && value.out >= 0 &&
+      Number.isFinite(value.in) && value.in >= 0);
+  }
+
+  function formatSection(name, key, state) {
+    if (!state.seen[key]) return `${name}\nUnavailable`;
+
+    const traffic = state.traffic[key];
+    const maximum = state.max[key];
+
     if (options.style === "normal") {
       return [
-        section.name,
-        `Uploaded: ${formatBytes(item.out)}`,
-        `Downloaded: ${formatBytes(item.in)}`,
-        `Maximum Upload Speed: ${formatBytes(item.outMaxSpeed)}/s`,
-        `Maximum Download Speed: ${formatBytes(item.inMaxSpeed)}/s`
+        name,
+        `Uploaded: ${formatBytes(traffic.out)}`,
+        `Downloaded: ${formatBytes(traffic.in)}`,
+        `Max Upload Speed: ${formatBytes(maximum.out)}/s`,
+        `Max Download Speed: ${formatBytes(maximum.in)}/s`
       ].join("\n");
     }
 
     return [
-      section.name,
-      `Traffic: Up ${formatBytes(item.out)} | Down ${formatBytes(item.in)}`,
-      `Maximum Speed: Up ${formatBytes(item.outMaxSpeed)}/s | Down ${formatBytes(item.inMaxSpeed)}/s`
+      name,
+      `Traffic: Up ${formatBytes(traffic.out)} | Down ${formatBytes(traffic.in)}`,
+      `Max Speed: Up ${formatBytes(maximum.out)}/s | Down ${formatBytes(maximum.in)}/s`
     ].join("\n");
   }
 
   function formatBytes(value) {
-    const number = Number(value);
-    if (!Number.isFinite(number) || number <= 0) return "0 B";
+    const number = safeNumber(value);
+    if (number <= 0) return "0 B";
 
     const units = ["B", "KB", "MB", "GB", "TB", "PB"];
     const index = Math.min(
@@ -174,6 +295,18 @@
     const precision = index === 0 ? 0 : 2;
 
     return `${Number(scaled.toFixed(precision))} ${units[index]}`;
+  }
+
+  function safeNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : 0;
+  }
+
+  function dateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }
 
   function messageFor(error) {
