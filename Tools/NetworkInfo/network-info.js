@@ -1,11 +1,3 @@
-/**
- * Network Info for Surge
- *
- * Based on Network Info Lite by xream:
- * https://github.com/xream/scripts/tree/main/surge/modules/network-info
- * Licensed under GPL-3.0.
- */
-
 (function () {
   "use strict";
 
