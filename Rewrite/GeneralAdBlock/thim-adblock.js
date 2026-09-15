@@ -1,18 +1,15 @@
 /**
- * THIM AdBlock for Surge — v1.0.2
- * Removes the Home screen's hero banner and complete Privilege Offers carousel
- * by emptying only their dedicated placement responses.
+ * THIM AdBlock for Surge — v1.0.3
+ * Removes the Home screen's complete Privilege Offers carousel by emptying only
+ * the dedicated exclusive-banners placement response.
  */
 
 (function () {
   "use strict";
 
-  const HERO_ENDPOINT = /^https:\/\/service(?:\.global)?\.thim\.immigration\.go\.th\/api\/v1\/explore\/hero-banner(?:\?[^#]*)?$/;
-  const OFFERS_ENDPOINT = /^https:\/\/service(?:\.global)?\.thim\.immigration\.go\.th\/api\/v1\/explore\/coupons\/exclusive-banners(?:\?[^#]*)?$/;
-  const isHeroBanner = HERO_ENDPOINT.test($request.url);
-  const isOffersBanner = OFFERS_ENDPOINT.test($request.url);
+  const ENDPOINT = /^https:\/\/service(?:\.global)?\.thim\.immigration\.go\.th\/api\/v1\/explore\/coupons\/exclusive-banners(?:\?[^#]*)?$/;
 
-  if ($request.method !== "GET" || (!isHeroBanner && !isOffersBanner) ||
+  if ($request.method !== "GET" || !ENDPOINT.test($request.url) ||
       Number($response.status) !== 200 || typeof $response.body !== "string") {
     $done({});
     return;
@@ -20,25 +17,13 @@
 
   try {
     const payload = JSON.parse($response.body);
-    if (!payload || payload.code !== "200.00" || payload.status !== "SUCCESS") {
+    if (!payload || payload.code !== "200.00" || payload.status !== "SUCCESS" ||
+        !Array.isArray(payload.data) || payload.data.length === 0) {
       $done({});
       return;
     }
 
-    if (isHeroBanner) {
-      if (!payload.data || typeof payload.data !== "object" || Array.isArray(payload.data)) {
-        $done({});
-        return;
-      }
-      payload.data = null;
-    } else {
-      if (!Array.isArray(payload.data) || payload.data.length === 0) {
-        $done({});
-        return;
-      }
-      payload.data = [];
-    }
-
+    payload.data = [];
     $done({ body: JSON.stringify(payload) });
   } catch (_) {
     // Preserve malformed or future response layouts instead of affecting THIM.
