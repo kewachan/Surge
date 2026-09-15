@@ -1,5 +1,5 @@
 /**
- * THIM AdBlock for Surge — v1.0.0
+ * THIM AdBlock for Surge — v1.0.1
  * Removes the Home screen's complete Privilege Offers carousel by emptying only
  * the dedicated exclusive-banners placement response.
  */
@@ -7,7 +7,7 @@
 (function () {
   "use strict";
 
-  const ENDPOINT = /^https:\/\/service\.thim\.immigration\.go\.th\/api\/v1\/explore\/coupons\/exclusive-banners(?:\?[^#]*)?$/;
+  const ENDPOINT = /^https:\/\/service(?:\.global)?\.thim\.immigration\.go\.th\/api\/v1\/explore\/coupons\/exclusive-banners(?:\?[^#]*)?$/;
 
   if ($request.method !== "GET" || !ENDPOINT.test($request.url) ||
       Number($response.status) !== 200 || typeof $response.body !== "string") {
