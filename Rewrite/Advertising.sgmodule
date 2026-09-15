@@ -180,6 +180,7 @@
 "^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.taobao\.idle\.home\.welcome\/" - reject
 "^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.trip\.activity\.querytmsresources\/" - reject
 "^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.wdk\.render\.querysinglepage" - reject
+"^https?:\/\/guide-acs\.m\.taobao\.com\/gw\/mtop\.taobao\.wireless\.home\.splash\.awesome\.get" - reject
 "^https?:\/\/act\.vip\.iqiyi\.com\/interact\/api\/show\.do" - reject
 "^https?:\/\/ad\.cj\.sina\.cn\/(osa\/adpreload|fax\/impress)" - reject
 "^https?:\/\/ad\.lofter\.com\/.*yitou\/madr" - reject
@@ -1120,6 +1121,7 @@ https://support.you.163.com/appversync/check.do - reject
 ^https:\/\/mobileapi\.xiamenair\.com\/mobile-starter - reject
 ^https?:\/\/acs\.m\.taobao\.com\/gw\/mtop\.alimusic\.common\.mobileservice\.startinit\/ - reject
 ^https:\/\/acs\.m\.goofish\.com\/gw\/mtop\.taobao\.idle\.playboy\.recommend\/1\.0 - reject
+^https?:\/\/acs\.m\.goofish\.com\/gw\/mtop\..*splash\.ads - reject
 ^https?:\/\/(info\.mina\.xiaoaisound|marketing-aibox\.v\.mitvos)\.com\/advertise(?!\/banner) - reject
 ^https?:\/\/(info\.mina\.xiaoaisound|marketing-aibox\.v\.mitvos)\.com\/payGuide\/userCenter - reject
 ^https?:\/\/api\.xbxxhz\.com\/big_data\/v1\/home_pages - reject

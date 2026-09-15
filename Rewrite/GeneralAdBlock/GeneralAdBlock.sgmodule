@@ -1,6 +1,10 @@
 #!name=General AdBlock
-#!desc=Unified module for website/app response scripts; each target uses a dedicated JS file
+#!desc=Unified response filtering for websites and apps
 #!system=ios
+#!requirement=CORE_VERSION>=20
+
+[General]
+force-http-engine-hosts = %APPEND% gql.reddit.com, gql-fed.reddit.com
 
 [Script]
 Bahamut = type=http-response, pattern=^https:\/\/api\.gamer\.com\.tw\/(?:mobile_app\/anime\/v\d\/(?:token|m3u8)|anime\/v\d\/video_src)\.php(?:\?.*)?$, requires-body=true, max-size=0, timeout=40, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/bahamut-adblock.js?v=1.1.0
@@ -13,5 +17,8 @@ Wikipedia = type=http-response, pattern=^https?:\/\/(?:zh\.wikipedia\.org\/w\/lo
 Yahoo Finance Request = type=http-request, pattern=^https:\/\/config\.mobile\.yahoo\.com\/V3\/getconfig(?:\?.*)?$, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/yahoo-finance-adblock.js?v=1.0.0
 Yahoo Finance = type=http-response, pattern=^https:\/\/config\.mobile\.yahoo\.com\/V3\/getconfig(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/yahoo-finance-adblock.js?v=1.0.0
 
+[Body Rewrite]
+http-response-jq ^https?:\/\/gql(-fed)?\.reddit\.com 'walk(if type == "object" then (if .isNsfw == true then .isNsfw = false else . end) | (if .isNsfwMediaBlocked == true then .isNsfwMediaBlocked = false else . end) | (if .isNsfwContentShown == false then .isNsfwContentShown = true else . end) | (if (.commentsPageAds | type == "array") then .commentsPageAds = [] else . end) | (if ((.node | type == "object") and (.node.cells | type == "array") and (.node.cells | any(.__typename? == "AdMetadataCell" or .isAdPost? == true))) then empty else . end) | (if ((.node | type == "object") and (.node.adPayload | type == "object")) then empty else . end) | (if .__typename == "AdPost" then empty else . end) else . end)'
+
 [MITM]
-hostname = %APPEND% *.manhuashe.com, api.gamer.com.tw, config.mobile.yahoo.com, meta.wikimedia.org, service.thim.immigration.go.th, userside-api.mfoodapp.com, www.google.com, zh.wikipedia.org
+hostname = %APPEND% *.manhuashe.com, api.gamer.com.tw, config.mobile.yahoo.com, gql-fed.reddit.com, gql.reddit.com, meta.wikimedia.org, service.thim.immigration.go.th, userside-api.mfoodapp.com, www.google.com, zh.wikipedia.org
