@@ -149,6 +149,12 @@ DOMAIN-SUFFIX, x.research.qq.com
 
 ##### International #####
 
+# LINE
+DOMAIN, ad.line-scdn.net
+DOMAIN, ec-bot-obs.line-scdn.net
+DOMAIN, nelo2-col.linecorp.com
+DOMAIN, uts-front.line-apps.com
+
 # Samsung
 DOMAIN-SUFFIX, ad.samsungadhub.com
 DOMAIN-SUFFIX, analytics-api.samsunghealthcn.com
