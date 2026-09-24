@@ -1,9 +1,9 @@
 /**
- * Facebook Web AdBlock for Surge — v1.0.11
+ * Facebook Web AdBlock for Surge — v1.0.12
  * Removes "Open app" calls to action from mobile Facebook pages while
  * preserving navigation, playback controls, and feed content. Also applies a
- * Facebook-toned iOS status bar, black feed separators, and transparent
- * post action and refresh controls in the standalone web app.
+ * Facebook-toned iOS status bar and black feed separators in the standalone
+ * web app without altering post action or pull-to-refresh controls.
  */
 
 (function () {
@@ -70,12 +70,10 @@
 
   var LABEL = "open app";
   var HIDDEN_ATTRIBUTE = "data-surge-open-app-hidden";
-  var ACTION_ATTRIBUTE = "data-surge-facebook-action";
   var SEPARATOR_ATTRIBUTE = "data-surge-facebook-separator";
-  var ACTION_PATTERN = /(?:^|[\\s_-])(?:like|unlike|comment|comments|share|refresh|reload)(?:\\b|[_-]|$)|^(?:讚好|取消讚好|赞|取消赞|留言|評論|评论|分享|重新整理|重新載入|重新加载|刷新)/i;
   var BUTTON_SELECTOR = "a,button,[role=\\"button\\"]";
   var WEBLITE_ACTION_SELECTOR = "[data-action-id],[data-on-touch-up-action-id]";
-  var SELECTOR = BUTTON_SELECTOR + ",[role=\\"progressbar\\"],[aria-label]";
+  var SELECTOR = BUTTON_SELECTOR + ",[aria-label]";
   var dynamicScanTimer = null;
 
   function normalizedText(element) {
@@ -145,35 +143,8 @@
     }
   }
 
-  function actionLabel(element) {
-    return [
-      element.getAttribute("aria-label"),
-      element.getAttribute("title"),
-      element.getAttribute("data-sigil"),
-      element.getAttribute("data-testid"),
-      element.getAttribute("name"),
-      element.textContent
-    ].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
-  }
-
-  function clearActionBubble(element) {
-    if (!element) return;
-
-    var target = element.matches(BUTTON_SELECTOR) ? element :
-      (containingButton(element) || element);
-    var label = actionLabel(element) + " " + actionLabel(target);
-    if (!ACTION_PATTERN.test(label)) return;
-
-    target.setAttribute(ACTION_ATTRIBUTE, "1");
-    setImportantStyle(target, "background", "transparent");
-    setImportantStyle(target, "background-color", "transparent");
-    setImportantStyle(target, "border-color", "transparent");
-    setImportantStyle(target, "box-shadow", "none");
-  }
-
   function processButton(element) {
     hideButton(element);
-    clearActionBubble(element);
   }
 
   function colorChannels(value) {
@@ -222,39 +193,6 @@
     element.style.setProperty(property, value, "important");
   }
 
-  function isPillElement(element, viewportWidth, scale) {
-    var rect = visibleRect(element);
-    if (!rect) return false;
-
-    var style = window.getComputedStyle(element);
-    var normalizedHeight = rect.height / scale;
-    var radius = (parseFloat(style.borderTopLeftRadius) || 0) / scale;
-    var suitableWidth = rect.width >= viewportWidth * 0.24 &&
-      rect.width <= viewportWidth * 0.39;
-    var suitableHeight = normalizedHeight >= 32 && normalizedHeight <= 76;
-
-    return suitableWidth && suitableHeight &&
-      radius >= normalizedHeight * 0.18 &&
-      isNeutralColor(style.backgroundColor, 35, 120);
-  }
-
-  function pillTarget(element, viewportWidth, scale) {
-    var current = element;
-
-    for (var depth = 0; current && depth < 12; depth += 1) {
-      if (isPillElement(current, viewportWidth, scale)) return current;
-
-      if (current.id === "screen-root" || current === document.body) break;
-      current = current.parentElement;
-    }
-
-    return null;
-  }
-
-  function appendUnique(elements, element) {
-    if (element && elements.indexOf(element) === -1) elements.push(element);
-  }
-
   function applyWebLiteStaticFixes() {
     var baseElements = [
       document.documentElement,
@@ -268,12 +206,6 @@
         setImportantStyle(element, "background-color", "#242527");
       }
     });
-
-    var screenRoot = document.getElementById("screen-root");
-    if (screenRoot) {
-      setImportantStyle(screenRoot, "padding-top", "0px");
-      setImportantStyle(screenRoot, "margin-top", "16px");
-    }
 
     var loadingTracks = document.querySelectorAll(".loading-bar-background");
     for (var trackIndex = 0; trackIndex < loadingTracks.length; trackIndex += 1) {
@@ -291,78 +223,19 @@
       setImportantStyle(progress, "background", fill);
     }
 
-    var refreshers = document.querySelectorAll(".pull-to-refresh-spinner");
-    for (var index = 0; index < refreshers.length; index += 1) {
-      setImportantStyle(refreshers[index], "background", "transparent");
-      setImportantStyle(refreshers[index], "background-color", "transparent");
-      setImportantStyle(refreshers[index], "box-shadow", "none");
-    }
-
-    var shadows = document.querySelectorAll(".pull-to-refresh-spinner-shadow");
-    for (var shadowIndex = 0; shadowIndex < shadows.length; shadowIndex += 1) {
-      setImportantStyle(shadows[shadowIndex], "box-shadow", "none");
-    }
-  }
-
-  function clearWebLiteActionRows() {
-    var root = document.getElementById("screen-root");
-    if (!root) return;
-
-    var rootRect = visibleRect(root);
-    var viewportWidth = rootRect ? rootRect.width :
-      (window.innerWidth || document.documentElement.clientWidth || 0);
-    if (!viewportWidth) return;
-    var scale = coordinateScale(viewportWidth);
-
-    var actions = document.querySelectorAll(WEBLITE_ACTION_SELECTOR);
-    var pills = [];
-
-    for (var index = 0; index < actions.length; index += 1) {
-      appendUnique(pills, pillTarget(actions[index], viewportWidth, scale));
-    }
-
-    var visualCandidates = root.querySelectorAll("div,a,button,span");
-    for (var candidateIndex = 0; candidateIndex < visualCandidates.length;
-         candidateIndex += 1) {
-      var candidate = visualCandidates[candidateIndex];
-      if (isPillElement(candidate, viewportWidth, scale)) {
-        appendUnique(pills, candidate);
-      }
-    }
-
-    for (var pillIndex = 0; pillIndex < pills.length; pillIndex += 1) {
-      var reference = visibleRect(pills[pillIndex]);
-      if (!reference) continue;
-
-      var row = pills.filter(function (candidate) {
-        var rect = visibleRect(candidate);
-        return rect && Math.abs(rect.top - reference.top) <= 8 * scale &&
-          Math.abs(rect.height - reference.height) <= 8 * scale;
-      });
-
-      if (row.length < 3) continue;
-      row.sort(function (left, right) {
-        return visibleRect(left).left - visibleRect(right).left;
-      });
-
-      var first = visibleRect(row[0]);
-      var last = visibleRect(row[row.length - 1]);
-      if (!first || !last || last.right - first.left < viewportWidth * 0.78) continue;
-
-      row.forEach(function (target) {
-        target.setAttribute(ACTION_ATTRIBUTE, "1");
-        setImportantStyle(target, "background", "transparent");
-        setImportantStyle(target, "background-color", "transparent");
-        setImportantStyle(target, "border-color", "transparent");
-        setImportantStyle(target, "box-shadow", "none");
-      });
-    }
   }
 
   function isMediaControl(element) {
     return Boolean(element.closest && element.closest(
       "video,[role=\\"slider\\"],[role=\\"progressbar\\"]," +
       ".inline-video-progress-bar-container,.inline-video-progress-bar"
+    ));
+  }
+
+  function isPullToRefreshControl(element) {
+    return Boolean(element.closest && element.closest(
+      ".pull-to-refresh-spinner-container,.pull-to-refresh-spinner," +
+      ".pull-to-refresh-spinner-shadow,.pull-to-refresh-spinner-icon"
     ));
   }
 
@@ -384,7 +257,7 @@
       var rect = visibleRect(element);
       if (!rect || rect.width < viewportWidth * 0.85 ||
           element.matches(".loading-bar-background,.loading-bar-animation") ||
-          isMediaControl(element)) continue;
+          isMediaControl(element) || isPullToRefreshControl(element)) continue;
 
       var style = window.getComputedStyle(element);
       var normalizedHeight = rect.height / scale;
@@ -462,7 +335,6 @@
       dynamicScanTimer = null;
       applyWebLiteStaticFixes();
       hideOpenAppElements();
-      clearWebLiteActionRows();
       clearWebLiteSeparators();
     }, 160);
   }
@@ -497,8 +369,6 @@
       });
       scheduleDynamicScan();
     }).observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["style", "class", "data-bg", "data-background-color"],
       childList: true,
       subtree: true,
       characterData: true
@@ -539,26 +409,12 @@ body,
   background-color: #242527 !important;
 }
 
-#screen-root {
-  padding-top: 0 !important;
-  margin-top: 16px !important;
-}
-
-html,
-body,
-#screen-root,
-[data-type="vscroller"] {
-  scrollbar-width: none !important;
-  -ms-overflow-style: none !important;
-}
-
-html::-webkit-scrollbar,
-body::-webkit-scrollbar,
-#screen-root::-webkit-scrollbar,
-[data-type="vscroller"]::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
+#screen-root::before {
+  content: "";
+  display: block;
+  height: 16px;
+  background-color: #242527;
+  pointer-events: none;
 }
 
 .loading-bar-background,
@@ -590,14 +446,6 @@ hr,
   border-color: #000 !important;
 }
 
-.pull-to-refresh-spinner {
-  background-color: transparent !important;
-}
-
-.pull-to-refresh-spinner-shadow {
-  box-shadow: none !important;
-}
-
 ._52z5._7gxn,
 ._9mlm ._52z5,
 ._9mln ._52z5 {
@@ -625,16 +473,6 @@ article > div,
   border-top-color: #000 !important;
   border-bottom-color: #000 !important;
   outline-color: #000 !important;
-  box-shadow: none !important;
-}
-
-[data-surge-facebook-action="1"],
-[data-surge-facebook-action="1"]::before,
-[data-surge-facebook-action="1"]::after,
-[data-surge-facebook-action="1"] > * {
-  background: transparent !important;
-  background-color: transparent !important;
-  border-color: transparent !important;
   box-shadow: none !important;
 }
 
