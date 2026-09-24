@@ -1,5 +1,5 @@
 /**
- * Facebook Web AdBlock for Surge — v1.0.8
+ * Facebook Web AdBlock for Surge — v1.0.9
  * Removes "Open app" calls to action from mobile Facebook pages while
  * preserving navigation, playback controls, and feed content. Also applies a
  * Facebook-toned iOS status bar, black feed separators, and transparent
@@ -85,6 +85,19 @@
       .toLowerCase();
   }
 
+  function isOpenAppElement(element) {
+    if (!element) return false;
+    var labels = [
+      normalizedText(element),
+      element.getAttribute("aria-label"),
+      element.getAttribute("title")
+    ];
+
+    return labels.some(function (label) {
+      return String(label || "").replace(/\\s+/g, " ").trim().toLowerCase() === LABEL;
+    });
+  }
+
   function containingButton(node) {
     if (!node) return null;
     var element = node.nodeType === 1 ? node : node.parentElement;
@@ -92,13 +105,16 @@
   }
 
   function expandedTarget(element) {
-    var target = element;
+    var clickable = element.closest && element.closest(
+      BUTTON_SELECTOR + "," + WEBLITE_ACTION_SELECTOR
+    );
+    var target = clickable && isOpenAppElement(clickable) ? clickable : element;
 
-    for (var depth = 0; depth < 3; depth += 1) {
+    for (var depth = 0; depth < 5; depth += 1) {
       var parent = target.parentElement;
       if (!parent || parent === document.body || parent === document.documentElement) break;
       if (parent.matches("header,nav,main,[role=\\"navigation\\"]")) break;
-      if (normalizedText(parent) !== LABEL) break;
+      if (!isOpenAppElement(parent)) break;
       target = parent;
     }
 
@@ -106,7 +122,7 @@
   }
 
   function hideButton(element) {
-    if (!element || normalizedText(element) !== LABEL) return;
+    if (!isOpenAppElement(element)) return;
 
     var target = expandedTarget(element);
     if (target.getAttribute(HIDDEN_ATTRIBUTE) === "1") return;
@@ -114,6 +130,19 @@
     target.style.setProperty("display", "none", "important");
     target.setAttribute(HIDDEN_ATTRIBUTE, "1");
     target.setAttribute("aria-hidden", "true");
+  }
+
+  function hideOpenAppElements() {
+    var root = document.body || document.getElementById("screen-root");
+    if (!root) return;
+
+    var elements = root.querySelectorAll(
+      "a,button,[role=\\"button\\"],[data-action-id]," +
+      "[data-on-touch-up-action-id],span,.native-text"
+    );
+    for (var index = 0; index < elements.length; index += 1) {
+      hideButton(elements[index]);
+    }
   }
 
   function actionLabel(element) {
@@ -240,6 +269,12 @@
       }
     });
 
+    var screenRoot = document.getElementById("screen-root");
+    if (screenRoot) {
+      setImportantStyle(screenRoot, "box-sizing", "border-box");
+      setImportantStyle(screenRoot, "padding-top", "6px");
+    }
+
     var loadingTracks = document.querySelectorAll(".loading-bar-background");
     for (var trackIndex = 0; trackIndex < loadingTracks.length; trackIndex += 1) {
       setImportantStyle(loadingTracks[trackIndex], "background", "#242527");
@@ -341,7 +376,7 @@
     if (!viewportWidth) return;
     var scale = coordinateScale(viewportWidth);
 
-    var elements = root.querySelectorAll("div");
+    var elements = root.querySelectorAll("div,section,article,hr");
     for (var index = 0; index < elements.length; index += 1) {
       var element = elements[index];
       var rect = visibleRect(element);
@@ -353,24 +388,38 @@
       var changed = false;
 
       if (rect.height / scale <= 8 &&
-          isNeutralColor(style.backgroundColor, 55, 230)) {
+          isNeutralColor(style.backgroundColor, 40, 230)) {
         setImportantStyle(element, "background-color", "#000");
         changed = true;
       }
 
       var topWidth = (parseFloat(style.borderTopWidth) || 0) / scale;
       if (topWidth > 0 && topWidth <= 8 &&
-          isNeutralColor(style.borderTopColor, 55, 230)) {
+          isNeutralColor(style.borderTopColor, 40, 230)) {
         setImportantStyle(element, "border-top-color", "#000");
         changed = true;
       }
 
       var bottomWidth = (parseFloat(style.borderBottomWidth) || 0) / scale;
       if (bottomWidth > 0 && bottomWidth <= 8 &&
-          isNeutralColor(style.borderBottomColor, 55, 230)) {
+          isNeutralColor(style.borderBottomColor, 40, 230)) {
         setImportantStyle(element, "border-bottom-color", "#000");
         changed = true;
       }
+
+      ["::before", "::after"].forEach(function (pseudo) {
+        var pseudoStyle = window.getComputedStyle(element, pseudo);
+        var content = String(pseudoStyle.content || "").toLowerCase();
+        var pseudoHeight = (parseFloat(pseudoStyle.height) || 0) / scale;
+        var hasContent = content !== "" && content !== "none" &&
+          content !== "normal";
+        if (hasContent && pseudoHeight > 0 && pseudoHeight <= 8 &&
+            (isNeutralColor(pseudoStyle.backgroundColor, 40, 230) ||
+             isNeutralColor(pseudoStyle.borderTopColor, 40, 230) ||
+             isNeutralColor(pseudoStyle.borderBottomColor, 40, 230))) {
+          changed = true;
+        }
+      });
 
       if (changed) {
         element.setAttribute(SEPARATOR_ATTRIBUTE, "1");
@@ -384,6 +433,7 @@
     dynamicScanTimer = window.setTimeout(function () {
       dynamicScanTimer = null;
       applyWebLiteStaticFixes();
+      hideOpenAppElements();
       clearWebLiteActionRows();
       clearWebLiteSeparators();
     }, 160);
@@ -459,6 +509,28 @@ body,
 #viewport,
 #page {
   background-color: #242527 !important;
+}
+
+#screen-root {
+  box-sizing: border-box !important;
+  padding-top: 6px !important;
+}
+
+html,
+body,
+#screen-root,
+[data-type="vscroller"] {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#screen-root::-webkit-scrollbar,
+[data-type="vscroller"]::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .loading-bar-background,
@@ -542,6 +614,17 @@ article > div,
   border-top-color: #000 !important;
   border-bottom-color: #000 !important;
   box-shadow: none !important;
+}
+
+[data-surge-facebook-separator="1"]::before,
+[data-surge-facebook-separator="1"]::after {
+  background-color: #000 !important;
+  border-color: #000 !important;
+  box-shadow: none !important;
+}
+
+[data-surge-open-app-hidden="1"] {
+  display: none !important;
 }`;
   }
 
