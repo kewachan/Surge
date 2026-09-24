@@ -25,9 +25,6 @@ DOMAIN-SUFFIX, theradioapp.com
 #HKTVmall
 DOMAIN-KEYWORD, hktvmall
 
-#Maaseas Youtube Adblock
-DOMAIN, stream.maasea.workers.dev
-
 ############ China ############
 
 #XiaoMi
