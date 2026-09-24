@@ -1,5 +1,5 @@
 /**
- * Facebook Web AdBlock for Surge — v1.0.7
+ * Facebook Web AdBlock for Surge — v1.0.8
  * Removes "Open app" calls to action from mobile Facebook pages while
  * preserving navigation, playback controls, and feed content. Also applies a
  * Facebook-toned iOS status bar, black feed separators, and transparent
@@ -240,6 +240,22 @@
       }
     });
 
+    var loadingTracks = document.querySelectorAll(".loading-bar-background");
+    for (var trackIndex = 0; trackIndex < loadingTracks.length; trackIndex += 1) {
+      setImportantStyle(loadingTracks[trackIndex], "background", "#242527");
+      setImportantStyle(loadingTracks[trackIndex], "background-color", "#242527");
+      setImportantStyle(loadingTracks[trackIndex], "box-shadow", "none");
+    }
+
+    var loadingProgress = document.querySelectorAll(".loading-bar-animation");
+    for (var progressIndex = 0; progressIndex < loadingProgress.length;
+         progressIndex += 1) {
+      var progress = loadingProgress[progressIndex];
+      var fill = progress.closest(".revamped-progress-bar-color") ?
+        "linear-gradient(90deg, #004cc6, #0079ff)" : "#1877f2";
+      setImportantStyle(progress, "background", fill);
+    }
+
     var refreshers = document.querySelectorAll(".pull-to-refresh-spinner");
     for (var index = 0; index < refreshers.length; index += 1) {
       setImportantStyle(refreshers[index], "background", "transparent");
@@ -443,6 +459,21 @@ body,
 #viewport,
 #page {
   background-color: #242527 !important;
+}
+
+.loading-bar-background,
+.revamped-progress-bar-color .loading-bar-background {
+  background: #242527 !important;
+  background-color: #242527 !important;
+  box-shadow: none !important;
+}
+
+.loading-bar-animation {
+  background: #1877f2 !important;
+}
+
+.revamped-progress-bar-color .loading-bar-animation {
+  background: linear-gradient(90deg, #004cc6, #0079ff) !important;
 }
 
 #pagelet_feed_stream,
