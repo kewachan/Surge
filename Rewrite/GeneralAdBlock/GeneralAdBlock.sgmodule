@@ -5,8 +5,12 @@
 [General]
 force-http-engine-hosts = %APPEND% gql.reddit.com, gql-fed.reddit.com
 
+[Rule]
+AND,((DOMAIN,m.facebook.com),(PROTOCOL,UDP)),REJECT
+
 [Script]
 Bahamut = type=http-response, pattern=^https:\/\/api\.gamer\.com\.tw\/(?:mobile_app\/anime\/v\d\/(?:token|m3u8)|anime\/v\d\/video_src)\.php(?:\?.*)?$, requires-body=true, max-size=0, timeout=40, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/bahamut-adblock.js?v=1.1.0
+Facebook = type=http-response, pattern=^https:\/\/m\.facebook\.com\/(?:$|[?#]|reel(?:s)?(?:\/|[?#]|$)|watch(?:\/|[?#]|$)|share(?:\/|[?#]|$)), requires-body=true, max-size=0, timeout=10, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/facebook-adblock.js?v=1.0.3
 Google = type=http-response, pattern=^https?:\/\/(www\.)?google\.[^\/]+\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/google-adblock.js?v=1.0.19
 Manhuashe = type=http-response, pattern=^https?:\/\/comicapi\.manhuashe\.com\/v\d\/.+?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/manhuashe-adblock.js?v=1.0.2
 LINE = type=http-response, pattern=^https:\/\/legy\.line-apps\.com(?::443)?\/S4(?:\?[^#]*)?$, requires-body=true, binary-body-mode=true, max-size=262144, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/line-adblock.js?v=1.0.0
@@ -19,4 +23,4 @@ Yahoo Finance Request = type=http-request, pattern=^https:\/\/config\.mobile\.ya
 Yahoo Finance = type=http-response, pattern=^https:\/\/config\.mobile\.yahoo\.com\/V3\/getconfig(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/yahoo-finance-adblock.js?v=1.0.0
 
 [MITM]
-hostname = %APPEND% *.manhuashe.com, api.gamer.com.tw, config.mobile.yahoo.com, gql-fed.reddit.com, gql.reddit.com, legy.line-apps.com, meta.wikimedia.org, service.global.thim.immigration.go.th, service.thim.immigration.go.th, userside-api.mfoodapp.com, www.google.com, zh.wikipedia.org
+hostname = %APPEND% *.manhuashe.com, api.gamer.com.tw, config.mobile.yahoo.com, gql-fed.reddit.com, gql.reddit.com, legy.line-apps.com, m.facebook.com, meta.wikimedia.org, service.global.thim.immigration.go.th, service.thim.immigration.go.th, userside-api.mfoodapp.com, www.google.com, zh.wikipedia.org
