@@ -1,5 +1,5 @@
 /**
- * Facebook Web AdBlock for Surge — v1.0.9
+ * Facebook Web AdBlock for Surge — v1.0.10
  * Removes "Open app" calls to action from mobile Facebook pages while
  * preserving navigation, playback controls, and feed content. Also applies a
  * Facebook-toned iOS status bar, black feed separators, and transparent
@@ -376,34 +376,57 @@
     if (!viewportWidth) return;
     var scale = coordinateScale(viewportWidth);
 
-    var elements = root.querySelectorAll("div,section,article,hr");
+    var elements = root.querySelectorAll(
+      "div,section,article,header,footer,nav,main,aside,hr,ul,ol,li,form"
+    );
     for (var index = 0; index < elements.length; index += 1) {
       var element = elements[index];
       var rect = visibleRect(element);
-      if (!rect || rect.top / scale < 80 ||
-          rect.width < viewportWidth * 0.85 ||
+      if (!rect || rect.width < viewportWidth * 0.85 ||
+          element.matches(".loading-bar-background,.loading-bar-animation") ||
           isMediaControl(element)) continue;
 
       var style = window.getComputedStyle(element);
+      var normalizedHeight = rect.height / scale;
+      var radius = Math.max(
+        parseFloat(style.borderTopLeftRadius) || 0,
+        parseFloat(style.borderTopRightRadius) || 0,
+        parseFloat(style.borderBottomLeftRadius) || 0,
+        parseFloat(style.borderBottomRightRadius) || 0
+      ) / scale;
+      if (normalizedHeight > 8 && radius > 8) continue;
+
       var changed = false;
 
-      if (rect.height / scale <= 8 &&
-          isNeutralColor(style.backgroundColor, 40, 230)) {
+      if (normalizedHeight <= 8 &&
+          isNeutralColor(style.backgroundColor, 40, 255)) {
         setImportantStyle(element, "background-color", "#000");
         changed = true;
       }
 
       var topWidth = (parseFloat(style.borderTopWidth) || 0) / scale;
       if (topWidth > 0 && topWidth <= 8 &&
-          isNeutralColor(style.borderTopColor, 40, 230)) {
+          isNeutralColor(style.borderTopColor, 40, 255)) {
         setImportantStyle(element, "border-top-color", "#000");
         changed = true;
       }
 
       var bottomWidth = (parseFloat(style.borderBottomWidth) || 0) / scale;
       if (bottomWidth > 0 && bottomWidth <= 8 &&
-          isNeutralColor(style.borderBottomColor, 40, 230)) {
+          isNeutralColor(style.borderBottomColor, 40, 255)) {
         setImportantStyle(element, "border-bottom-color", "#000");
+        changed = true;
+      }
+
+      var outlineWidth = (parseFloat(style.outlineWidth) || 0) / scale;
+      if (outlineWidth > 0 && outlineWidth <= 8 &&
+          isNeutralColor(style.outlineColor, 40, 255)) {
+        setImportantStyle(element, "outline-color", "#000");
+        changed = true;
+      }
+
+      if (style.boxShadow && style.boxShadow !== "none") {
+        setImportantStyle(element, "box-shadow", "none");
         changed = true;
       }
 
@@ -411,12 +434,17 @@
         var pseudoStyle = window.getComputedStyle(element, pseudo);
         var content = String(pseudoStyle.content || "").toLowerCase();
         var pseudoHeight = (parseFloat(pseudoStyle.height) || 0) / scale;
+        var pseudoTopWidth = (parseFloat(pseudoStyle.borderTopWidth) || 0) / scale;
+        var pseudoBottomWidth =
+          (parseFloat(pseudoStyle.borderBottomWidth) || 0) / scale;
         var hasContent = content !== "" && content !== "none" &&
           content !== "normal";
-        if (hasContent && pseudoHeight > 0 && pseudoHeight <= 8 &&
-            (isNeutralColor(pseudoStyle.backgroundColor, 40, 230) ||
-             isNeutralColor(pseudoStyle.borderTopColor, 40, 230) ||
-             isNeutralColor(pseudoStyle.borderBottomColor, 40, 230))) {
+        var isThin = pseudoHeight <= 8 &&
+          (pseudoHeight > 0 || pseudoTopWidth > 0 || pseudoBottomWidth > 0);
+        if (hasContent && isThin &&
+            (isNeutralColor(pseudoStyle.backgroundColor, 40, 255) ||
+             isNeutralColor(pseudoStyle.borderTopColor, 40, 255) ||
+             isNeutralColor(pseudoStyle.borderBottomColor, 40, 255))) {
           changed = true;
         }
       });
