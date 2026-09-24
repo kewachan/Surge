@@ -774,7 +774,7 @@
 ^https?:\/\/api\.feng\.com\/v\d\/advertisement\/.*Claunch - reject
 ^https?:\/\/(www|s)\.youtube\.com\/api\/stats\/ads - reject
 ^https?:\/\/(www|s)\.youtube\.com\/(pagead|ptracking) - reject
-^https?:\/\/\s.youtube.com/api/stats/qoe?.*adformat= - reject
+^https?:\/\/s\.youtube\.com\/api\/stats\/qoe(?:\?.*)?$ - reject
 ^https?:\/\/dl\.app\.gtja\.com\/dzswem\/kvController\/[\w\/]+\.jpg$ - reject
 ^https?:\/\/smkmp\.96225.com\/smkcenter\/ad/ - reject
 ^https?:\/\/api\.huomao\.com\/channels\/loginAd - reject
