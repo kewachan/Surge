@@ -1,8 +1,9 @@
 /**
- * Facebook Web AdBlock for Surge — v1.0.3
+ * Facebook Web AdBlock for Surge — v1.0.4
  * Removes "Open app" calls to action from mobile Facebook pages while
  * preserving navigation, playback controls, and feed content. Also applies a
- * black iOS status bar and black feed separators to the standalone web app.
+ * Facebook-toned iOS status bar, black feed separators, and transparent
+ * post action and refresh controls in the standalone web app.
  */
 
 (function () {
@@ -69,7 +70,10 @@
 
   var LABEL = "open app";
   var HIDDEN_ATTRIBUTE = "data-surge-open-app-hidden";
-  var SELECTOR = "a,button,[role=\\"button\\"]";
+  var ACTION_ATTRIBUTE = "data-surge-facebook-action";
+  var ACTION_PATTERN = /(?:^|[\\s_-])(?:like|unlike|comment|comments|share|refresh|reload)(?:\\b|[_-]|$)|^(?:讚好|取消讚好|赞|取消赞|留言|評論|评论|分享|重新整理|重新載入|重新加载|刷新)/i;
+  var BUTTON_SELECTOR = "a,button,[role=\\"button\\"]";
+  var SELECTOR = BUTTON_SELECTOR + ",[role=\\"progressbar\\"],[aria-label]";
 
   function normalizedText(element) {
     return String(element.textContent || "")
@@ -81,7 +85,7 @@
   function containingButton(node) {
     if (!node) return null;
     var element = node.nodeType === 1 ? node : node.parentElement;
-    return element && element.closest ? element.closest(SELECTOR) : null;
+    return element && element.closest ? element.closest(BUTTON_SELECTOR) : null;
   }
 
   function expandedTarget(element) {
@@ -109,14 +113,45 @@
     target.setAttribute("aria-hidden", "true");
   }
 
+  function actionLabel(element) {
+    return [
+      element.getAttribute("aria-label"),
+      element.getAttribute("title"),
+      element.getAttribute("data-sigil"),
+      element.getAttribute("data-testid"),
+      element.getAttribute("name"),
+      element.textContent
+    ].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
+  }
+
+  function clearActionBubble(element) {
+    if (!element) return;
+
+    var target = element.matches(BUTTON_SELECTOR) ? element :
+      (containingButton(element) || element);
+    var label = actionLabel(element) + " " + actionLabel(target);
+    if (!ACTION_PATTERN.test(label)) return;
+
+    target.setAttribute(ACTION_ATTRIBUTE, "1");
+    target.style.setProperty("background", "transparent", "important");
+    target.style.setProperty("background-color", "transparent", "important");
+    target.style.setProperty("border-color", "transparent", "important");
+    target.style.setProperty("box-shadow", "none", "important");
+  }
+
+  function processButton(element) {
+    hideButton(element);
+    clearActionBubble(element);
+  }
+
   function scan(root) {
     if (!root || (root.nodeType !== 1 && root.nodeType !== 9)) return;
 
-    if (root.nodeType === 1 && root.matches(SELECTOR)) hideButton(root);
+    if (root.nodeType === 1 && root.matches(SELECTOR)) processButton(root);
 
     var buttons = root.querySelectorAll(SELECTOR);
     for (var index = 0; index < buttons.length; index += 1) {
-      hideButton(buttons[index]);
+      processButton(buttons[index]);
     }
   }
 
@@ -125,14 +160,14 @@
 
     new MutationObserver(function (records) {
       records.forEach(function (record) {
-        hideButton(containingButton(record.target));
+        processButton(containingButton(record.target));
 
         for (var index = 0; index < record.addedNodes.length; index += 1) {
           var node = record.addedNodes[index];
           if (node.nodeType === 1) {
             scan(node);
           } else {
-            hideButton(containingButton(node));
+            processButton(containingButton(node));
           }
         }
       });
@@ -153,6 +188,28 @@
 
   function injectedStyle() {
     return `html {
+  background-color: #242526 !important;
+}
+
+html::before {
+  content: "";
+  position: fixed;
+  z-index: 2147483647;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: env(safe-area-inset-top);
+  background-color: #242526 !important;
+  pointer-events: none;
+}
+
+body,
+#root,
+#viewport,
+#page,
+#pagelet_feed_stream,
+[role="feed"],
+.storyStream {
   background-color: #000 !important;
 }
 
@@ -183,9 +240,25 @@ hr,
 
 [role="article"],
 [role="article"] > div,
+article,
+article > div,
+.storyStream > *,
+[role="feed"] > *,
 .storyStream .carded > div {
   border-top-color: #000 !important;
   border-bottom-color: #000 !important;
+  outline-color: #000 !important;
+  box-shadow: none !important;
+}
+
+[data-surge-facebook-action="1"],
+[data-surge-facebook-action="1"]::before,
+[data-surge-facebook-action="1"]::after,
+[data-surge-facebook-action="1"] > * {
+  background: transparent !important;
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
 }`;
   }
 
@@ -201,8 +274,8 @@ hr,
   }
 
   let output = setMetaContent(body, "apple-mobile-web-app-capable", "yes");
-  output = setMetaContent(output, "apple-mobile-web-app-status-bar-style", "black");
-  output = setMetaContent(output, "theme-color", "#000000");
+  output = setMetaContent(output, "apple-mobile-web-app-status-bar-style", "black-translucent");
+  output = setMetaContent(output, "theme-color", "#242526");
 
   const needsScript = output.indexOf(MARKER) === -1;
   const needsStyle = output.indexOf(STYLE_MARKER) === -1;
