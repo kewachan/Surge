@@ -1,5 +1,5 @@
 /**
- * Facebook Web AdBlock for Surge — v1.0.12
+ * Facebook Web AdBlock for Surge — v1.0.13
  * Removes "Open app" calls to action from mobile Facebook pages while
  * preserving navigation, playback controls, and feed content. Also applies a
  * Facebook-toned iOS status bar and black feed separators in the standalone
@@ -9,8 +9,8 @@
 (function () {
   "use strict";
 
-  const MARKER = "data-surge-facebook-open-app";
-  const STYLE_MARKER = "data-surge-facebook-dark-ui";
+  const MARKER = "data-surge-facebook-open-app-v13";
+  const STYLE_MARKER = "data-surge-facebook-dark-ui-v13";
 
   function headerValue(headers, name) {
     const target = name.toLowerCase();
@@ -410,11 +410,8 @@ body,
 }
 
 #screen-root::before {
-  content: "";
-  display: block;
-  height: 16px;
-  background-color: #242527;
-  pointer-events: none;
+  content: none !important;
+  display: none !important;
 }
 
 .loading-bar-background,
