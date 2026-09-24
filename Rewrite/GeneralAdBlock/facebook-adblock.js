@@ -1,5 +1,5 @@
 /**
- * Facebook Web AdBlock for Surge — v1.0.4
+ * Facebook Web AdBlock for Surge — v1.0.5
  * Removes "Open app" calls to action from mobile Facebook pages while
  * preserving navigation, playback controls, and feed content. Also applies a
  * Facebook-toned iOS status bar, black feed separators, and transparent
