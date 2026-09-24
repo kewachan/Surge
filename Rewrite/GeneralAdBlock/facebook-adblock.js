@@ -1,5 +1,5 @@
 /**
- * Facebook Web AdBlock for Surge — v1.0.6
+ * Facebook Web AdBlock for Surge — v1.0.7
  * Removes "Open app" calls to action from mobile Facebook pages while
  * preserving navigation, playback controls, and feed content. Also applies a
  * Facebook-toned iOS status bar, black feed separators, and transparent
@@ -136,10 +136,10 @@
     if (!ACTION_PATTERN.test(label)) return;
 
     target.setAttribute(ACTION_ATTRIBUTE, "1");
-    target.style.setProperty("background", "transparent", "important");
-    target.style.setProperty("background-color", "transparent", "important");
-    target.style.setProperty("border-color", "transparent", "important");
-    target.style.setProperty("box-shadow", "none", "important");
+    setImportantStyle(target, "background", "transparent");
+    setImportantStyle(target, "background-color", "transparent");
+    setImportantStyle(target, "border-color", "transparent");
+    setImportantStyle(target, "box-shadow", "none");
   }
 
   function processButton(element) {
@@ -178,23 +178,42 @@
     return rect;
   }
 
-  function pillTarget(element, viewportWidth) {
+  function coordinateScale(viewportWidth) {
+    var cssWidth = window.innerWidth || document.documentElement.clientWidth ||
+      viewportWidth;
+    var scale = cssWidth > 0 ? viewportWidth / cssWidth : 1;
+
+    return scale >= 1 && scale <= 4 ? scale : 1;
+  }
+
+  function setImportantStyle(element, property, value) {
+    if (!element) return;
+    if (element.style.getPropertyValue(property) === value &&
+        element.style.getPropertyPriority(property) === "important") return;
+    element.style.setProperty(property, value, "important");
+  }
+
+  function isPillElement(element, viewportWidth, scale) {
+    var rect = visibleRect(element);
+    if (!rect) return false;
+
+    var style = window.getComputedStyle(element);
+    var normalizedHeight = rect.height / scale;
+    var radius = (parseFloat(style.borderTopLeftRadius) || 0) / scale;
+    var suitableWidth = rect.width >= viewportWidth * 0.24 &&
+      rect.width <= viewportWidth * 0.39;
+    var suitableHeight = normalizedHeight >= 32 && normalizedHeight <= 76;
+
+    return suitableWidth && suitableHeight &&
+      radius >= normalizedHeight * 0.18 &&
+      isNeutralColor(style.backgroundColor, 35, 120);
+  }
+
+  function pillTarget(element, viewportWidth, scale) {
     var current = element;
 
-    for (var depth = 0; current && depth < 6; depth += 1) {
-      var rect = visibleRect(current);
-      if (rect) {
-        var style = window.getComputedStyle(current);
-        var radius = parseFloat(style.borderTopLeftRadius) || 0;
-        var suitableWidth = rect.width >= viewportWidth * 0.24 &&
-          rect.width <= viewportWidth * 0.39;
-        var suitableHeight = rect.height >= 34 && rect.height <= 72;
-
-        if (suitableWidth && suitableHeight && radius >= rect.height * 0.25 &&
-            isNeutralColor(style.backgroundColor, 45, 100)) {
-          return current;
-        }
-      }
+    for (var depth = 0; current && depth < 12; depth += 1) {
+      if (isPillElement(current, viewportWidth, scale)) return current;
 
       if (current.id === "screen-root" || current === document.body) break;
       current = current.parentElement;
@@ -203,16 +222,61 @@
     return null;
   }
 
+  function appendUnique(elements, element) {
+    if (element && elements.indexOf(element) === -1) elements.push(element);
+  }
+
+  function applyWebLiteStaticFixes() {
+    var baseElements = [
+      document.documentElement,
+      document.body,
+      document.getElementById("app-body"),
+      document.getElementById("screen-root")
+    ];
+
+    baseElements.forEach(function (element) {
+      if (element) {
+        setImportantStyle(element, "background-color", "#242527");
+      }
+    });
+
+    var refreshers = document.querySelectorAll(".pull-to-refresh-spinner");
+    for (var index = 0; index < refreshers.length; index += 1) {
+      setImportantStyle(refreshers[index], "background", "transparent");
+      setImportantStyle(refreshers[index], "background-color", "transparent");
+      setImportantStyle(refreshers[index], "box-shadow", "none");
+    }
+
+    var shadows = document.querySelectorAll(".pull-to-refresh-spinner-shadow");
+    for (var shadowIndex = 0; shadowIndex < shadows.length; shadowIndex += 1) {
+      setImportantStyle(shadows[shadowIndex], "box-shadow", "none");
+    }
+  }
+
   function clearWebLiteActionRows() {
-    var viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    var root = document.getElementById("screen-root");
+    if (!root) return;
+
+    var rootRect = visibleRect(root);
+    var viewportWidth = rootRect ? rootRect.width :
+      (window.innerWidth || document.documentElement.clientWidth || 0);
     if (!viewportWidth) return;
+    var scale = coordinateScale(viewportWidth);
 
     var actions = document.querySelectorAll(WEBLITE_ACTION_SELECTOR);
     var pills = [];
 
     for (var index = 0; index < actions.length; index += 1) {
-      var pill = pillTarget(actions[index], viewportWidth);
-      if (pill && pills.indexOf(pill) === -1) pills.push(pill);
+      appendUnique(pills, pillTarget(actions[index], viewportWidth, scale));
+    }
+
+    var visualCandidates = root.querySelectorAll("div,a,button,span");
+    for (var candidateIndex = 0; candidateIndex < visualCandidates.length;
+         candidateIndex += 1) {
+      var candidate = visualCandidates[candidateIndex];
+      if (isPillElement(candidate, viewportWidth, scale)) {
+        appendUnique(pills, candidate);
+      }
     }
 
     for (var pillIndex = 0; pillIndex < pills.length; pillIndex += 1) {
@@ -221,8 +285,8 @@
 
       var row = pills.filter(function (candidate) {
         var rect = visibleRect(candidate);
-        return rect && Math.abs(rect.top - reference.top) <= 8 &&
-          Math.abs(rect.height - reference.height) <= 8;
+        return rect && Math.abs(rect.top - reference.top) <= 8 * scale &&
+          Math.abs(rect.height - reference.height) <= 8 * scale;
       });
 
       if (row.length < 3) continue;
@@ -236,10 +300,10 @@
 
       row.forEach(function (target) {
         target.setAttribute(ACTION_ATTRIBUTE, "1");
-        target.style.setProperty("background", "transparent", "important");
-        target.style.setProperty("background-color", "transparent", "important");
-        target.style.setProperty("border-color", "transparent", "important");
-        target.style.setProperty("box-shadow", "none", "important");
+        setImportantStyle(target, "background", "transparent");
+        setImportantStyle(target, "background-color", "transparent");
+        setImportantStyle(target, "border-color", "transparent");
+        setImportantStyle(target, "box-shadow", "none");
       });
     }
   }
@@ -253,41 +317,48 @@
 
   function clearWebLiteSeparators() {
     var root = document.getElementById("screen-root");
-    var viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
-    if (!root || !viewportWidth) return;
+    if (!root) return;
+
+    var rootRect = visibleRect(root);
+    var viewportWidth = rootRect ? rootRect.width :
+      (window.innerWidth || document.documentElement.clientWidth || 0);
+    if (!viewportWidth) return;
+    var scale = coordinateScale(viewportWidth);
 
     var elements = root.querySelectorAll("div");
     for (var index = 0; index < elements.length; index += 1) {
       var element = elements[index];
       var rect = visibleRect(element);
-      if (!rect || rect.top < 80 || rect.width < viewportWidth * 0.85 ||
+      if (!rect || rect.top / scale < 80 ||
+          rect.width < viewportWidth * 0.85 ||
           isMediaControl(element)) continue;
 
       var style = window.getComputedStyle(element);
       var changed = false;
 
-      if (rect.height <= 8 && isNeutralColor(style.backgroundColor, 55, 230)) {
-        element.style.setProperty("background-color", "#000", "important");
+      if (rect.height / scale <= 8 &&
+          isNeutralColor(style.backgroundColor, 55, 230)) {
+        setImportantStyle(element, "background-color", "#000");
         changed = true;
       }
 
-      var topWidth = parseFloat(style.borderTopWidth) || 0;
+      var topWidth = (parseFloat(style.borderTopWidth) || 0) / scale;
       if (topWidth > 0 && topWidth <= 8 &&
           isNeutralColor(style.borderTopColor, 55, 230)) {
-        element.style.setProperty("border-top-color", "#000", "important");
+        setImportantStyle(element, "border-top-color", "#000");
         changed = true;
       }
 
-      var bottomWidth = parseFloat(style.borderBottomWidth) || 0;
+      var bottomWidth = (parseFloat(style.borderBottomWidth) || 0) / scale;
       if (bottomWidth > 0 && bottomWidth <= 8 &&
           isNeutralColor(style.borderBottomColor, 55, 230)) {
-        element.style.setProperty("border-bottom-color", "#000", "important");
+        setImportantStyle(element, "border-bottom-color", "#000");
         changed = true;
       }
 
       if (changed) {
         element.setAttribute(SEPARATOR_ATTRIBUTE, "1");
-        element.style.setProperty("box-shadow", "none", "important");
+        setImportantStyle(element, "box-shadow", "none");
       }
     }
   }
@@ -296,6 +367,7 @@
     if (dynamicScanTimer !== null) return;
     dynamicScanTimer = window.setTimeout(function () {
       dynamicScanTimer = null;
+      applyWebLiteStaticFixes();
       clearWebLiteActionRows();
       clearWebLiteSeparators();
     }, 160);
@@ -331,6 +403,8 @@
       });
       scheduleDynamicScan();
     }).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["style", "class", "data-bg", "data-background-color"],
       childList: true,
       subtree: true,
       characterData: true
