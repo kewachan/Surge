@@ -1,19 +1,19 @@
 /**
- * MPay AdBlock for Surge — v1.0.3
- * Removes the Home screen floating promotion and mCard promotional artwork
- * while preserving the app's default navigation and built-in icon fallback.
+ * MPay AdBlock for Surge — v1.0.4
+ * Removes the Home screen floating promotion and replaces mCard campaign art
+ * with MPay's official neutral icon in native inactive and focused sizes.
  */
 
 (function () {
   "use strict";
 
   const ENDPOINT = /^https:\/\/pay\.macaupass\.com\/tdrmp\/appMenu\/getAppMenu\.do(?:\?.*)?$/;
-  const MCARD_PROMOTIONAL_FIELDS = [
-    "logo",
-    "logoSelected",
-    "animeEffect",
-    "menuNameColor"
-  ];
+  const MCARD_ICON_SOURCE =
+    "https://oss-mpay-prd.macaupass.com/mpay_prd/appMenu/IMAGE_202311031427502c8da5d58848.png";
+  const MCARD_ICON = MCARD_ICON_SOURCE +
+    "?x-oss-process=image/resize,m_lfit,w_52,h_52/gray,1";
+  const MCARD_ICON_SELECTED = MCARD_ICON_SOURCE +
+    "?x-oss-process=image/resize,m_lfit,w_64,h_64";
 
   if ($request.method !== "POST" || !ENDPOINT.test($request.url) ||
       Number($response.status) !== 200 || typeof $response.body !== "string") {
@@ -45,11 +45,14 @@
       data["4"].forEach(function (item) {
         if (!item || item.code !== "mCard_page_v2_new") return;
 
-        MCARD_PROMOTIONAL_FIELDS.forEach(function (field) {
-          if (!Object.prototype.hasOwnProperty.call(item, field)) return;
-          delete item[field];
+        if (item.logo !== MCARD_ICON ||
+            item.logoSelected !== MCARD_ICON_SELECTED ||
+            item.animeEffect !== null) {
+          item.logo = MCARD_ICON;
+          item.logoSelected = MCARD_ICON_SELECTED;
+          item.animeEffect = null;
           changed = true;
-        });
+        }
       });
     }
 
