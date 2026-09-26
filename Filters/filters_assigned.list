@@ -22,9 +22,6 @@ DOMAIN, coolism-web.cdn.byteark.com
 DOMAIN, streaming.flexconnect.net
 DOMAIN-SUFFIX, theradioapp.com
 
-#HKTVmall
-DOMAIN-KEYWORD, hktvmall
-
 ############ China ############
 
 #XiaoMi
