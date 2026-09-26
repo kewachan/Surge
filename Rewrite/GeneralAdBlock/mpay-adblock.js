@@ -1,7 +1,7 @@
 /**
- * MPay AdBlock for Surge — v1.0.4
+ * MPay AdBlock for Surge — v1.0.5
  * Removes the Home screen floating promotion and replaces mCard campaign art
- * with MPay's official neutral icon in native inactive and focused sizes.
+ * with MPay's official neutral icon in native inactive and selected styles.
  */
 
 (function () {
@@ -12,8 +12,8 @@
     "https://oss-mpay-prd.macaupass.com/mpay_prd/appMenu/IMAGE_202311031427502c8da5d58848.png";
   const MCARD_ICON = MCARD_ICON_SOURCE +
     "?x-oss-process=image/resize,m_lfit,w_52,h_52/gray,1";
-  const MCARD_ICON_SELECTED = MCARD_ICON_SOURCE +
-    "?x-oss-process=image/resize,m_lfit,w_64,h_64";
+  const MCARD_ICON_SELECTED =
+    "https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/mpay-mcard-selected.png?v=1.0.5";
 
   if ($request.method !== "POST" || !ENDPOINT.test($request.url) ||
       Number($response.status) !== 200 || typeof $response.body !== "string") {
