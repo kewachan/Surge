@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.5.0
+ * Node Offline Monitor for Surge — v1.6.0
  * Discovers custom proxy policies from the active profile and notifies once
  * when a node goes offline or resumes.
  */
@@ -13,6 +13,9 @@
   const PROBE_TIMEOUT = 8;
   const CONFIRMATION_DELAY_MS = 5000;
   const REQUIRED_CONFIRMATIONS = 5;
+  const DEFAULT_MAINTENANCE_START = "04:25";
+  const DEFAULT_MAINTENANCE_END = "05:00";
+  const DEFAULT_MAINTENANCE_UTC_OFFSET = 8;
   const BUILT_INS = new Set([
     "DIRECT", "REJECT", "REJECT-DROP", "REJECT-NO-DROP", "REJECT-TINYGIF",
     "PROXY", "GLOBAL", "FINAL"
@@ -25,6 +28,7 @@
   ]);
 
   const options = parseArguments(typeof $argument === "string" ? $argument : "");
+  const maintenance = maintenanceStatus(new Date());
   let completed = false;
   let unsupportedResultLogged = false;
   let directFallbackUsed = false;
@@ -47,7 +51,54 @@
       values[key] = value;
     });
     return {
-      testUrl: values.test_url || "auto"
+      testUrl: values.test_url || "auto",
+      maintenanceEnabled: parseBoolean(values.maintenance_enabled, true),
+      maintenanceStart: parseClock(values.maintenance_start, DEFAULT_MAINTENANCE_START),
+      maintenanceEnd: parseClock(values.maintenance_end, DEFAULT_MAINTENANCE_END),
+      maintenanceUtcOffset: parseUtcOffset(
+        values.maintenance_utc_offset,
+        DEFAULT_MAINTENANCE_UTC_OFFSET
+      )
+    };
+  }
+
+  function parseBoolean(value, fallback) {
+    if (value === undefined || value === "") return fallback;
+    if (/^(?:1|true|yes|on)$/i.test(value)) return true;
+    if (/^(?:0|false|no|off)$/i.test(value)) return false;
+    return fallback;
+  }
+
+  function parseClock(value, fallback) {
+    const candidate = String(value || fallback).trim();
+    const match = candidate.match(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+    const normalized = match ? candidate : fallback;
+    const parts = normalized.split(":").map(Number);
+    return { text: normalized, minutes: parts[0] * 60 + parts[1] };
+  }
+
+  function parseUtcOffset(value, fallback) {
+    if (value === undefined || String(value).trim() === "") return fallback;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= -12 && parsed <= 14 ? parsed : fallback;
+  }
+
+  function formatUtcOffset(offset) {
+    return `UTC${offset >= 0 ? "+" : ""}${offset}`;
+  }
+
+  function maintenanceStatus(now) {
+    const start = options.maintenanceStart.minutes;
+    const end = options.maintenanceEnd.minutes;
+    const shifted = new Date(now.getTime() + options.maintenanceUtcOffset * 60 * 60 * 1000);
+    const current = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+    const active = options.maintenanceEnabled && start !== end && (
+      start < end ? current >= start && current < end : current >= start || current < end
+    );
+    return {
+      active,
+      label: `${options.maintenanceStart.text}–${options.maintenanceEnd.text} ` +
+        formatUtcOffset(options.maintenanceUtcOffset)
     };
   }
 
@@ -531,8 +582,23 @@
     log(`Tested ${nodeCount(policies.length)} from the current profile; ${offline.length} offline`);
   }
 
+  function logMaintenanceResult(policies, offline) {
+    log(
+      `Maintenance quiet window ${maintenance.label}: tested ${nodeCount(policies.length)}; ` +
+      `${offline.length} observed offline; notifications were suppressed and persistent state was preserved`
+    );
+  }
+
   function reportError(error) {
     const message = error && error.message ? error.message : String(error || "Unknown error");
+    if (maintenance.active) {
+      log(
+        `Monitor failed during maintenance quiet window ${maintenance.label}; ` +
+        `previous state was preserved: ${message}`
+      );
+      finish();
+      return;
+    }
     const previous = readState();
     if (!previous || previous.lastError !== message || typeof $trigger !== "undefined") {
       notify("Proxy Node Monitor Failed", "Previous state was preserved", message);
@@ -562,7 +628,11 @@
           reportError(testError);
           return;
         }
-        saveResult(policies, offline);
+        if (maintenance.active) {
+          logMaintenanceResult(policies, offline);
+        } else {
+          saveResult(policies, offline);
+        }
         finish();
       });
     });

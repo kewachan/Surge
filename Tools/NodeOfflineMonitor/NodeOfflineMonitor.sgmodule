@@ -1,8 +1,8 @@
 #!name=Node Offline Monitor
 #!desc=Alerts after confirmed proxy outages and resumptions
 #!system=ios
-#!arguments=cronexp:*/15 * * * *,test_url:auto,wake_system:true
-#!arguments-desc=Defaults: every 15 minutes with four 5-second confirmation retries
+#!arguments=cronexp:*/15 * * * *,test_url:auto,wake_system:true,maintenance_enabled:true,maintenance_start:04:25,maintenance_end:05:00,maintenance_utc_offset:8
+#!arguments-desc=Defaults: every 15 minutes with four 5-second confirmation retries; notifications and state updates are paused daily from 04:25 to 05:00 at UTC+8
 
 [Script]
-Node Offline Monitor = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=180, ability=http-client-policy, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.5.0, argument="test_url={{{test_url}}}"
+Node Offline Monitor = type=cron, cronexp="{{{cronexp}}}", wake-system={{{wake_system}}}, timeout=180, ability=http-client-policy, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.6.0, argument="test_url={{{test_url}}}&maintenance_enabled={{{maintenance_enabled}}}&maintenance_start={{{maintenance_start}}}&maintenance_end={{{maintenance_end}}}&maintenance_utc_offset={{{maintenance_utc_offset}}}"

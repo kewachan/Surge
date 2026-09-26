@@ -54,7 +54,7 @@
 - LINE：專用 domain／path reject 廣告及遙測；`getConfigurations` binary Thrift response 關閉 News tab，同時保留共用 `/S4` endpoint。
 - Bilibili：合併 BiliUniverse Enhanced／ADBlock → 本地 fail-closed feed 過濾 → 其餘功能使用固定上游版本 → 額外 PlayPause reject。
 - THIM Home：`exclusive-banners` response → 清空 `data` → App 隱藏 Privilege Offers carousel。
-- Node Offline Monitor：cron → active Profile `[Proxy]` → policy test → 5 次狀態確認 → 狀態轉變通知。
+- Node Offline Monitor：cron → active Profile `[Proxy]` → policy test → 5 次狀態確認 → 維護時段閘門 → 狀態轉變通知。
 
 ### Key Files
 
@@ -78,6 +78,7 @@
 - Bilibili 首頁 feed 由本地 response script 直接移除廣告及可選活動大圖，不改 request、亦不發補位 request；其他功能保留固定上游 script。
 - THIM script 驗證成功 envelope 後只將 `data` 改成空陣列；其他 API 或未知格式原樣放行。
 - 節點監察從 active Profile `[Proxy]` 動態發現節點；offline／resume 均須連續 5 次一致，每次相隔 5 秒，狀態不變時不重複通知。
+- 每日 UTC+8 04:25–05:00 維護靜默時段仍會檢測及記錄 log，但不通知或覆寫 persistent state；時段結束後才以原有狀態重新確認。
 
 ### Important Decisions
 
@@ -88,9 +89,11 @@
 - THIM 不封鎖共用圖片 CDN，只攔截獨立 `exclusive-banners` endpoint。
 - Bilibili feed 採用 fail-closed 過濾；網絡異常不得令廣告補位或原始廣告 response 回流。
 - Surge module 不可修改 `[Proxy Group]`；節點監察使用 `$httpAPI`，不硬編碼節點名。
+- Node Offline Monitor 的維護時段由 module arguments 控制，預設 UTC+8 04:25–05:00，避免計劃重啟產生 offline／resume 通知風暴。
 
 ### Recent Significant Changes
 
+- `2026-09-26` — Node Offline Monitor 加入 UTC+8 04:25–05:00 維護靜默時段；檢測照常執行，但不通知或保存錯誤／狀態變更，時段外重新判斷。
 - `2026-09-16` — LINE 加入專用 domain／path 廣告及遙測封鎖，並以 binary Thrift feature flag 隱藏 News tab；共用 `/S4` 保持可用。
 - `2026-09-16` — Reddit 去廣告由 JQ 改為專用 JSON／multipart parser，支援 deferred Home Feed 並保留 NSFW 解鎖。
 - `2026-09-12` — Bilibili 首頁 feed 改用本地純過濾 script，移除上游補位 request、5 秒 timeout 及原始廣告 fallback 路徑。
