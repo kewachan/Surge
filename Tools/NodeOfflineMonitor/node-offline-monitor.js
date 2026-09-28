@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.6.0
+ * Node Offline Monitor for Surge — v1.6.1
  * Discovers custom proxy policies from the active profile and notifies once
  * when a node goes offline or resumes.
  */
@@ -14,7 +14,7 @@
   const CONFIRMATION_DELAY_MS = 5000;
   const REQUIRED_CONFIRMATIONS = 5;
   const DEFAULT_MAINTENANCE_START = "04:25";
-  const DEFAULT_MAINTENANCE_END = "05:00";
+  const DEFAULT_MAINTENANCE_END = "05:15";
   const DEFAULT_MAINTENANCE_UTC_OFFSET = 8;
   const BUILT_INS = new Set([
     "DIRECT", "REJECT", "REJECT-DROP", "REJECT-NO-DROP", "REJECT-TINYGIF",
@@ -54,7 +54,7 @@
       testUrl: values.test_url || "auto",
       maintenanceEnabled: parseBoolean(values.maintenance_enabled, true),
       maintenanceStart: parseClock(values.maintenance_start, DEFAULT_MAINTENANCE_START),
-      maintenanceEnd: parseClock(values.maintenance_end, DEFAULT_MAINTENANCE_END),
+      maintenanceEnd: parseClock(maintenanceEndArgument(values), DEFAULT_MAINTENANCE_END),
       maintenanceUtcOffset: parseUtcOffset(
         values.maintenance_utc_offset,
         DEFAULT_MAINTENANCE_UTC_OFFSET
@@ -67,6 +67,12 @@
     if (/^(?:1|true|yes|on)$/i.test(value)) return true;
     if (/^(?:0|false|no|off)$/i.test(value)) return false;
     return fallback;
+  }
+
+  function maintenanceEndArgument(values) {
+    if (values.maintenance_end_time !== undefined) return values.maintenance_end_time;
+    if (values.maintenance_end === "05:00") return DEFAULT_MAINTENANCE_END;
+    return values.maintenance_end;
   }
 
   function parseClock(value, fallback) {
