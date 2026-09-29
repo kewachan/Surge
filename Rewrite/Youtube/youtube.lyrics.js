@@ -298,7 +298,7 @@
       return new Promise((resolve, reject) => {
         $httpClient.post({
           url: WORKER_ENDPOINT,
-          timeout: TRANSLATE_TIMEOUT_SECONDS,
+          timeout: typeof $loon !== "undefined" ? TRANSLATE_TIMEOUT_SECONDS * 1000 : TRANSLATE_TIMEOUT_SECONDS,
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: payload,
         }, (error, response, body) => {
