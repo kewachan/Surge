@@ -11,6 +11,18 @@ const MAX_RESPONSE_BYTES = 24 * 1024 * 1024;
 const MAX_CLIENT_KEY_CHARS = 64;
 const MAX_CAPTION_LANGUAGE_CHARS = 32;
 const UPSTREAM_TIMEOUT_MS = 25000;
+const TRANSLATE_PATH = "/translate";
+const TRANSLATE_ATTEMPTS = [
+  ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
+  ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
+  ["https://translate.googleapis.com/translate_a/single", "gtx"],
+];
+const MAX_TRANSLATE_REQUEST_BYTES = 48 * 1024;
+const MAX_TRANSLATE_ITEMS = 160;
+const MAX_TRANSLATE_LINE_CHARS = 1000;
+const MAX_TRANSLATE_TOTAL_CHARS = 24000;
+const MAX_TRANSLATE_ENCODED_QUERY_CHARS = 6500;
+const TRANSLATE_TIMEOUT_MS = 7000;
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const PAGEAD_MARKER = TEXT_ENCODER.encode("pagead");
@@ -1010,10 +1022,156 @@ function responseWithStream(upstream, result) {
   });
 }
 
+function normalizeTranslationLanguage(value, allowAuto = false) {
+  const language = String(value || "").trim();
+  if (allowAuto && language.toLowerCase() === "auto") return "auto";
+  if (!language || language.length > MAX_CAPTION_LANGUAGE_CHARS) return "";
+  if (!/^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(language)) return "";
+  return {
+    "zh-hant": "zh-TW",
+    "zh-hans": "zh-CN",
+    "zh-tw": "zh-TW",
+    "zh-cn": "zh-CN",
+  }[language.toLowerCase()] || language;
+}
+
+function translationSeparator(index) {
+  return `\n[[YTL:${index}]]\n`;
+}
+
+function translationQuery(texts) {
+  return texts.map((text, index) => `${index ? translationSeparator(index) : ""}${text}`).join("");
+}
+
+function buildTranslationBatches(texts) {
+  const batches = [];
+  let batch = [];
+  for (const text of texts) {
+    const candidate = [...batch, text];
+    if (batch.length && encodeURIComponent(translationQuery(candidate)).length > MAX_TRANSLATE_ENCODED_QUERY_CHARS) {
+      batches.push(batch);
+      batch = [];
+    }
+    batch.push(text);
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
+async function fetchGoogleTranslation(query, source, target) {
+  let lastError;
+  for (const [endpoint, client] of TRANSLATE_ATTEMPTS) {
+    const body = new URLSearchParams({ client, sl: source, tl: target, dt: "t", q: query });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          Accept: "application/json, text/plain, */*",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: "https://translate.google.com/",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        body: body.toString(),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Google Translate status ${response.status}`);
+      const result = await response.json();
+      if (!Array.isArray(result?.[0])) throw new Error("Invalid Google Translate response");
+      return result[0].map((part) => part?.[0] || "").join("");
+    } catch (error) {
+      lastError = new Error(`${new URL(endpoint).hostname}: ${error?.message || String(error)}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw lastError || new Error("Google Translate unavailable");
+}
+
+async function translateTextBatch(texts, source, target) {
+  const translated = await fetchGoogleTranslation(translationQuery(texts), source, target);
+  if (texts.length === 1) return [translated.trim()];
+
+  const parts = translated.split(/\s*\[\[\s*YTL\s*:\s*\d+\s*\]\]\s*/gi);
+  if (parts.length === texts.length) return parts.map((part) => part.trim());
+
+  const middle = Math.ceil(texts.length / 2);
+  const [left, right] = await Promise.all([
+    translateTextBatch(texts.slice(0, middle), source, target),
+    translateTextBatch(texts.slice(middle), source, target),
+  ]);
+  return [...left, ...right];
+}
+
+async function translateTexts(texts, source, target) {
+  const batches = buildTranslationBatches(texts);
+  const translated = await Promise.all(batches.map((batch) => translateTextBatch(batch, source, target)));
+  return translated.flat();
+}
+
+function translationResponse(body, status = 200) {
+  return new Response(typeof body === "string" ? body : JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": typeof body === "string" ? "text/plain; charset=utf-8" : "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
+async function handleTranslationRequest(request) {
+  const contentType = request.headers.get("content-type")?.toLowerCase() || "";
+  if (!contentType.includes("application/json")) return translationResponse("JSON Required", 415);
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (declaredLength > MAX_TRANSLATE_REQUEST_BYTES) return translationResponse("Request Too Large", 413);
+
+  const requestBytes = new Uint8Array(await request.arrayBuffer());
+  if (requestBytes.length > MAX_TRANSLATE_REQUEST_BYTES) return translationResponse("Request Too Large", 413);
+
+  let payload;
+  try {
+    payload = JSON.parse(TEXT_DECODER.decode(requestBytes));
+  } catch {
+    return translationResponse("Invalid JSON", 400);
+  }
+
+  const texts = payload?.texts;
+  const source = normalizeTranslationLanguage(payload?.source || "auto", true);
+  const target = normalizeTranslationLanguage(payload?.target, false);
+  if (!Array.isArray(texts) || texts.length < 1 || texts.length > MAX_TRANSLATE_ITEMS || !source || !target) {
+    return translationResponse("Invalid Translation Request", 400);
+  }
+
+  let totalCharacters = 0;
+  const normalizedTexts = [];
+  for (const value of texts) {
+    if (typeof value !== "string" || !value.trim() || value.length > MAX_TRANSLATE_LINE_CHARS) {
+      return translationResponse("Invalid Translation Request", 400);
+    }
+    totalCharacters += value.length;
+    if (totalCharacters > MAX_TRANSLATE_TOTAL_CHARS) return translationResponse("Translation Request Too Large", 413);
+    normalizedTexts.push(value);
+  }
+
+  try {
+    const translations = await translateTexts(normalizedTexts, source, target);
+    if (translations.length !== normalizedTexts.length) throw new Error("Translation count mismatch");
+    return translationResponse({ translations, target });
+  } catch (error) {
+    console.error("YouTube lyrics translation failed:", error?.message || String(error));
+    return translationResponse("Translation Failed", 502);
+  }
+}
+
 async function handleRequest(request) {
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
 
   const workerUrl = new URL(request.url);
+  if (workerUrl.pathname === TRANSLATE_PATH) return handleTranslationRequest(request);
   const targetValue = workerUrl.searchParams.get("target");
   const clientKeyValue = workerUrl.searchParams.get("ck");
   const captionLanguage = normalizeCaptionLanguage(workerUrl.searchParams.get("captionLang"));
@@ -1114,6 +1272,9 @@ export const __test = {
   stripPlayerAds,
   addEnhanceCaptionTrack,
   normalizeCaptionLanguage,
+  normalizeTranslationLanguage,
+  buildTranslationBatches,
+  translateTexts,
 };
 
 export default {
