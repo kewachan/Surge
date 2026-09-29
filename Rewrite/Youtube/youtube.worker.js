@@ -11,7 +11,9 @@ const MAX_RESPONSE_BYTES = 24 * 1024 * 1024;
 const MAX_CLIENT_KEY_CHARS = 64;
 const MAX_CAPTION_LANGUAGE_CHARS = 32;
 const UPSTREAM_TIMEOUT_MS = 25000;
+const TRANSFORM_PATH = "/transform";
 const TRANSLATE_PATH = "/translate";
+const WORKER_BUILD = "init-transform-v2";
 const TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -559,6 +561,7 @@ function enhancePlayabilityStatus(playabilityBytes) {
 function normalizeCaptionLanguage(value) {
   const language = String(value || "").trim();
   if (!language || language.toLowerCase() === "off" || language.length > MAX_CAPTION_LANGUAGE_CHARS) return "off";
+  if (["on", "true"].includes(language.toLowerCase())) return "zh-Hant";
   if (!/^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(language)) return "off";
   return {
     "zh-hant": "zh-Hant",
@@ -1003,6 +1006,7 @@ function responseHeaders(upstream, result, rewritten) {
     headers.delete("content-encoding");
   }
   headers.set("x-youtube-adblock", result);
+  headers.set("x-youtube-worker-build", WORKER_BUILD);
   return headers;
 }
 
@@ -1119,8 +1123,62 @@ function translationResponse(body, status = 200) {
       "Content-Type": typeof body === "string" ? "text/plain; charset=utf-8" : "application/json; charset=utf-8",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
+      "X-YouTube-Worker-Build": WORKER_BUILD,
     },
   });
+}
+
+function transformResponse(body, status, result) {
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": status === 200 ? UMP_CONTENT_TYPE : "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "X-YouTube-AdBlock": result,
+      "X-YouTube-Worker-Build": WORKER_BUILD,
+    },
+  });
+}
+
+async function handleTransformRequest(request, workerUrl) {
+  const contentType = request.headers.get("content-type")?.toLowerCase() || "";
+  if (!contentType.includes(UMP_CONTENT_TYPE)) {
+    return transformResponse("UMP Required", 415, "transform-invalid-content-type");
+  }
+
+  const clientKeyValue = workerUrl.searchParams.get("ck");
+  const captionLanguage = normalizeCaptionLanguage(workerUrl.searchParams.get("captionLang"));
+  if (!clientKeyValue || clientKeyValue.length > MAX_CLIENT_KEY_CHARS) {
+    return transformResponse("Invalid ck", 400, "transform-invalid-key");
+  }
+
+  let clientKey;
+  try {
+    clientKey = decodeBase64(clientKeyValue);
+  } catch {
+    return transformResponse("Invalid ck", 400, "transform-invalid-key");
+  }
+  if (clientKey.length !== 32) return transformResponse("Invalid ck", 400, "transform-invalid-key");
+
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (declaredLength > MAX_RESPONSE_BYTES) {
+    return transformResponse("Request Too Large", 413, "transform-too-large");
+  }
+
+  const responseBytes = new Uint8Array(await request.arrayBuffer());
+  if (!responseBytes.length) return transformResponse("Empty UMP", 400, "transform-empty");
+  if (responseBytes.length > MAX_RESPONSE_BYTES) {
+    return transformResponse("Request Too Large", 413, "transform-too-large");
+  }
+
+  try {
+    const result = await processUmpResponse(responseBytes, clientKey, captionLanguage);
+    return transformResponse(result.bytes, 200, `removed-${result.removed}`);
+  } catch (error) {
+    console.error("YouTube UMP transform was left unchanged:", error);
+    return transformResponse(responseBytes, 200, "bypass-error");
+  }
 }
 
 async function handleTranslationRequest(request) {
@@ -1172,6 +1230,7 @@ async function handleRequest(request) {
 
   const workerUrl = new URL(request.url);
   if (workerUrl.pathname === TRANSLATE_PATH) return handleTranslationRequest(request);
+  if (workerUrl.pathname === TRANSFORM_PATH) return handleTransformRequest(request, workerUrl);
   const targetValue = workerUrl.searchParams.get("target");
   const clientKeyValue = workerUrl.searchParams.get("ck");
   const captionLanguage = normalizeCaptionLanguage(workerUrl.searchParams.get("captionLang"));
