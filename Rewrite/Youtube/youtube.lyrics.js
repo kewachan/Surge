@@ -4,6 +4,7 @@
 (() => {
   const WORKER_ENDPOINT = "https://youtube-init.hmtw47cv7m.workers.dev/translate";
   const LYRICS_RENDERER_FIELD = 465160965;
+  const TRANSLATE_CONTROL_FIELD = 24;
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
   const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v1";
@@ -179,13 +180,17 @@
     return null;
   }
 
-  function rewriteLyricsRenderer(rendererBytes, translatedByOriginal) {
+  function rewriteLyricsRenderer(rendererBytes, translatedByOriginal, hideTranslateControl) {
     const lyrics = lyricList(rendererBytes);
     if (!lyrics) return [rendererBytes, false];
     let listChanged = false;
     const listChunks = [];
 
     for (const itemField of lyrics.listFields) {
+      if (hideTranslateControl && itemField.number === TRANSLATE_CONTROL_FIELD && itemField.wireType === 2) {
+        listChanged = true;
+        continue;
+      }
       if (itemField.number !== 1 || itemField.wireType !== 2) {
         listChunks.push(rawField(lyrics.listBytes, itemField));
         continue;
@@ -220,7 +225,7 @@
     return [join(rendererChunks), true];
   }
 
-  function rewriteNested(bytes, translatedByOriginal, depth = 0) {
+  function rewriteNested(bytes, translatedByOriginal, depth = 0, hideTranslateControl = false) {
     if (depth > 14) return [bytes, false];
     const fields = parseMessage(bytes);
     if (!fields) return [bytes, false];
@@ -236,10 +241,10 @@
       let rewritten = data;
       let fieldChanged = false;
       if (field.number === LYRICS_RENDERER_FIELD) {
-        [rewritten, fieldChanged] = rewriteLyricsRenderer(data, translatedByOriginal);
+        [rewritten, fieldChanged] = rewriteLyricsRenderer(data, translatedByOriginal, hideTranslateControl);
       }
       if (!fieldChanged && data.length >= 4) {
-        [rewritten, fieldChanged] = rewriteNested(data, translatedByOriginal, depth + 1);
+        [rewritten, fieldChanged] = rewriteNested(data, translatedByOriginal, depth + 1, hideTranslateControl);
       }
       if (fieldChanged) {
         chunks.push(encodeField(field.number, rewritten));
@@ -341,20 +346,27 @@
     const input = responseBytes();
     if (target === "off" || !input) return $done({});
 
-    const lines = findLyrics(input);
-    if (!lines) return $done({});
+    const [inputWithoutControl, controlChanged] = rewriteNested(input, new Map(), 0, true);
+    const lines = findLyrics(inputWithoutControl);
+    if (!lines) return $done(controlChanged ? { body: inputWithoutControl } : {});
     const uniqueLines = [...new Set(lines)];
     const key = cacheKey(uniqueLines, target);
-    let translations = readCache(key, uniqueLines.length);
-    if (!translations) {
-      translations = await requestTranslations(uniqueLines, target);
-      writeCache(key, translations);
-    }
+    try {
+      let translations = readCache(key, uniqueLines.length);
+      if (!translations) {
+        translations = await requestTranslations(uniqueLines, target);
+        writeCache(key, translations);
+      }
 
-    const translatedByOriginal = new Map(uniqueLines.map((line, index) => [line, translations[index]]));
-    const [output, changed] = rewriteNested(input, translatedByOriginal);
-    if (options.debug) console.log(`YouTube lyrics: ${changed ? "translated" : "unchanged"} (${uniqueLines.length} unique lines)`);
-    $done(changed ? { body: output } : {});
+      const translatedByOriginal = new Map(uniqueLines.map((line, index) => [line, translations[index]]));
+      const [output, translated] = rewriteNested(inputWithoutControl, translatedByOriginal);
+      const changed = controlChanged || translated;
+      if (options.debug) console.log(`YouTube lyrics: ${translated ? "translated" : "unchanged"}; translate control ${controlChanged ? "hidden" : "absent"} (${uniqueLines.length} unique lines)`);
+      return $done(changed ? { body: output } : {});
+    } catch (error) {
+      console.log(`YouTube lyrics translation failed: ${String(error)}`);
+      return $done(controlChanged ? { body: inputWithoutControl } : {});
+    }
   }
 
   main().catch((error) => {
