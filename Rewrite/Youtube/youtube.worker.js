@@ -13,16 +13,12 @@ const MAX_CAPTION_LANGUAGE_CHARS = 32;
 const UPSTREAM_TIMEOUT_MS = 25000;
 const TRANSFORM_PATH = "/transform";
 const TRANSLATE_PATH = "/translate";
-const TRANSLATE_ORIGIN_ENDPOINT = "https://radiquo-stream.duckdns.org/youtube-translate/translate";
 const REALTIME_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
-const WORKER_BUILD = "init-transform-v7-realtime-ai-translate";
+const WORKER_BUILD = "init-transform-v8-workers-ai-only";
 const MAX_TRANSLATE_REQUEST_BYTES = 48 * 1024;
 const MAX_TRANSLATE_ITEMS = 48;
 const MAX_TRANSLATE_LINE_CHARS = 500;
 const MAX_TRANSLATE_TOTAL_CHARS = 1600;
-const ORIGIN_MAX_TRANSLATE_ITEMS = 8;
-const ORIGIN_MAX_TRANSLATE_TOTAL_CHARS = 500;
-const TRANSLATE_TIMEOUT_MS = 110000;
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const PAGEAD_MARKER = TEXT_ENCODER.encode("pagead");
@@ -1038,7 +1034,7 @@ function normalizeTranslationLanguage(value, allowAuto = false) {
 }
 
 async function translateTexts(texts, source, target, env, purpose = "lyrics") {
-  return (await translateTextsWithProvider(texts, source, target, env, purpose)).translations;
+  return translateWithWorkersAI(texts, source, target, env, purpose);
 }
 
 function validatedTranslations(value, expectedCount) {
@@ -1155,75 +1151,10 @@ async function translateWithWorkersAI(texts, source, target, env, purpose = "lyr
   return translations;
 }
 
-async function translateWithOrigin(texts, source, target, env) {
-  const token = String(env?.TRANSLATE_TOKEN || "");
-  if (!token) throw new Error("Translation origin token is not configured");
-
-  const batches = [];
-  let batch = [];
-  let characters = 0;
-  for (const text of texts) {
-    if (
-      batch.length
-      && (batch.length >= ORIGIN_MAX_TRANSLATE_ITEMS || characters + text.length > ORIGIN_MAX_TRANSLATE_TOTAL_CHARS)
-    ) {
-      batches.push(batch);
-      batch = [];
-      characters = 0;
-    }
-    batch.push(text);
-    characters += text.length;
-  }
-  if (batch.length) batches.push(batch);
-
-  const translations = [];
-  for (const currentBatch of batches) {
-    translations.push(...await translateOriginBatch(currentBatch, source, target, token));
-  }
-  return translations;
-}
-
-async function translateOriginBatch(texts, source, target, token) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
-  try {
-    const response = await fetch(TRANSLATE_ORIGIN_ENDPOINT, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "X-Translate-Token": token,
-      },
-      body: JSON.stringify({ texts, source, target }),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      const error = new Error(`Translation origin status ${response.status}`);
-      error.status = response.status;
-      throw error;
-    }
-    const result = await response.json();
-    if (!Array.isArray(result?.translations) || result.translations.length !== texts.length) {
-      throw new Error("Invalid translation origin response");
-    }
-    return result.translations.map((text) => String(text || "").trim());
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function translateTextsWithProvider(texts, source, target, env, purpose = "lyrics") {
-  try {
-    return {
-      translations: await translateWithWorkersAI(texts, source, target, env, purpose),
-      provider: purpose === "captions" ? "workers-ai-captions" : "workers-ai-lyrics",
-    };
-  } catch (error) {
-    console.error("Workers AI translation failed; using origin fallback:", error?.message || String(error));
-  }
   return {
-    translations: await translateWithOrigin(texts, source, target, env),
-    provider: "origin-fallback",
+    translations: await translateWithWorkersAI(texts, source, target, env, purpose),
+    provider: purpose === "captions" ? "workers-ai-captions" : "workers-ai-lyrics",
   };
 }
 
@@ -1452,7 +1383,6 @@ export const __test = {
   normalizeTranslationLanguage,
   parseWorkersAITranslations,
   translateWithWorkersAI,
-  translateWithOrigin,
   translateTexts,
 };
 
