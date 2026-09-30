@@ -10,9 +10,9 @@
   const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v1";
   const MAX_BATCH_ITEMS = 8;
   const MAX_BATCH_TOTAL_CHARS = 500;
-  const RESPONSE_BUDGET_MS = 115000;
+  const RESPONSE_BUDGET_MS = 4500;
   const TRANSLATE_TIMEOUT_SECONDS = 110;
-  const MAX_BUSY_RETRIES = 3;
+  const MAX_BUSY_RETRIES = 0;
   const TEXT_ENCODER = new TextEncoder();
   const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
