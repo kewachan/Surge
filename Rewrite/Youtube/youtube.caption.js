@@ -8,7 +8,7 @@ const MAX_CAPTION_CHARS = 1000;
 const CONCURRENCY = 1;
 const RESPONSE_BUDGET_MS = 115000;
 const TRANSLATE_TIMEOUT_SECONDS = 110;
-const MAX_RETRIES = 0;
+const MAX_RETRIES = 3;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_LIMIT = 96;
 const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v2";
@@ -119,7 +119,11 @@ function requestTranslation(texts, source, target, timeoutSeconds) {
       if (error) return reject(error);
       try {
         const status = response.status || response.statusCode;
-        if (status !== 200) throw new Error(`Worker status ${status}`);
+        if (status !== 200) {
+          const statusError = new Error(`Worker status ${status}`);
+          statusError.status = status;
+          throw statusError;
+        }
         const result = JSON.parse(body);
         if (!Array.isArray(result?.translations) || result.translations.length !== texts.length) {
           throw new Error("Invalid Worker translation response");
@@ -142,8 +146,8 @@ async function fetchTranslation(texts, source, target, deadline) {
       return await requestTranslation(texts, source, target, timeout);
     } catch (error) {
       lastError = error;
-      if (attempt === MAX_RETRIES) break;
-      const delay = 250 * (2 ** attempt);
+      if (attempt === MAX_RETRIES || Number(error?.status) !== 429) break;
+      const delay = 5000;
       if (Date.now() + delay >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, delay));
     }

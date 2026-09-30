@@ -12,6 +12,7 @@
   const MAX_BATCH_TOTAL_CHARS = 500;
   const RESPONSE_BUDGET_MS = 115000;
   const TRANSLATE_TIMEOUT_SECONDS = 110;
+  const MAX_BUSY_RETRIES = 3;
   const TEXT_ENCODER = new TextEncoder();
   const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
@@ -330,7 +331,11 @@
           if (error) return reject(error);
           try {
             const status = response.status || response.statusCode;
-            if (status !== 200) throw new Error(`Worker status ${status}`);
+            if (status !== 200) {
+              const statusError = new Error(`Worker status ${status}`);
+              statusError.status = status;
+              throw statusError;
+            }
             const result = JSON.parse(body);
             if (!Array.isArray(result?.translations) || result.translations.length !== lines.length) {
               throw new Error("Invalid Worker translation response");
@@ -350,7 +355,11 @@
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: payload,
       }).then((response) => {
-        if (response.statusCode !== 200) throw new Error(`Worker status ${response.statusCode}`);
+        if (response.statusCode !== 200) {
+          const statusError = new Error(`Worker status ${response.statusCode}`);
+          statusError.status = response.statusCode;
+          throw statusError;
+        }
         const result = JSON.parse(response.body);
         if (!Array.isArray(result?.translations) || result.translations.length !== lines.length) {
           throw new Error("Invalid Worker translation response");
@@ -359,6 +368,25 @@
       });
     }
     return Promise.reject(new Error("No HTTP client available"));
+  }
+
+  async function fetchTranslations(lines, target, deadline) {
+    let lastError;
+    for (let attempt = 0; attempt <= MAX_BUSY_RETRIES; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw lastError || new Error("Lyrics translation time budget exhausted");
+      const timeout = Math.max(1, Math.min(TRANSLATE_TIMEOUT_SECONDS, Math.ceil(remaining / 1000)));
+      try {
+        return await requestTranslations(lines, target, timeout);
+      } catch (error) {
+        lastError = error;
+        if (attempt === MAX_BUSY_RETRIES || Number(error?.status) !== 429) break;
+        const delay = 5000;
+        if (Date.now() + delay >= deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw lastError || new Error("Lyrics translation failed");
   }
 
   async function main() {
@@ -380,9 +408,8 @@
         if (!translations) {
           const remaining = deadline - Date.now();
           if (remaining <= 0) break;
-          const timeout = Math.max(1, Math.min(TRANSLATE_TIMEOUT_SECONDS, Math.ceil(remaining / 1000)));
           try {
-            translations = await requestTranslations(batch, target, timeout);
+            translations = await fetchTranslations(batch, target, deadline);
             writeCache(key, translations);
           } catch (error) {
             console.log(`YouTube lyrics translation batch failed: ${String(error)}`);

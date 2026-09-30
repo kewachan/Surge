@@ -14,11 +14,11 @@ const UPSTREAM_TIMEOUT_MS = 25000;
 const TRANSFORM_PATH = "/transform";
 const TRANSLATE_PATH = "/translate";
 const TRANSLATE_ORIGIN_ENDPOINT = "https://radiquo-stream.duckdns.org/youtube-translate/translate";
-const WORKER_BUILD = "init-transform-v3-self-hosted-translate";
+const WORKER_BUILD = "init-transform-v4-queued-translate";
 const MAX_TRANSLATE_REQUEST_BYTES = 48 * 1024;
-const MAX_TRANSLATE_ITEMS = 160;
-const MAX_TRANSLATE_LINE_CHARS = 1000;
-const MAX_TRANSLATE_TOTAL_CHARS = 24000;
+const MAX_TRANSLATE_ITEMS = 8;
+const MAX_TRANSLATE_LINE_CHARS = 500;
+const MAX_TRANSLATE_TOTAL_CHARS = 500;
 const TRANSLATE_TIMEOUT_MS = 110000;
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
@@ -1051,7 +1051,11 @@ async function translateTexts(texts, source, target, env) {
       body: JSON.stringify({ texts, source, target }),
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`Translation origin status ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(`Translation origin status ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
     const result = await response.json();
     if (!Array.isArray(result?.translations) || result.translations.length !== texts.length) {
       throw new Error("Invalid translation origin response");
@@ -1167,7 +1171,8 @@ async function handleTranslationRequest(request, env) {
     return translationResponse({ translations, target });
   } catch (error) {
     console.error("YouTube lyrics translation failed:", error?.message || String(error));
-    return translationResponse("Translation Failed", 502);
+    const busy = Number(error?.status) === 429;
+    return translationResponse(busy ? "Translation Busy" : "Translation Failed", busy ? 429 : 502);
   }
 }
 
