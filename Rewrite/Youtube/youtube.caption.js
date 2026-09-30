@@ -1,7 +1,7 @@
 // Translate YouTube srv3 captions through the project translation Worker.
 // Only caption text and language settings are sent to the Worker.
 
-const WORKER_ENDPOINT = "https://youtube-init.hmtw47cv7m.workers.dev/translate";
+const WORKER_ENDPOINT = "https://caption-translate.hmtw47cv7m.workers.dev/translate";
 const MAX_BATCH_ITEMS = 48;
 const MAX_BATCH_TOTAL_CHARS = 1600;
 const MAX_CAPTION_CHARS = 1000;

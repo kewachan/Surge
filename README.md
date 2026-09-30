@@ -54,6 +54,7 @@
 - LINE：專用 domain／path reject 廣告及遙測；`getConfigurations` binary Thrift response 關閉 News tab，同時保留共用 `/S4` endpoint。
 - Bilibili：合併 BiliUniverse Enhanced／ADBlock → 本地 fail-closed feed 過濾 → 其餘功能使用固定上游版本 → 額外 PlayPause reject。
 - THIM Home：`exclusive-banners` response → 清空 `data` → App 隱藏 Privilege Offers carousel。
+- YouTube／YouTube Music：播放初始化 request → `youtube-init` media Worker；字幕／歌詞文字 → `caption-translate` translation Worker → Cache API → Workers AI。
 - Node Offline Monitor：cron → active Profile `[Proxy]` → policy test → 5 次狀態確認 → 維護時段閘門 → 狀態轉變通知。
 
 ### Key Files
@@ -63,8 +64,8 @@
 - `Rewrite/Advertising.sgmodule` — 外部廣告 regex 資源。
 - `Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule` — 統一 script 與 MITM 設定。
 - `Rewrite/GeneralAdBlock/reddit-adblock.js` — Reddit JSON／GraphQL multipart 廣告及 NSFW response 過濾。
-- `Rewrite/GeneralAdBlock/line-adblock.js` — LINE binary Thrift News tab feature flag 過濾。
 - `Rewrite/Bilibili/bilibili.feed.response.js` — 無網絡補位、失敗時不回退廣告內容的首頁 feed 過濾。
+- `Rewrite/Youtube/YouTube.Enhance.sgmodule`、`Rewrite/Youtube/youtube.worker.js` — YouTube client scripts、media Worker 及獨立 translation Worker。
 - `Tools/NodeOfflineMonitor/node-offline-monitor.js` — 節點發現、測試及狀態通知。
 
 ### Core Logic
@@ -77,6 +78,7 @@
 - LINE 靜態規則按類型分流：專用 hostname 放 `filters_block.list`，共享 hostname 的廣告／遙測 path 放 `Adrewrite.sgmodule`。
 - Bilibili 首頁 feed 由本地 response script 直接移除廣告及可選活動大圖，不改 request、亦不發補位 request；其他功能保留固定上游 script。
 - THIM script 驗證成功 envelope 後只將 `data` 改成空陣列；其他 API 或未知格式原樣放行。
+- Translation Worker 以完整 request 內容建立 SHA-256 key，成功結果快取 7 日；同一 isolate 內相同的進行中請求會合併，每個 isolate 最多同時執行 3 個 Workers AI 請求。
 - 節點監察從 active Profile `[Proxy]` 動態發現節點；offline／resume 均須連續 5 次一致，每次相隔 5 秒，狀態不變時不重複通知。
 - 每日 UTC+8 04:25–05:15 維護靜默時段仍會檢測及記錄 log，但不通知或覆寫 persistent state；時段結束後才以原有狀態重新確認。
 
@@ -88,11 +90,13 @@
 - LINE `/S4` 是共用核心 endpoint，不可封鎖；只可在 binary-body mode 精準修改已驗證的 News flag。
 - THIM 不封鎖共用圖片 CDN，只攔截獨立 `exclusive-banners` endpoint。
 - Bilibili feed 採用 fail-closed 過濾；網絡異常不得令廣告補位或原始廣告 response 回流。
+- Media 與 translation Worker 分開部署；舊 `youtube-init/translate` 透過 service binding 作相容轉發，client 必須直接連線 `caption-translate`，不使用 Durable Objects 或預先翻譯。
 - Surge module 不可修改 `[Proxy Group]`；節點監察使用 `$httpAPI`，不硬編碼節點名。
 - Node Offline Monitor 的維護時段由 module arguments 控制，預設 UTC+8 04:25–05:15，包含 05:00 排程並避免計劃重啟產生 offline／resume 通知風暴。
 
 ### Recent Significant Changes
 
+- `2026-09-30` — YouTube media 與 translation Worker 分拆；translation 加入 7 日 Cache API、相同請求合併及每 isolate 3 個 AI 請求的並行上限，module 將 translation Worker 明確設為 DIRECT。
 - `2026-09-28` — Node Offline Monitor 維護靜默時段調整為 UTC+8 04:25–05:15，確保 05:00 排程仍靜默；檢測照常執行，但不通知或保存錯誤／狀態變更。
 - `2026-09-16` — LINE 加入專用 domain／path 廣告及遙測封鎖，並以 binary Thrift feature flag 隱藏 News tab；共用 `/S4` 保持可用。
 - `2026-09-16` — Reddit 去廣告由 JQ 改為專用 JSON／multipart parser，支援 deferred Home Feed 並保留 NSFW 解鎖。
@@ -105,6 +109,7 @@
 ### Watch Out
 
 - Module 使用 GitHub raw JS URL；修改本機工作檔不會自動發佈，發佈時須同步 JS 與 module 版本。
+- `youtube-init` 使用 `wrangler.jsonc`，`caption-translate` 使用 `wrangler.translate.jsonc`；部署順序應先 translation、後 media，避免舊入口轉發到未部署服務。
 - Reddit `HomeFeedWithDefer` 使用 `multipart/mixed; boundary=graphql`；不可退回只接受單一 JSON 的 JQ rule。
 - HAR 可驗證 API 已清空；整個 section 是否收合仍須以 THIM 真機 UI 驗收。
 - Node Offline Monitor 預設沿用 Profile `proxy-test-url`，未設定時才使用內置 fallback URL。

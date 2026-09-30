@@ -13,12 +13,19 @@ const MAX_CAPTION_LANGUAGE_CHARS = 32;
 const UPSTREAM_TIMEOUT_MS = 25000;
 const TRANSFORM_PATH = "/transform";
 const TRANSLATE_PATH = "/translate";
+const TRANSLATION_WORKER_ENDPOINT = "https://caption-translate.hmtw47cv7m.workers.dev/translate";
 const REALTIME_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
-const WORKER_BUILD = "init-transform-v8-workers-ai-only";
+const WORKER_BUILD = "init-transform-v9-split-cache";
 const MAX_TRANSLATE_REQUEST_BYTES = 48 * 1024;
 const MAX_TRANSLATE_ITEMS = 48;
 const MAX_TRANSLATE_LINE_CHARS = 500;
 const MAX_TRANSLATE_TOTAL_CHARS = 1600;
+const MAX_AI_CONCURRENCY = 3;
+const TRANSLATION_CACHE_VERSION = "v1";
+const TRANSLATION_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const TRANSLATION_INFLIGHT = new Map();
+const TRANSLATION_WAITERS = [];
+let activeTranslations = 0;
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const PAGEAD_MARKER = TEXT_ENCODER.encode("pagead");
@@ -1171,6 +1178,111 @@ function translationResponse(body, status = 200, extraHeaders = {}) {
   });
 }
 
+async function acquireTranslationSlot() {
+  if (activeTranslations < MAX_AI_CONCURRENCY) {
+    activeTranslations++;
+    return;
+  }
+  await new Promise((resolve) => TRANSLATION_WAITERS.push(resolve));
+}
+
+function releaseTranslationSlot() {
+  const next = TRANSLATION_WAITERS.shift();
+  if (next) next();
+  else activeTranslations--;
+}
+
+async function withTranslationSlot(operation) {
+  await acquireTranslationSlot();
+  try {
+    return await operation();
+  } finally {
+    releaseTranslationSlot();
+  }
+}
+
+async function translationCacheRequest(texts, source, target, purpose) {
+  const input = JSON.stringify({
+    version: TRANSLATION_CACHE_VERSION,
+    model: REALTIME_AI_MODEL,
+    purpose,
+    source,
+    target,
+    texts,
+  });
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", TEXT_ENCODER.encode(input)));
+  const identifier = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return {
+    identifier,
+    request: new Request(`https://caption-translate.hmtw47cv7m.workers.dev/__cache/${TRANSLATION_CACHE_VERSION}/${identifier}`),
+  };
+}
+
+async function readTranslationCache(cacheRequest, expectedCount) {
+  const cache = globalThis.caches?.default;
+  if (!cache) return null;
+  try {
+    const response = await cache.match(cacheRequest);
+    if (!response) return null;
+    const body = await response.json();
+    const translations = validatedTranslations(body?.translations, expectedCount);
+    if (!translations) return null;
+    return {
+      translations,
+      provider: String(body?.provider || "workers-ai-cache"),
+    };
+  } catch (error) {
+    console.error("YouTube translation cache read failed:", error?.message || String(error));
+    return null;
+  }
+}
+
+async function writeTranslationCache(cacheRequest, result) {
+  const cache = globalThis.caches?.default;
+  if (!cache) return;
+  const response = new Response(JSON.stringify(result), {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": `public, max-age=${TRANSLATION_CACHE_TTL_SECONDS}`,
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+  try {
+    await cache.put(cacheRequest, response);
+  } catch (error) {
+    console.error("YouTube translation cache write failed:", error?.message || String(error));
+  }
+}
+
+async function translateTextsCached(texts, source, target, env, purpose, context) {
+  const cacheKey = await translationCacheRequest(texts, source, target, purpose);
+  const cached = await readTranslationCache(cacheKey.request, texts.length);
+  if (cached) return { ...cached, cacheStatus: "HIT" };
+
+  let pending = TRANSLATION_INFLIGHT.get(cacheKey.identifier);
+  let cacheStatus = "COALESCED";
+  if (!pending) {
+    cacheStatus = "MISS";
+    pending = withTranslationSlot(async () => {
+      const result = await translateTextsWithProvider(texts, source, target, env, purpose);
+      await writeTranslationCache(cacheKey.request, result);
+      return result;
+    });
+    TRANSLATION_INFLIGHT.set(cacheKey.identifier, pending);
+    void pending.finally(() => {
+      if (TRANSLATION_INFLIGHT.get(cacheKey.identifier) === pending) {
+        TRANSLATION_INFLIGHT.delete(cacheKey.identifier);
+      }
+    }).catch(() => {});
+  }
+
+  if (typeof context?.waitUntil === "function") {
+    context.waitUntil(pending.then(() => undefined, () => undefined));
+  }
+  const result = await pending;
+  return { ...result, cacheStatus };
+}
+
 function transformResponse(body, status, result) {
   return new Response(body, {
     status,
@@ -1224,7 +1336,7 @@ async function handleTransformRequest(request, workerUrl) {
   }
 }
 
-async function handleTranslationRequest(request, env) {
+async function handleTranslationRequest(request, env, context) {
   const contentType = request.headers.get("content-type")?.toLowerCase() || "";
   if (!contentType.includes("application/json")) return translationResponse("JSON Required", 415);
   const declaredLength = Number(request.headers.get("content-length") || 0);
@@ -1260,12 +1372,22 @@ async function handleTranslationRequest(request, env) {
   }
 
   try {
-    const { translations, provider } = await translateTextsWithProvider(normalizedTexts, source, target, env, purpose);
+    const { translations, provider, cacheStatus } = await translateTextsCached(
+      normalizedTexts,
+      source,
+      target,
+      env,
+      purpose,
+      context,
+    );
     if (translations.length !== normalizedTexts.length) throw new Error("Translation count mismatch");
     return translationResponse(
       { translations, target, provider },
       200,
-      { "X-YouTube-Translation-Provider": provider },
+      {
+        "X-YouTube-Translation-Provider": provider,
+        "X-YouTube-Translation-Cache": cacheStatus,
+      },
     );
   } catch (error) {
     console.error("YouTube translation failed:", error?.message || String(error));
@@ -1274,11 +1396,23 @@ async function handleTranslationRequest(request, env) {
   }
 }
 
-async function handleRequest(request, env) {
+function forwardTranslationRequest(request, env) {
+  if (typeof env?.TRANSLATION_WORKER?.fetch === "function") {
+    return env.TRANSLATION_WORKER.fetch(new Request("https://caption-translate/translate", request));
+  }
+  return fetch(new Request(TRANSLATION_WORKER_ENDPOINT, request));
+}
+
+async function handleRequest(request, env, context) {
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
 
   const workerUrl = new URL(request.url);
-  if (workerUrl.pathname === TRANSLATE_PATH) return handleTranslationRequest(request, env);
+  const serviceMode = String(env?.SERVICE_MODE || "combined").toLowerCase();
+  if (workerUrl.pathname === TRANSLATE_PATH) {
+    if (serviceMode === "media") return forwardTranslationRequest(request, env);
+    return handleTranslationRequest(request, env, context);
+  }
+  if (serviceMode === "translation") return new Response("Not Found", { status: 404 });
   if (workerUrl.pathname === TRANSFORM_PATH) return handleTransformRequest(request, workerUrl);
   const targetValue = workerUrl.searchParams.get("target");
   const clientKeyValue = workerUrl.searchParams.get("ck");
@@ -1384,6 +1518,8 @@ export const __test = {
   parseWorkersAITranslations,
   translateWithWorkersAI,
   translateTexts,
+  translateTextsCached,
+  translationCacheRequest,
 };
 
 export default {

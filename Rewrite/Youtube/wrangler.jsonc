@@ -3,7 +3,13 @@
   "name": "youtube-init",
   "main": "youtube.worker.js",
   "compatibility_date": "2026-09-30",
-  "ai": {
-    "binding": "AI"
-  }
+  "vars": {
+    "SERVICE_MODE": "media"
+  },
+  "services": [
+    {
+      "binding": "TRANSLATION_WORKER",
+      "service": "caption-translate"
+    }
+  ]
 }

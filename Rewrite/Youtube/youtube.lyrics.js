@@ -2,7 +2,7 @@
 // Only lyric text and the requested language are sent to the Worker.
 
 (() => {
-  const WORKER_ENDPOINT = "https://youtube-init.hmtw47cv7m.workers.dev/translate";
+  const WORKER_ENDPOINT = "https://caption-translate.hmtw47cv7m.workers.dev/translate";
   const LYRICS_RENDERER_FIELD = 465160965;
   const TRANSLATE_CONTROL_FIELD = 24;
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
