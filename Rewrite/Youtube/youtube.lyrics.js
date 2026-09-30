@@ -11,7 +11,7 @@
   const MAX_BATCH_ITEMS = 12;
   const MAX_BATCH_TOTAL_CHARS = 600;
   const CONCURRENCY = 3;
-  const RESPONSE_BUDGET_MS = 6000;
+  const RESPONSE_BUDGET_MS = 9000;
   const TRANSLATE_TIMEOUT_SECONDS = 110;
   const MAX_BUSY_RETRIES = 0;
   const TEXT_ENCODER = new TextEncoder();
