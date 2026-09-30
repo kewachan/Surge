@@ -2,14 +2,5 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "youtube-init",
   "main": "youtube.worker.js",
-  "compatibility_date": "2026-09-30",
-  "vars": {
-    "SERVICE_MODE": "media"
-  },
-  "services": [
-    {
-      "binding": "TRANSLATION_WORKER",
-      "service": "caption-translate"
-    }
-  ]
+  "compatibility_date": "2026-09-30"
 }

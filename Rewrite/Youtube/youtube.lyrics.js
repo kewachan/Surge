@@ -1,13 +1,13 @@
-// Add bilingual YouTube Music lyrics using the project translation Worker.
+// Add bilingual YouTube Music lyrics using the dedicated lyrics Worker.
 // Only lyric text and the requested language are sent to the Worker.
 
 (() => {
-  const WORKER_ENDPOINT = "https://caption-translate.hmtw47cv7m.workers.dev/translate";
+  const WORKER_ENDPOINT = "https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/lyrics";
   const LYRICS_RENDERER_FIELD = 465160965;
   const TRANSLATE_CONTROL_FIELD = 24;
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
-  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v1";
+  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v2";
   const MAX_BATCH_ITEMS = 12;
   const MAX_BATCH_TOTAL_CHARS = 600;
   const CONCURRENCY = 3;
@@ -268,7 +268,7 @@
       hash ^= value.charCodeAt(index);
       hash = Math.imul(hash, 16777619);
     }
-    return `YouTubeLyrics.v1.${(hash >>> 0).toString(16)}`;
+    return `YouTubeLyrics.v2.${(hash >>> 0).toString(16)}`;
   }
 
   function buildTranslationBatches(lines) {

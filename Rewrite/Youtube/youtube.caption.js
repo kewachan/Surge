@@ -1,17 +1,15 @@
-// Translate YouTube srv3 captions through the project translation Worker.
-// Only caption text and language settings are sent to the Worker.
+// Translate YouTube srv3 captions with Google's public web translation endpoint.
+// No account or API key is required. Public endpoint limits still apply.
 
-const WORKER_ENDPOINT = "https://caption-translate.hmtw47cv7m.workers.dev/translate";
-const MAX_BATCH_ITEMS = 48;
-const MAX_BATCH_TOTAL_CHARS = 1600;
-const MAX_CAPTION_CHARS = 1000;
-const CONCURRENCY = 3;
-const RESPONSE_BUDGET_MS = 115000;
-const TRANSLATE_TIMEOUT_SECONDS = 110;
-const MAX_RETRIES = 3;
+const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
+const MAX_ENCODED_QUERY_CHARS = 6000;
+const CONCURRENCY = 8;
+const RESPONSE_BUDGET_MS = 7500;
+const TRANSLATE_TIMEOUT_SECONDS = 6;
+const MAX_RETRIES = 1;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_LIMIT = 96;
-const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v2";
+const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v4";
 
 function getQueryValue(url, name) {
   const match = url.match(new RegExp(`[?&]${name}=([^&#]*)`));
@@ -30,7 +28,7 @@ function cacheKey(query, source, target) {
     hash ^= value.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
-  return `YouTubeCaption.v2.${(hash >>> 0).toString(16)}`;
+  return `YouTubeCaption.v4.${(hash >>> 0).toString(16)}`;
 }
 
 function readCachedParts(key, length) {
@@ -84,51 +82,43 @@ function encodeXml(text) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+function separator(index) {
+  return `\n[[YTS:${index}]]\n`;
+}
+
 function buildBatches(captions) {
   const batches = [];
   let items = [];
-  let texts = [];
-  let totalCharacters = 0;
-
-  function flush() {
-    if (items.length) batches.push({items, texts});
-    items = [];
-    texts = [];
-    totalCharacters = 0;
-  }
-
+  let query = "";
   captions.forEach((caption, index) => {
-    if (!caption.text || caption.text.length > MAX_CAPTION_CHARS) return;
-    if (items.length && (items.length >= MAX_BATCH_ITEMS || totalCharacters + caption.text.length > MAX_BATCH_TOTAL_CHARS)) flush();
+    const addition = `${items.length ? separator(index) : ""}${caption.text}`;
+    if (items.length && encodeURIComponent(query + addition).length > MAX_ENCODED_QUERY_CHARS) {
+      batches.push({items, query});
+      items = [];
+      query = "";
+    }
+    query += `${items.length ? separator(index) : ""}${caption.text}`;
     items.push({captionIndex: index});
-    texts.push(caption.text);
-    totalCharacters += caption.text.length;
   });
-  flush();
+  if (items.length) batches.push({items, query});
   return batches;
 }
 
-function requestTranslation(texts, source, target, timeoutSeconds) {
+function requestTranslation(query, source, target, timeoutSeconds) {
+  const url = `${TRANSLATE_ENDPOINT}?client=gtx&sl=${encodeURIComponent(source)}&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(query)}`;
   return new Promise((resolve, reject) => {
-    $httpClient.post({
-      url: WORKER_ENDPOINT,
+    $httpClient.get({
+      url,
       timeout: typeof $loon !== "undefined" ? timeoutSeconds * 1000 : timeoutSeconds,
-      headers: {Accept: "application/json", "Content-Type": "application/json"},
-      body: JSON.stringify({texts, source, target, purpose: "captions"}),
+      headers: {Accept: "application/json"},
     }, (error, response, body) => {
       if (error) return reject(error);
       try {
         const status = response.status || response.statusCode;
-        if (status !== 200) {
-          const statusError = new Error(`Worker status ${status}`);
-          statusError.status = status;
-          throw statusError;
-        }
+        if (status !== 200) throw new Error(`Google Translate status ${status}`);
         const result = JSON.parse(body);
-        if (!Array.isArray(result?.translations) || result.translations.length !== texts.length) {
-          throw new Error("Invalid Worker translation response");
-        }
-        resolve(result.translations.map((text) => String(text || "")));
+        if (!Array.isArray(result?.[0])) throw new Error("Invalid Google Translate response");
+        resolve(result[0].map((part) => part?.[0] || "").join(""));
       } catch (parseError) {
         reject(parseError);
       }
@@ -136,23 +126,30 @@ function requestTranslation(texts, source, target, timeoutSeconds) {
   });
 }
 
-async function fetchTranslation(texts, source, target, deadline) {
+async function fetchTranslation(query, source, target, deadline) {
   let lastError;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw lastError || new Error("Caption translation time budget exhausted");
     try {
       const timeout = Math.max(1, Math.min(TRANSLATE_TIMEOUT_SECONDS, Math.ceil(remaining / 1000)));
-      return await requestTranslation(texts, source, target, timeout);
+      return await requestTranslation(query, source, target, timeout);
     } catch (error) {
       lastError = error;
-      if (attempt === MAX_RETRIES || Number(error?.status) !== 429) break;
-      const delay = 5000;
+      if (attempt === MAX_RETRIES) break;
+      const delay = 200;
       if (Date.now() + delay >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
   throw lastError || new Error("Caption translation failed");
+}
+
+function rebuildBatch(items, captions) {
+  return {
+    items,
+    query: items.map((item, index) => `${index ? separator(item.captionIndex) : ""}${captions[item.captionIndex].text}`).join(""),
+  };
 }
 
 async function translateBatches(batches, captions, source, target) {
@@ -163,15 +160,24 @@ async function translateBatches(batches, captions, source, target) {
     while (cursor < queue.length && Date.now() < deadline) {
       const batch = queue[cursor++];
       try {
-        const key = cacheKey(batch.texts.join("\u001f"), source, target);
+        const key = cacheKey(batch.query, source, target);
         let parts = readCachedParts(key, batch.items.length);
         if (!parts) {
-          parts = await fetchTranslation(batch.texts, source, target, deadline);
-          writeCachedParts(key, parts);
+          const translated = await fetchTranslation(batch.query, source, target, deadline);
+          parts = translated.split(/\s*\[\[YTS:\s*\d+\s*\]\]\s*/g);
+          if (parts.length === batch.items.length) writeCachedParts(key, parts);
+        }
+        if (parts.length !== batch.items.length) {
+          if (batch.items.length > 1) {
+            const middle = Math.ceil(batch.items.length / 2);
+            queue.push(rebuildBatch(batch.items.slice(0, middle), captions));
+            queue.push(rebuildBatch(batch.items.slice(middle), captions));
+          }
+          continue;
         }
         batch.items.forEach((item, index) => { captions[item.captionIndex].translated = parts[index].trim(); });
       } catch (error) {
-        console.log(`Caption Worker batch failed: ${error}`);
+        console.log(`Google caption batch failed: ${error}`);
       }
     }
   }
@@ -220,7 +226,7 @@ if (typeof $response === "undefined") {
   $done({url: rewriteCaptionRequest($request.url)});
 } else {
   translateCaptionResponse().catch((error) => {
-    console.log(`Caption Worker translation failed: ${error}`);
+    console.log(`Google caption translation failed: ${error}`);
     $done({});
   });
 }
