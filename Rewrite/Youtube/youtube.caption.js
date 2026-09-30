@@ -2,10 +2,10 @@
 // Only caption text and language settings are sent to the Worker.
 
 const WORKER_ENDPOINT = "https://youtube-init.hmtw47cv7m.workers.dev/translate";
-const MAX_BATCH_ITEMS = 8;
-const MAX_BATCH_TOTAL_CHARS = 500;
+const MAX_BATCH_ITEMS = 48;
+const MAX_BATCH_TOTAL_CHARS = 1600;
 const MAX_CAPTION_CHARS = 1000;
-const CONCURRENCY = 1;
+const CONCURRENCY = 3;
 const RESPONSE_BUDGET_MS = 115000;
 const TRANSLATE_TIMEOUT_SECONDS = 110;
 const MAX_RETRIES = 3;
@@ -114,7 +114,7 @@ function requestTranslation(texts, source, target, timeoutSeconds) {
       url: WORKER_ENDPOINT,
       timeout: typeof $loon !== "undefined" ? timeoutSeconds * 1000 : timeoutSeconds,
       headers: {Accept: "application/json", "Content-Type": "application/json"},
-      body: JSON.stringify({texts, source, target}),
+      body: JSON.stringify({texts, source, target, purpose: "captions"}),
     }, (error, response, body) => {
       if (error) return reject(error);
       try {

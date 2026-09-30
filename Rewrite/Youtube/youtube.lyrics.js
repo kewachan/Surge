@@ -8,9 +8,10 @@
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
   const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v1";
-  const MAX_BATCH_ITEMS = 8;
-  const MAX_BATCH_TOTAL_CHARS = 500;
-  const RESPONSE_BUDGET_MS = 4500;
+  const MAX_BATCH_ITEMS = 12;
+  const MAX_BATCH_TOTAL_CHARS = 600;
+  const CONCURRENCY = 3;
+  const RESPONSE_BUDGET_MS = 6000;
   const TRANSLATE_TIMEOUT_SECONDS = 110;
   const MAX_BUSY_RETRIES = 0;
   const TEXT_ENCODER = new TextEncoder();
@@ -402,22 +403,36 @@
     try {
       const translatedByOriginal = new Map();
       const deadline = Date.now() + RESPONSE_BUDGET_MS;
-      for (const batch of buildTranslationBatches(uniqueLines)) {
-        const key = cacheKey(batch, target);
-        let translations = readCache(key, batch.length);
-        if (!translations) {
-          const remaining = deadline - Date.now();
-          if (remaining <= 0) break;
-          try {
-            translations = await fetchTranslations(batch, target, deadline);
-            writeCache(key, translations);
-          } catch (error) {
-            console.log(`YouTube lyrics translation batch failed: ${String(error)}`);
-            if (Date.now() >= deadline) break;
-            continue;
+      const batches = buildTranslationBatches(uniqueLines);
+      let cursor = 0;
+      async function worker() {
+        while (cursor < batches.length && Date.now() < deadline) {
+          const batch = batches[cursor++];
+          const key = cacheKey(batch, target);
+          let translations = readCache(key, batch.length);
+          if (!translations) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) break;
+            try {
+              translations = await fetchTranslations(batch, target, deadline);
+              writeCache(key, translations);
+            } catch (error) {
+              console.log(`YouTube lyrics translation batch failed: ${String(error)}`);
+              continue;
+            }
           }
+          batch.forEach((line, index) => translatedByOriginal.set(line, translations[index]));
         }
-        batch.forEach((line, index) => translatedByOriginal.set(line, translations[index]));
+      }
+      const work = Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
+      let timer;
+      await Promise.race([
+        work,
+        new Promise((resolve) => { timer = setTimeout(resolve, RESPONSE_BUDGET_MS); }),
+      ]);
+      if (timer) clearTimeout(timer);
+      if (translatedByOriginal.size !== uniqueLines.length) {
+        throw new Error(`Incomplete lyrics translation (${translatedByOriginal.size}/${uniqueLines.length})`);
       }
 
       const [output, translated] = rewriteNested(inputWithoutControl, translatedByOriginal);
