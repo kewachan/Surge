@@ -13,18 +13,13 @@ const MAX_CAPTION_LANGUAGE_CHARS = 32;
 const UPSTREAM_TIMEOUT_MS = 25000;
 const TRANSFORM_PATH = "/transform";
 const TRANSLATE_PATH = "/translate";
-const WORKER_BUILD = "init-transform-v2";
-const TRANSLATE_ATTEMPTS = [
-  ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
-  ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
-  ["https://translate.googleapis.com/translate_a/single", "gtx"],
-];
+const TRANSLATE_ORIGIN_ENDPOINT = "https://radiquo-stream.duckdns.org/youtube-translate/translate";
+const WORKER_BUILD = "init-transform-v3-self-hosted-translate";
 const MAX_TRANSLATE_REQUEST_BYTES = 48 * 1024;
 const MAX_TRANSLATE_ITEMS = 160;
 const MAX_TRANSLATE_LINE_CHARS = 1000;
 const MAX_TRANSLATE_TOTAL_CHARS = 24000;
-const MAX_TRANSLATE_ENCODED_QUERY_CHARS = 6500;
-const TRANSLATE_TIMEOUT_MS = 7000;
+const TRANSLATE_TIMEOUT_MS = 110000;
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const PAGEAD_MARKER = TEXT_ENCODER.encode("pagead");
@@ -1039,81 +1034,32 @@ function normalizeTranslationLanguage(value, allowAuto = false) {
   }[language.toLowerCase()] || language;
 }
 
-function translationSeparator(index) {
-  return `\n[[YTL:${index}]]\n`;
-}
+async function translateTexts(texts, source, target, env) {
+  const token = String(env?.TRANSLATE_TOKEN || "");
+  if (!token) throw new Error("Translation origin token is not configured");
 
-function translationQuery(texts) {
-  return texts.map((text, index) => `${index ? translationSeparator(index) : ""}${text}`).join("");
-}
-
-function buildTranslationBatches(texts) {
-  const batches = [];
-  let batch = [];
-  for (const text of texts) {
-    const candidate = [...batch, text];
-    if (batch.length && encodeURIComponent(translationQuery(candidate)).length > MAX_TRANSLATE_ENCODED_QUERY_CHARS) {
-      batches.push(batch);
-      batch = [];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
+  try {
+    const response = await fetch(TRANSLATE_ORIGIN_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Translate-Token": token,
+      },
+      body: JSON.stringify({ texts, source, target }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Translation origin status ${response.status}`);
+    const result = await response.json();
+    if (!Array.isArray(result?.translations) || result.translations.length !== texts.length) {
+      throw new Error("Invalid translation origin response");
     }
-    batch.push(text);
+    return result.translations.map((text) => String(text || "").trim());
+  } finally {
+    clearTimeout(timeout);
   }
-  if (batch.length) batches.push(batch);
-  return batches;
-}
-
-async function fetchGoogleTranslation(query, source, target) {
-  let lastError;
-  for (const [endpoint, client] of TRANSLATE_ATTEMPTS) {
-    const body = new URLSearchParams({ client, sl: source, tl: target, dt: "t", q: query });
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          Accept: "application/json, text/plain, */*",
-          "Accept-Language": "en-US,en;q=0.9",
-          Referer: "https://translate.google.com/",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        },
-        body: body.toString(),
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`Google Translate status ${response.status}`);
-      const result = await response.json();
-      if (!Array.isArray(result?.[0])) throw new Error("Invalid Google Translate response");
-      return result[0].map((part) => part?.[0] || "").join("");
-    } catch (error) {
-      lastError = new Error(`${new URL(endpoint).hostname}: ${error?.message || String(error)}`);
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-  throw lastError || new Error("Google Translate unavailable");
-}
-
-async function translateTextBatch(texts, source, target) {
-  const translated = await fetchGoogleTranslation(translationQuery(texts), source, target);
-  if (texts.length === 1) return [translated.trim()];
-
-  const parts = translated.split(/\s*\[\[\s*YTL\s*:\s*\d+\s*\]\]\s*/gi);
-  if (parts.length === texts.length) return parts.map((part) => part.trim());
-
-  const middle = Math.ceil(texts.length / 2);
-  const [left, right] = await Promise.all([
-    translateTextBatch(texts.slice(0, middle), source, target),
-    translateTextBatch(texts.slice(middle), source, target),
-  ]);
-  return [...left, ...right];
-}
-
-async function translateTexts(texts, source, target) {
-  const batches = buildTranslationBatches(texts);
-  const translated = await Promise.all(batches.map((batch) => translateTextBatch(batch, source, target)));
-  return translated.flat();
 }
 
 function translationResponse(body, status = 200) {
@@ -1181,7 +1127,7 @@ async function handleTransformRequest(request, workerUrl) {
   }
 }
 
-async function handleTranslationRequest(request) {
+async function handleTranslationRequest(request, env) {
   const contentType = request.headers.get("content-type")?.toLowerCase() || "";
   if (!contentType.includes("application/json")) return translationResponse("JSON Required", 415);
   const declaredLength = Number(request.headers.get("content-length") || 0);
@@ -1216,7 +1162,7 @@ async function handleTranslationRequest(request) {
   }
 
   try {
-    const translations = await translateTexts(normalizedTexts, source, target);
+    const translations = await translateTexts(normalizedTexts, source, target, env);
     if (translations.length !== normalizedTexts.length) throw new Error("Translation count mismatch");
     return translationResponse({ translations, target });
   } catch (error) {
@@ -1225,11 +1171,11 @@ async function handleTranslationRequest(request) {
   }
 }
 
-async function handleRequest(request) {
+async function handleRequest(request, env) {
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
 
   const workerUrl = new URL(request.url);
-  if (workerUrl.pathname === TRANSLATE_PATH) return handleTranslationRequest(request);
+  if (workerUrl.pathname === TRANSLATE_PATH) return handleTranslationRequest(request, env);
   if (workerUrl.pathname === TRANSFORM_PATH) return handleTransformRequest(request, workerUrl);
   const targetValue = workerUrl.searchParams.get("target");
   const clientKeyValue = workerUrl.searchParams.get("ck");
@@ -1332,7 +1278,6 @@ export const __test = {
   addEnhanceCaptionTrack,
   normalizeCaptionLanguage,
   normalizeTranslationLanguage,
-  buildTranslationBatches,
   translateTexts,
 };
 

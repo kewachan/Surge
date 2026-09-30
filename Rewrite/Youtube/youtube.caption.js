@@ -2,13 +2,13 @@
 // Only caption text and language settings are sent to the Worker.
 
 const WORKER_ENDPOINT = "https://youtube-init.hmtw47cv7m.workers.dev/translate";
-const MAX_BATCH_ITEMS = 120;
-const MAX_BATCH_TOTAL_CHARS = 10000;
+const MAX_BATCH_ITEMS = 8;
+const MAX_BATCH_TOTAL_CHARS = 500;
 const MAX_CAPTION_CHARS = 1000;
-const CONCURRENCY = 2;
-const RESPONSE_BUDGET_MS = 24000;
-const TRANSLATE_TIMEOUT_SECONDS = 18;
-const MAX_RETRIES = 1;
+const CONCURRENCY = 1;
+const RESPONSE_BUDGET_MS = 115000;
+const TRANSLATE_TIMEOUT_SECONDS = 110;
+const MAX_RETRIES = 0;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_LIMIT = 96;
 const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v2";

@@ -8,7 +8,10 @@
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
   const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v1";
-  const TRANSLATE_TIMEOUT_SECONDS = 18;
+  const MAX_BATCH_ITEMS = 8;
+  const MAX_BATCH_TOTAL_CHARS = 500;
+  const RESPONSE_BUDGET_MS = 115000;
+  const TRANSLATE_TIMEOUT_SECONDS = 110;
   const TEXT_ENCODER = new TextEncoder();
   const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
@@ -266,6 +269,23 @@
     return `YouTubeLyrics.v1.${(hash >>> 0).toString(16)}`;
   }
 
+  function buildTranslationBatches(lines) {
+    const batches = [];
+    let batch = [];
+    let characters = 0;
+    for (const line of lines) {
+      if (batch.length && (batch.length >= MAX_BATCH_ITEMS || characters + line.length > MAX_BATCH_TOTAL_CHARS)) {
+        batches.push(batch);
+        batch = [];
+        characters = 0;
+      }
+      batch.push(line);
+      characters += line.length;
+    }
+    if (batch.length) batches.push(batch);
+    return batches;
+  }
+
   function readCache(key, expectedLength) {
     if (typeof $persistentStore === "undefined") return null;
     try {
@@ -297,13 +317,13 @@
     } catch (_) {}
   }
 
-  function requestTranslations(lines, target) {
+  function requestTranslations(lines, target, timeoutSeconds) {
     const payload = JSON.stringify({ texts: lines, source: "auto", target });
     if (typeof $httpClient !== "undefined") {
       return new Promise((resolve, reject) => {
         $httpClient.post({
           url: WORKER_ENDPOINT,
-          timeout: typeof $loon !== "undefined" ? TRANSLATE_TIMEOUT_SECONDS * 1000 : TRANSLATE_TIMEOUT_SECONDS,
+          timeout: typeof $loon !== "undefined" ? timeoutSeconds * 1000 : timeoutSeconds,
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: payload,
         }, (error, response, body) => {
@@ -326,6 +346,7 @@
       return $task.fetch({
         url: WORKER_ENDPOINT,
         method: "POST",
+        timeout: timeoutSeconds,
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: payload,
       }).then((response) => {
@@ -350,18 +371,31 @@
     const lines = findLyrics(inputWithoutControl);
     if (!lines) return $done(controlChanged ? { body: inputWithoutControl } : {});
     const uniqueLines = [...new Set(lines)];
-    const key = cacheKey(uniqueLines, target);
     try {
-      let translations = readCache(key, uniqueLines.length);
-      if (!translations) {
-        translations = await requestTranslations(uniqueLines, target);
-        writeCache(key, translations);
+      const translatedByOriginal = new Map();
+      const deadline = Date.now() + RESPONSE_BUDGET_MS;
+      for (const batch of buildTranslationBatches(uniqueLines)) {
+        const key = cacheKey(batch, target);
+        let translations = readCache(key, batch.length);
+        if (!translations) {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) break;
+          const timeout = Math.max(1, Math.min(TRANSLATE_TIMEOUT_SECONDS, Math.ceil(remaining / 1000)));
+          try {
+            translations = await requestTranslations(batch, target, timeout);
+            writeCache(key, translations);
+          } catch (error) {
+            console.log(`YouTube lyrics translation batch failed: ${String(error)}`);
+            if (Date.now() >= deadline) break;
+            continue;
+          }
+        }
+        batch.forEach((line, index) => translatedByOriginal.set(line, translations[index]));
       }
 
-      const translatedByOriginal = new Map(uniqueLines.map((line, index) => [line, translations[index]]));
       const [output, translated] = rewriteNested(inputWithoutControl, translatedByOriginal);
       const changed = controlChanged || translated;
-      if (options.debug) console.log(`YouTube lyrics: ${translated ? "translated" : "unchanged"}; translate control ${controlChanged ? "hidden" : "absent"} (${uniqueLines.length} unique lines)`);
+      if (options.debug) console.log(`YouTube lyrics: ${translated ? "translated" : "unchanged"}; translate control ${controlChanged ? "hidden" : "absent"} (${translatedByOriginal.size}/${uniqueLines.length} unique lines)`);
       return $done(changed ? { body: output } : {});
     } catch (error) {
       console.log(`YouTube lyrics translation failed: ${String(error)}`);
