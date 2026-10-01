@@ -1,12 +1,19 @@
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v1-qwen3-30b-a3b";
+const WORKER_BUILD = "lyrics-translate-v2-ai-google-fallback";
+const GOOGLE_TRANSLATE_ATTEMPTS = [
+  ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
+  ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
+  ["https://translate.googleapis.com/translate_a/single", "gtx"],
+];
 const MAX_REQUEST_BYTES = 48 * 1024;
 const MAX_ITEMS = 12;
 const MAX_LINE_CHARS = 500;
 const MAX_TOTAL_CHARS = 600;
 const MAX_AI_CONCURRENCY = 3;
-const CACHE_VERSION = "v1";
+const MAX_GOOGLE_ENCODED_QUERY_CHARS = 6000;
+const GOOGLE_TRANSLATE_TIMEOUT_MS = 6500;
+const CACHE_VERSION = "v2";
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
@@ -154,7 +161,86 @@ async function translateLyrics(texts, source, target, env) {
   });
   const translations = parseAITranslations(result, texts.length);
   if (!translations) throw new Error("Workers AI returned an invalid lyric translation response");
-  return { translations, provider: "workers-ai-qwen3-30b-a3b-lyrics" };
+  return { translations, provider: "cloudflare-ai" };
+}
+
+function translationSeparator(index) {
+  return `\n[[YTL:${index}]]\n`;
+}
+
+function translationQuery(texts) {
+  return texts.map((text, index) => `${index ? translationSeparator(index) : ""}${text}`).join("");
+}
+
+function buildGoogleBatches(texts) {
+  const batches = [];
+  let batch = [];
+  for (const text of texts) {
+    const candidate = [...batch, text];
+    if (batch.length && encodeURIComponent(translationQuery(candidate)).length > MAX_GOOGLE_ENCODED_QUERY_CHARS) {
+      batches.push(batch);
+      batch = [];
+    }
+    batch.push(text);
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
+async function fetchGoogleTranslation(query, source, target) {
+  let lastError;
+  for (const [endpoint, client] of GOOGLE_TRANSLATE_ATTEMPTS) {
+    const body = new URLSearchParams({ client, sl: source, tl: target, dt: "t", q: query });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GOOGLE_TRANSLATE_TIMEOUT_MS);
+    try {
+      const googleResponse = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          Accept: "application/json, text/plain, */*",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: "https://translate.google.com/",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        body: body.toString(),
+        signal: controller.signal,
+      });
+      if (!googleResponse.ok) throw new Error(`Google Translate status ${googleResponse.status}`);
+      const result = await googleResponse.json();
+      if (!Array.isArray(result?.[0])) throw new Error("Invalid Google Translate response");
+      return result[0].map((part) => part?.[0] || "").join("");
+    } catch (error) {
+      lastError = new Error(`${new URL(endpoint).hostname}: ${error?.message || String(error)}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw lastError || new Error("Google Translate unavailable");
+}
+
+async function translateGoogleBatch(texts, source, target) {
+  const translated = await fetchGoogleTranslation(translationQuery(texts), source, target);
+  if (texts.length === 1) return [translated.trim()];
+
+  const parts = translated.split(/\s*\[\[\s*YTL\s*:\s*\d+\s*\]\]\s*/gi);
+  if (parts.length === texts.length) return parts.map((part) => part.trim());
+
+  const middle = Math.ceil(texts.length / 2);
+  const [left, right] = await Promise.all([
+    translateGoogleBatch(texts.slice(0, middle), source, target),
+    translateGoogleBatch(texts.slice(middle), source, target),
+  ]);
+  return [...left, ...right];
+}
+
+async function translateWithGoogle(texts, source, target) {
+  const batches = buildGoogleBatches(texts);
+  const translated = await Promise.all(batches.map((batch) => translateGoogleBatch(batch, source, target)));
+  const translations = translated.flat();
+  const validated = validatedTranslations(translations, texts.length);
+  if (!validated) throw new Error("Google Translate returned an invalid lyric translation response");
+  return { translations: validated, provider: "google-translate" };
 }
 
 function response(body, status = 200, extraHeaders = {}) {
@@ -245,7 +331,13 @@ async function translateCached(texts, source, target, env, context) {
   if (!pending) {
     cacheStatus = "MISS";
     pending = withSlot(async () => {
-      const result = await translateLyrics(texts, source, target, env);
+      let result;
+      try {
+        result = await translateLyrics(texts, source, target, env);
+      } catch (error) {
+        console.warn("YouTube lyric Workers AI unavailable; using Google Translate:", error?.message || String(error));
+        result = await translateWithGoogle(texts, source, target);
+      }
       await writeCache(key.request, result);
       return result;
     });
@@ -331,6 +423,7 @@ export const __test = {
   normalizeLanguage,
   parseAITranslations,
   translateLyrics,
+  translateWithGoogle,
   translateCached,
   cacheRequest,
   constantTimeEqual,

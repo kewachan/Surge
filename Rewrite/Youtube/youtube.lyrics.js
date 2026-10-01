@@ -5,9 +5,10 @@
   const WORKER_ENDPOINT = "https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/lyrics";
   const LYRICS_RENDERER_FIELD = 465160965;
   const TRANSLATE_CONTROL_FIELD = 24;
+  const TRANSLATION_ATTRIBUTION_FIELD = 26;
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
-  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v2";
+  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v3";
   const MAX_BATCH_ITEMS = 12;
   const MAX_BATCH_TOTAL_CHARS = 600;
   const CONCURRENCY = 3;
@@ -190,14 +191,30 @@
     return null;
   }
 
-  function rewriteLyricsRenderer(rendererBytes, translatedByOriginal, hideTranslateControl) {
+  function providerLabel(providers) {
+    const normalized = new Set(Array.from(providers || [], (value) => String(value || "").toLowerCase()));
+    const usedGoogle = Array.from(normalized).some((value) => value.includes("google"));
+    const usedCloudflare = Array.from(normalized).some((value) => value.includes("cloudflare") || value.includes("workers-ai"));
+    if (usedGoogle && usedCloudflare) return "Translated by Cloudflare AI + Google Translate";
+    if (usedGoogle) return "Translated by Google Translate";
+    return "Translated by Cloudflare AI";
+  }
+
+  function rewriteLyricsRenderer(rendererBytes, translatedByOriginal, hideTranslateControl, attribution) {
     const lyrics = lyricList(rendererBytes);
     if (!lyrics) return [rendererBytes, false];
     let listChanged = false;
+    let attributionHandled = false;
     const listChunks = [];
 
     for (const itemField of lyrics.listFields) {
       if (hideTranslateControl && itemField.number === TRANSLATE_CONTROL_FIELD && itemField.wireType === 2) {
+        listChanged = true;
+        continue;
+      }
+      if (attribution && itemField.number === TRANSLATION_ATTRIBUTION_FIELD && itemField.wireType === 2) {
+        listChunks.push(encodeField(itemField.number, TEXT_ENCODER.encode(attribution)));
+        attributionHandled = true;
         listChanged = true;
         continue;
       }
@@ -227,6 +244,11 @@
       listChanged = true;
     }
 
+    if (attribution && !attributionHandled) {
+      listChunks.push(encodeField(TRANSLATION_ATTRIBUTION_FIELD, TEXT_ENCODER.encode(attribution)));
+      listChanged = true;
+    }
+
     if (!listChanged) return [rendererBytes, false];
     const rewrittenList = join(listChunks);
     const rendererChunks = lyrics.rendererFields.map((field) => (
@@ -235,7 +257,7 @@
     return [join(rendererChunks), true];
   }
 
-  function rewriteNested(bytes, translatedByOriginal, depth = 0, hideTranslateControl = false) {
+  function rewriteNested(bytes, translatedByOriginal, depth = 0, hideTranslateControl = false, attribution = "") {
     if (depth > 14) return [bytes, false];
     const fields = parseMessage(bytes);
     if (!fields) return [bytes, false];
@@ -251,10 +273,10 @@
       let rewritten = data;
       let fieldChanged = false;
       if (field.number === LYRICS_RENDERER_FIELD) {
-        [rewritten, fieldChanged] = rewriteLyricsRenderer(data, translatedByOriginal, hideTranslateControl);
+        [rewritten, fieldChanged] = rewriteLyricsRenderer(data, translatedByOriginal, hideTranslateControl, attribution);
       }
       if (!fieldChanged && data.length >= 4) {
-        [rewritten, fieldChanged] = rewriteNested(data, translatedByOriginal, depth + 1, hideTranslateControl);
+        [rewritten, fieldChanged] = rewriteNested(data, translatedByOriginal, depth + 1, hideTranslateControl, attribution);
       }
       if (fieldChanged) {
         chunks.push(encodeField(field.number, rewritten));
@@ -301,17 +323,22 @@
         cached && Array.isArray(cached.translations)
         && cached.translations.length === expectedLength
         && Date.now() - Number(cached.savedAt || 0) < CACHE_TTL_MS
-      ) return cached.translations;
+        && typeof cached.provider === "string" && cached.provider
+      ) return { translations: cached.translations, provider: cached.provider };
       if (cached) $persistentStore.write("", key);
     } catch (_) {}
     return null;
   }
 
-  function writeCache(key, translations) {
+  function writeCache(key, result) {
     if (typeof $persistentStore === "undefined") return;
     try {
       const savedAt = Date.now();
-      $persistentStore.write(JSON.stringify({ savedAt, translations }), key);
+      $persistentStore.write(JSON.stringify({
+        savedAt,
+        translations: result.translations,
+        provider: result.provider,
+      }), key);
       const stored = JSON.parse($persistentStore.read(CACHE_INDEX_KEY) || "[]");
       const index = (Array.isArray(stored) ? stored : [])
         .filter((item) => item?.key && item.key !== key && savedAt - Number(item.savedAt || 0) < CACHE_TTL_MS);
@@ -351,7 +378,10 @@
             if (!Array.isArray(result?.translations) || result.translations.length !== lines.length) {
               throw new Error("Invalid Worker translation response");
             }
-            resolve(result.translations.map((line) => String(line || "")));
+            resolve({
+              translations: result.translations.map((line) => String(line || "")),
+              provider: String(result.provider || "cloudflare-ai"),
+            });
           } catch (parseError) {
             reject(parseError);
           }
@@ -375,7 +405,10 @@
         if (!Array.isArray(result?.translations) || result.translations.length !== lines.length) {
           throw new Error("Invalid Worker translation response");
         }
-        return result.translations.map((line) => String(line || ""));
+        return {
+          translations: result.translations.map((line) => String(line || "")),
+          provider: String(result.provider || "cloudflare-ai"),
+        };
       });
     }
     return Promise.reject(new Error("No HTTP client available"));
@@ -417,6 +450,7 @@
     const uniqueLines = [...new Set(lines)];
     try {
       const translatedByOriginal = new Map();
+      const providers = new Set();
       const deadline = Date.now() + RESPONSE_BUDGET_MS;
       const batches = buildTranslationBatches(uniqueLines);
       let cursor = 0;
@@ -424,19 +458,20 @@
         while (cursor < batches.length && Date.now() < deadline) {
           const batch = batches[cursor++];
           const key = cacheKey(batch, target);
-          let translations = readCache(key, batch.length);
-          if (!translations) {
+          let result = readCache(key, batch.length);
+          if (!result) {
             const remaining = deadline - Date.now();
             if (remaining <= 0) break;
             try {
-              translations = await fetchTranslations(batch, target, deadline, accessToken);
-              writeCache(key, translations);
+              result = await fetchTranslations(batch, target, deadline, accessToken);
+              writeCache(key, result);
             } catch (error) {
               console.log(`YouTube lyrics translation batch failed: ${String(error)}`);
               continue;
             }
           }
-          batch.forEach((line, index) => translatedByOriginal.set(line, translations[index]));
+          providers.add(result.provider);
+          batch.forEach((line, index) => translatedByOriginal.set(line, result.translations[index]));
         }
       }
       const work = Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
@@ -450,9 +485,10 @@
         throw new Error(`Incomplete lyrics translation (${translatedByOriginal.size}/${uniqueLines.length})`);
       }
 
-      const [output, translated] = rewriteNested(inputWithoutControl, translatedByOriginal);
+      const attribution = providerLabel(providers);
+      const [output, translated] = rewriteNested(inputWithoutControl, translatedByOriginal, 0, false, attribution);
       const changed = controlChanged || translated;
-      if (options.debug) console.log(`YouTube lyrics: ${translated ? "translated" : "unchanged"}; translate control ${controlChanged ? "hidden" : "absent"} (${translatedByOriginal.size}/${uniqueLines.length} unique lines)`);
+      if (options.debug) console.log(`YouTube lyrics: ${translated ? "translated" : "unchanged"}; ${attribution}; translate control ${controlChanged ? "hidden" : "absent"} (${translatedByOriginal.size}/${uniqueLines.length} unique lines)`);
       return $done(changed ? { body: output } : {});
     } catch (error) {
       console.log(`YouTube lyrics translation failed: ${String(error)}`);
