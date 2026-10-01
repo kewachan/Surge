@@ -1,6 +1,6 @@
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v3-ai-priority-cache";
+const WORKER_BUILD = "lyrics-translate-v4-adaptive-4-line-batches";
 const GOOGLE_TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -10,6 +10,8 @@ const MAX_REQUEST_BYTES = 48 * 1024;
 const MAX_ITEMS = 12;
 const MAX_LINE_CHARS = 500;
 const MAX_TOTAL_CHARS = 600;
+const PREFERRED_AI_ITEMS = 4;
+const PREFERRED_AI_TOTAL_CHARS = 180;
 const MAX_AI_CONCURRENCY = 3;
 const MAX_GOOGLE_ENCODED_QUERY_CHARS = 6000;
 const GOOGLE_TRANSLATE_TIMEOUT_MS = 6500;
@@ -21,6 +23,7 @@ const INFLIGHT = new Map();
 const WAITERS = [];
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
+const AI_INVALID_TRANSLATION_CODE = "AI_INVALID_TRANSLATION";
 let activeTranslations = 0;
 
 function constantTimeEqual(left, right) {
@@ -160,8 +163,46 @@ async function translateLyrics(texts, source, target, env) {
     max_tokens: 1024,
   });
   const translations = parseAITranslations(result, texts.length);
-  if (!translations) throw new Error("Workers AI returned an invalid lyric translation response");
+  if (!translations) {
+    const error = new Error("Workers AI returned an invalid lyric translation response");
+    error.code = AI_INVALID_TRANSLATION_CODE;
+    throw error;
+  }
   return { translations, provider: "cloudflare-ai" };
+}
+
+function shouldSplitAIInput(texts) {
+  if (texts.length < 2) return false;
+  return texts.length > PREFERRED_AI_ITEMS
+    || texts.reduce((total, text) => total + text.length, 0) > PREFERRED_AI_TOTAL_CHARS;
+}
+
+function splitAIInput(texts) {
+  const middle = Math.ceil(texts.length / 2);
+  return [texts.slice(0, middle), texts.slice(middle)];
+}
+
+async function translateLyricsAdaptive(texts, source, target, env) {
+  if (shouldSplitAIInput(texts)) {
+    const [leftTexts, rightTexts] = splitAIInput(texts);
+    const [left, right] = await Promise.all([
+      translateLyricsAdaptive(leftTexts, source, target, env),
+      translateLyricsAdaptive(rightTexts, source, target, env),
+    ]);
+    return { translations: [...left.translations, ...right.translations], provider: "cloudflare-ai" };
+  }
+
+  try {
+    return await translateLyrics(texts, source, target, env);
+  } catch (error) {
+    if (error?.code !== AI_INVALID_TRANSLATION_CODE || texts.length < 2) throw error;
+    const [leftTexts, rightTexts] = splitAIInput(texts);
+    const [left, right] = await Promise.all([
+      translateLyricsAdaptive(leftTexts, source, target, env),
+      translateLyricsAdaptive(rightTexts, source, target, env),
+    ]);
+    return { translations: [...left.translations, ...right.translations], provider: "cloudflare-ai" };
+  }
 }
 
 function translationSeparator(index) {
@@ -334,7 +375,7 @@ async function translateCached(texts, source, target, env, context) {
     pending = withSlot(async () => {
       let result;
       try {
-        result = await translateLyrics(texts, source, target, env);
+        result = await translateLyricsAdaptive(texts, source, target, env);
       } catch (error) {
         console.warn("YouTube lyric Workers AI unavailable; using Google Translate:", error?.message || String(error));
         result = await translateWithGoogle(texts, source, target);
@@ -424,6 +465,7 @@ export const __test = {
   normalizeLanguage,
   parseAITranslations,
   translateLyrics,
+  translateLyricsAdaptive,
   translateWithGoogle,
   translateCached,
   cacheRequest,
