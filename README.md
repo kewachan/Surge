@@ -54,7 +54,7 @@
 - LINE：專用 domain／path reject 廣告及遙測；`getConfigurations` binary Thrift response 關閉 News tab，同時保留共用 `/S4` endpoint。
 - Bilibili：合併 BiliUniverse Enhanced／ADBlock → 本地 fail-closed feed 過濾 → 其餘功能使用固定上游版本 → 額外 PlayPause reject。
 - THIM Home：`exclusive-banners` response → 清空 `data` → App 隱藏 Privilege Offers carousel。
-- YouTube／YouTube Music：播放初始化 request → `youtube-init` media Worker；字幕 → Google Translate public endpoint；歌詞 → `youtube-lyrics-translate` Worker → Cache API → Workers AI。
+- YouTube／YouTube Music：播放初始化 request → `youtube-init` media Worker；字幕 → Google Translate public endpoint；歌詞 → 私人 Bearer token → `youtube-lyrics-translate` Worker → Cache API → Workers AI。
 - Node Offline Monitor：cron → active Profile `[Proxy]` → policy test → 5 次狀態確認 → 維護時段閘門 → 狀態轉變通知。
 
 ### Key Files
@@ -78,7 +78,7 @@
 - LINE 靜態規則按類型分流：專用 hostname 放 `filters_block.list`，共享 hostname 的廣告／遙測 path 放 `Adrewrite.sgmodule`。
 - Bilibili 首頁 feed 由本地 response script 直接移除廣告及可選活動大圖，不改 request、亦不發補位 request；其他功能保留固定上游 script。
 - THIM script 驗證成功 envelope 後只將 `data` 改成空陣列；其他 API 或未知格式原樣放行。
-- 字幕 script 在約 7.5 秒 client 時限內分批並行呼叫 Google Translate，結果在 client 快取 7 日；歌詞由獨立 translation Worker 使用語意較佳的 AI 模型，Worker 成功結果同樣快取 7 日。
+- 字幕 script 在約 7.5 秒 client 時限內分批並行呼叫 Google Translate，結果在 client 快取 7 日；歌詞 script 只在 module 提供有效私人 token 時呼叫獨立 translation Worker，Worker 成功結果同樣快取 7 日。
 - 節點監察從 active Profile `[Proxy]` 動態發現節點；offline／resume 均須連續 5 次一致，每次相隔 5 秒，狀態不變時不重複通知。
 - 每日 UTC+8 04:25–05:15 維護靜默時段仍會檢測及記錄 log，但不通知或覆寫 persistent state；時段結束後才以原有狀態重新確認。
 
@@ -91,11 +91,13 @@
 - THIM 不封鎖共用圖片 CDN，只攔截獨立 `exclusive-banners` endpoint。
 - Bilibili feed 採用 fail-closed 過濾；網絡異常不得令廣告補位或原始廣告 response 回流。
 - Media 與 lyrics Worker 使用獨立 source 及部署；`youtube-init` 不含 AI binding 或翻譯路由。字幕直接連線 Google Translate，歌詞直接連線 `youtube-lyrics-translate`；兩者均設為 DIRECT，不使用 Durable Objects 或預先翻譯。
+- 歌詞 Worker 的共用 access token 只存於 Cloudflare Secret；module 預設不包含有效 token，使用者須私下取得並在本機參數輸入。
 - Surge module 不可修改 `[Proxy Group]`；節點監察使用 `$httpAPI`，不硬編碼節點名。
 - Node Offline Monitor 的維護時段由 module arguments 控制，預設 UTC+8 04:25–05:15，包含 05:00 排程並避免計劃重啟產生 offline／resume 通知風暴。
 
 ### Recent Significant Changes
 
+- `2026-10-01` — 歌詞 Worker 加入私人 Bearer token 驗證；Surge／Loon 均由本機 module 參數傳入，未授權請求不會消耗 Workers AI。
 - `2026-10-01` — 字幕改回 Google Translate 並採用限時分批並行；歌詞 Worker 更名為 `youtube-lyrics-translate`、升級語意模型並與 media source 完全分離，舊 caption Worker／AI 分支移除。
 - `2026-09-30` — YouTube media 與 translation Worker 分拆；translation 加入 7 日 Cache API、相同請求合併及每 isolate 3 個 AI 請求的並行上限，module 將 translation Worker 明確設為 DIRECT。
 - `2026-09-28` — Node Offline Monitor 維護靜默時段調整為 UTC+8 04:25–05:15，確保 05:00 排程仍靜默；檢測照常執行，但不通知或保存錯誤／狀態變更。
@@ -111,6 +113,7 @@
 
 - Module 使用 GitHub raw JS URL；修改本機工作檔不會自動發佈，發佈時須同步 JS 與 module 版本。
 - `youtube-init` 使用 `wrangler.jsonc`；`youtube-lyrics-translate` 使用 `wrangler.lyrics.jsonc`，兩者沒有 service binding，可獨立部署。
+- 啟用歌詞翻譯前，須在 module 的 `Lyrics Access Token` 參數輸入私下取得的 64 字元 token；不可將實際 token commit 到 repository。
 - Reddit `HomeFeedWithDefer` 使用 `multipart/mixed; boundary=graphql`；不可退回只接受單一 JSON 的 JQ rule。
 - HAR 可驗證 API 已清空；整個 section 是否收合仍須以 THIM 真機 UI 驗收。
 - Node Offline Monitor 預設沿用 Profile `proxy-test-url`，未設定時才使用內置 fallback URL。

@@ -8,11 +8,34 @@ const MAX_TOTAL_CHARS = 600;
 const MAX_AI_CONCURRENCY = 3;
 const CACHE_VERSION = "v1";
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const ACCESS_TOKEN_PREFIX = "Bearer ";
+const MAX_ACCESS_TOKEN_CHARS = 128;
 const INFLIGHT = new Map();
 const WAITERS = [];
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 let activeTranslations = 0;
+
+function constantTimeEqual(left, right) {
+  const leftBytes = TEXT_ENCODER.encode(left);
+  const rightBytes = TEXT_ENCODER.encode(right);
+  const length = Math.max(leftBytes.length, rightBytes.length);
+  let mismatch = leftBytes.length ^ rightBytes.length;
+  for (let index = 0; index < length; index++) {
+    mismatch |= (leftBytes[index] || 0) ^ (rightBytes[index] || 0);
+  }
+  return mismatch === 0;
+}
+
+function hasValidAccessToken(request, env) {
+  const expected = String(env?.LYRICS_ACCESS_TOKEN || "");
+  const authorization = request.headers.get("authorization") || "";
+  if (!expected || !authorization.startsWith(ACCESS_TOKEN_PREFIX)) return false;
+  const supplied = authorization.slice(ACCESS_TOKEN_PREFIX.length).trim();
+  return supplied.length > 0
+    && supplied.length <= MAX_ACCESS_TOKEN_CHARS
+    && constantTimeEqual(supplied, expected);
+}
 
 function normalizeLanguage(value, allowAuto = false) {
   const language = String(value || "").trim();
@@ -297,9 +320,21 @@ async function handleRequest(request, env, context) {
     return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
   }
   if (new URL(request.url).pathname !== LYRICS_PATH) return new Response("Not Found", { status: 404 });
+  if (!env?.LYRICS_ACCESS_TOKEN) return response("Service Unavailable", 503);
+  if (!hasValidAccessToken(request, env)) {
+    return response("Unauthorized", 401, { "WWW-Authenticate": "Bearer" });
+  }
   return handleLyricsRequest(request, env, context);
 }
 
-export const __test = { normalizeLanguage, parseAITranslations, translateLyrics, translateCached, cacheRequest };
+export const __test = {
+  normalizeLanguage,
+  parseAITranslations,
+  translateLyrics,
+  translateCached,
+  cacheRequest,
+  constantTimeEqual,
+  hasValidAccessToken,
+};
 
 export default { fetch: handleRequest };

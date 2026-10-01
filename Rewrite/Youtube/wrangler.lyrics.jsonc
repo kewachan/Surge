@@ -3,6 +3,9 @@
   "name": "youtube-lyrics-translate",
   "main": "youtube.lyrics.worker.js",
   "compatibility_date": "2026-09-30",
+  "secrets": {
+    "required": ["LYRICS_ACCESS_TOKEN"]
+  },
   "ai": {
     "binding": "AI"
   }

@@ -18,7 +18,7 @@
   const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
   function settings() {
-    const output = { lyricsLang: "zh-Hant", debug: false };
+    const output = { lyricsLang: "zh-Hant", lyricsToken: "", debug: false };
     try {
       if (typeof $argument === "string" && !$argument.includes("{{{")) {
         Object.assign(output, JSON.parse($argument));
@@ -27,6 +27,11 @@
       }
     } catch (_) {}
     return output;
+  }
+
+  function normalizeAccessToken(value) {
+    const token = String(value || "").trim();
+    return /^[a-f0-9]{64}$/i.test(token) ? token : "";
   }
 
   function normalizeLanguage(value) {
@@ -319,14 +324,19 @@
     } catch (_) {}
   }
 
-  function requestTranslations(lines, target, timeoutSeconds) {
-    const payload = JSON.stringify({ texts: lines, source: "auto", target });
+  function requestTranslations(lines, target, timeoutSeconds, accessToken) {
+    const payload = JSON.stringify({ purpose: "lyrics", texts: lines, source: "auto", target });
+    const headers = {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    };
     if (typeof $httpClient !== "undefined") {
       return new Promise((resolve, reject) => {
         $httpClient.post({
           url: WORKER_ENDPOINT,
           timeout: typeof $loon !== "undefined" ? timeoutSeconds * 1000 : timeoutSeconds,
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          headers,
           body: payload,
         }, (error, response, body) => {
           if (error) return reject(error);
@@ -353,7 +363,7 @@
         url: WORKER_ENDPOINT,
         method: "POST",
         timeout: timeoutSeconds,
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        headers,
         body: payload,
       }).then((response) => {
         if (response.statusCode !== 200) {
@@ -371,14 +381,14 @@
     return Promise.reject(new Error("No HTTP client available"));
   }
 
-  async function fetchTranslations(lines, target, deadline) {
+  async function fetchTranslations(lines, target, deadline, accessToken) {
     let lastError;
     for (let attempt = 0; attempt <= MAX_BUSY_RETRIES; attempt++) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw lastError || new Error("Lyrics translation time budget exhausted");
       const timeout = Math.max(1, Math.min(TRANSLATE_TIMEOUT_SECONDS, Math.ceil(remaining / 1000)));
       try {
-        return await requestTranslations(lines, target, timeout);
+        return await requestTranslations(lines, target, timeout, accessToken);
       } catch (error) {
         lastError = error;
         if (attempt === MAX_BUSY_RETRIES || Number(error?.status) !== 429) break;
@@ -393,8 +403,13 @@
   async function main() {
     const options = settings();
     const target = normalizeLanguage(options.lyricsLang);
+    const accessToken = normalizeAccessToken(options.lyricsToken);
     const input = responseBytes();
     if (target === "off" || !input) return $done({});
+    if (!accessToken) {
+      if (options.debug) console.log("YouTube lyrics translation skipped: access token is missing or invalid");
+      return $done({});
+    }
 
     const [inputWithoutControl, controlChanged] = rewriteNested(input, new Map(), 0, true);
     const lines = findLyrics(inputWithoutControl);
@@ -414,7 +429,7 @@
             const remaining = deadline - Date.now();
             if (remaining <= 0) break;
             try {
-              translations = await fetchTranslations(batch, target, deadline);
+              translations = await fetchTranslations(batch, target, deadline, accessToken);
               writeCache(key, translations);
             } catch (error) {
               console.log(`YouTube lyrics translation batch failed: ${String(error)}`);
