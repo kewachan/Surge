@@ -11,6 +11,8 @@
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
   const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v3";
+  const AI_RETRY_BACKOFF_MS = [30 * 60 * 1000, 60 * 60 * 1000, 2 * 60 * 60 * 1000, 4 * 60 * 60 * 1000, 6 * 60 * 60 * 1000];
+  const AI_RETRY_BUDGET_MS = 5000;
   const MAX_BATCH_ITEMS = 12;
   const MAX_BATCH_TOTAL_CHARS = 600;
   const CONCURRENCY = 3;
@@ -339,6 +341,44 @@
     return batches;
   }
 
+  function isGoogleProvider(provider) {
+    return String(provider || "").toLowerCase().includes("google");
+  }
+
+  function aiRetryDelay(retryCount) {
+    const index = Math.min(Math.max(0, Number(retryCount) || 0), AI_RETRY_BACKOFF_MS.length - 1);
+    return AI_RETRY_BACKOFF_MS[index];
+  }
+
+  function cacheRecord(result) {
+    const savedAt = Number(result?.savedAt || Date.now());
+    const record = {
+      savedAt,
+      translations: result.translations,
+      provider: result.provider,
+    };
+    if (isGoogleProvider(result.provider)) {
+      record.aiRetryCount = Math.min(
+        Math.max(0, Number(result.aiRetryCount) || 0),
+        AI_RETRY_BACKOFF_MS.length - 1,
+      );
+      record.nextAiRetryAt = Number(result.nextAiRetryAt || (savedAt + aiRetryDelay(record.aiRetryCount)));
+    }
+    return record;
+  }
+
+  function scheduleNextAiRetry(result) {
+    const aiRetryCount = Math.min(
+      Math.max(0, Number(result?.aiRetryCount) || 0) + 1,
+      AI_RETRY_BACKOFF_MS.length - 1,
+    );
+    return {
+      ...result,
+      aiRetryCount,
+      nextAiRetryAt: Date.now() + aiRetryDelay(aiRetryCount),
+    };
+  }
+
   function readCache(key, expectedLength) {
     if (typeof $persistentStore === "undefined") return null;
     try {
@@ -348,7 +388,7 @@
         && cached.translations.length === expectedLength
         && Date.now() - Number(cached.savedAt || 0) < CACHE_TTL_MS
         && typeof cached.provider === "string" && cached.provider
-      ) return { translations: cached.translations, provider: cached.provider };
+      ) return cacheRecord(cached);
       if (cached) $persistentStore.write("", key);
     } catch (_) {}
     return null;
@@ -357,12 +397,9 @@
   function writeCache(key, result) {
     if (typeof $persistentStore === "undefined") return;
     try {
-      const savedAt = Date.now();
-      $persistentStore.write(JSON.stringify({
-        savedAt,
-        translations: result.translations,
-        provider: result.provider,
-      }), key);
+      const record = cacheRecord(result);
+      const savedAt = record.savedAt;
+      $persistentStore.write(JSON.stringify(record), key);
       const stored = JSON.parse($persistentStore.read(CACHE_INDEX_KEY) || "[]");
       const index = (Array.isArray(stored) ? stored : [])
         .filter((item) => item?.key && item.key !== key && savedAt - Number(item.savedAt || 0) < CACHE_TTL_MS);
@@ -549,7 +586,7 @@
     return { translations, provider: "google-translate" };
   }
 
-  async function fetchTranslations(lines, target, deadline, accessToken) {
+  async function fetchWorkerTranslations(lines, target, deadline, accessToken) {
     let lastError;
     for (let attempt = 0; attempt <= MAX_BUSY_RETRIES; attempt++) {
       const remaining = deadline - Date.now();
@@ -565,12 +602,22 @@
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
-    const status = Number(lastError?.status || 0);
-    if (status && status !== 429 && status < 500) throw lastError;
+    throw lastError || new Error("Worker lyrics translation failed");
+  }
+
+  async function fetchTranslations(lines, target, deadline, accessToken) {
+    let workerError;
+    try {
+      return await fetchWorkerTranslations(lines, target, deadline, accessToken);
+    } catch (error) {
+      workerError = error;
+    }
+    const status = Number(workerError?.status || 0);
+    if (status && status !== 429 && status < 500) throw workerError;
     try {
       return await fetchGoogleTranslations(lines, target, deadline);
     } catch (googleError) {
-      throw new Error(`Worker failed (${String(lastError)}); Google fallback failed (${String(googleError)})`);
+      throw new Error(`Worker failed (${String(workerError)}); Google fallback failed (${String(googleError)})`);
     }
   }
 
@@ -600,6 +647,21 @@
           const batch = batches[cursor++];
           const key = cacheKey(batch, target);
           let result = readCache(key, batch.length);
+          if (
+            result && isGoogleProvider(result.provider)
+            && Date.now() >= Number(result.nextAiRetryAt || 0)
+            && Date.now() < deadline
+          ) {
+            try {
+              const retryDeadline = Math.min(deadline, Date.now() + AI_RETRY_BUDGET_MS);
+              result = await fetchWorkerTranslations(batch, target, retryDeadline, accessToken);
+              writeCache(key, result);
+            } catch (error) {
+              result = scheduleNextAiRetry(result);
+              writeCache(key, result);
+              if (options.debug) console.log(`YouTube lyrics AI retry deferred: ${String(error)}`);
+            }
+          }
           if (!result) {
             const remaining = deadline - Date.now();
             if (remaining <= 0) break;
