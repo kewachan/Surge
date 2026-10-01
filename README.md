@@ -78,7 +78,7 @@
 - LINE 靜態規則按類型分流：專用 hostname 放 `filters_block.list`，共享 hostname 的廣告／遙測 path 放 `Adrewrite.sgmodule`。
 - Bilibili 首頁 feed 由本地 response script 直接移除廣告及可選活動大圖，不改 request、亦不發補位 request；其他功能保留固定上游 script。
 - THIM script 驗證成功 envelope 後只將 `data` 改成空陣列；其他 API 或未知格式原樣放行。
-- 字幕 script 在約 7.5 秒 client 時限內分批並行呼叫 Google Translate，結果在 client 快取 7 日；歌詞 script 只在 module 提供有效私人 token 時呼叫獨立 translation Worker，Worker 成功結果同樣快取 7 日。
+- 字幕 script 在約 7.5 秒 client 時限內分批並行呼叫 Google Translate，結果在 client 快取 7 日；歌詞每批最多 4 行／180 字，Worker 對舊版大批次或無效 AI 格式自動拆半重試，成功結果快取 7 日。
 - 節點監察從 active Profile `[Proxy]` 動態發現節點；offline／resume 均須連續 5 次一致，每次相隔 5 秒，狀態不變時不重複通知。
 - 每日 UTC+8 04:25–05:15 維護靜默時段仍會檢測及記錄 log，但不通知或覆寫 persistent state；時段結束後才以原有狀態重新確認。
 
@@ -97,6 +97,7 @@
 
 ### Recent Significant Changes
 
+- `2026-10-02` — 歌詞 client 改用 4 行／180 字 AI 批次；Worker 對大批次及無效模型格式遞迴拆細，避免整批直接降級到 Google Translate。
 - `2026-10-01` — 歌詞 Worker 加入私人 Bearer token 驗證；Surge／Loon 均由本機 module 參數傳入，未授權請求不會消耗 Workers AI。
 - `2026-10-01` — 字幕改回 Google Translate 並採用限時分批並行；歌詞 Worker 更名為 `youtube-lyrics-translate`、升級語意模型並與 media source 完全分離，舊 caption Worker／AI 分支移除。
 - `2026-09-30` — YouTube media 與 translation Worker 分拆；translation 加入 7 日 Cache API、相同請求合併及每 isolate 3 個 AI 請求的並行上限，module 將 translation Worker 明確設為 DIRECT。
