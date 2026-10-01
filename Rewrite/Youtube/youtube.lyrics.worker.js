@@ -1,6 +1,6 @@
 const LYRICS_PATH = "/lyrics";
-const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const WORKER_BUILD = "lyrics-translate-v1-llama33";
+const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
+const WORKER_BUILD = "lyrics-translate-v1-qwen3-30b-a3b";
 const MAX_REQUEST_BYTES = 48 * 1024;
 const MAX_ITEMS = 12;
 const MAX_LINE_CHARS = 500;
@@ -131,7 +131,7 @@ async function translateLyrics(texts, source, target, env) {
   });
   const translations = parseAITranslations(result, texts.length);
   if (!translations) throw new Error("Workers AI returned an invalid lyric translation response");
-  return { translations, provider: "workers-ai-llama33-lyrics" };
+  return { translations, provider: "workers-ai-qwen3-30b-a3b-lyrics" };
 }
 
 function response(body, status = 200, extraHeaders = {}) {
