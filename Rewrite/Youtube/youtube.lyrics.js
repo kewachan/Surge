@@ -3,6 +3,7 @@
 
 (() => {
   const WORKER_ENDPOINT = "https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/lyrics";
+  const GOOGLE_TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
   const LYRICS_RENDERER_FIELD = 465160965;
   const TRANSLATE_CONTROL_FIELD = 24;
   const TRANSLATION_ATTRIBUTION_FIELD = 26;
@@ -15,6 +16,9 @@
   const RESPONSE_BUDGET_MS = 9000;
   const TRANSLATE_TIMEOUT_SECONDS = 110;
   const MAX_BUSY_RETRIES = 0;
+  const MAX_GOOGLE_ENCODED_QUERY_CHARS = 6000;
+  const GOOGLE_TRANSLATE_TIMEOUT_SECONDS = 6;
+  const GOOGLE_TRANSLATE_RETRIES = 1;
   const TEXT_ENCODER = new TextEncoder();
   const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
@@ -414,6 +418,117 @@
     return Promise.reject(new Error("No HTTP client available"));
   }
 
+  function googleTargetLanguage(language) {
+    return {
+      "zh-hant": "zh-TW",
+      "zh-tw": "zh-TW",
+      "zh-hans": "zh-CN",
+      "zh-cn": "zh-CN",
+    }[String(language || "").toLowerCase()] || language;
+  }
+
+  function googleSeparator(index) {
+    return `\n[[YTL:${index}]]\n`;
+  }
+
+  function googleQuery(lines) {
+    return lines.map((line, index) => `${index ? googleSeparator(index) : ""}${line}`).join("");
+  }
+
+  function buildGoogleBatches(lines) {
+    const batches = [];
+    let batch = [];
+    for (const line of lines) {
+      const candidate = [...batch, line];
+      if (batch.length && encodeURIComponent(googleQuery(candidate)).length > MAX_GOOGLE_ENCODED_QUERY_CHARS) {
+        batches.push(batch);
+        batch = [];
+      }
+      batch.push(line);
+    }
+    if (batch.length) batches.push(batch);
+    return batches;
+  }
+
+  function parseGoogleTranslation(body, status) {
+    if (status !== 200) {
+      const error = new Error(`Google Translate status ${status}`);
+      error.status = status;
+      throw error;
+    }
+    const result = JSON.parse(body);
+    if (!Array.isArray(result?.[0])) throw new Error("Invalid Google Translate response");
+    return result[0].map((part) => part?.[0] || "").join("");
+  }
+
+  function requestGoogleText(query, target, timeoutSeconds) {
+    const url = `${GOOGLE_TRANSLATE_ENDPOINT}?client=gtx&sl=auto&tl=${encodeURIComponent(googleTargetLanguage(target))}&dt=t&q=${encodeURIComponent(query)}`;
+    const request = {
+      url,
+      timeout: typeof $loon !== "undefined" ? timeoutSeconds * 1000 : timeoutSeconds,
+      headers: { Accept: "application/json" },
+    };
+    if (typeof $httpClient !== "undefined") {
+      return new Promise((resolve, reject) => {
+        $httpClient.get(request, (error, response, body) => {
+          if (error) return reject(error);
+          try {
+            resolve(parseGoogleTranslation(body, response.status || response.statusCode));
+          } catch (parseError) {
+            reject(parseError);
+          }
+        });
+      });
+    }
+    if (typeof $task !== "undefined") {
+      return $task.fetch({ ...request, method: "GET", timeout: timeoutSeconds }).then((response) => (
+        parseGoogleTranslation(response.body, response.statusCode || response.status)
+      ));
+    }
+    return Promise.reject(new Error("No HTTP client available"));
+  }
+
+  async function fetchGoogleText(query, target, deadline) {
+    let lastError;
+    for (let attempt = 0; attempt <= GOOGLE_TRANSLATE_RETRIES; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw lastError || new Error("Google Translate time budget exhausted");
+      const timeout = Math.max(1, Math.min(GOOGLE_TRANSLATE_TIMEOUT_SECONDS, Math.ceil(remaining / 1000)));
+      try {
+        return await requestGoogleText(query, target, timeout);
+      } catch (error) {
+        lastError = error;
+        if (attempt === GOOGLE_TRANSLATE_RETRIES) break;
+        const delay = 200;
+        if (Date.now() + delay >= deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw lastError || new Error("Google Translate failed");
+  }
+
+  async function translateGoogleBatch(lines, target, deadline) {
+    const translated = await fetchGoogleText(googleQuery(lines), target, deadline);
+    if (lines.length === 1) return [translated.trim()];
+    const parts = translated.split(/\s*\[\[\s*YTL\s*:\s*\d+\s*\]\]\s*/gi);
+    if (parts.length === lines.length) return parts.map((part) => part.trim());
+    const middle = Math.ceil(lines.length / 2);
+    const [left, right] = await Promise.all([
+      translateGoogleBatch(lines.slice(0, middle), target, deadline),
+      translateGoogleBatch(lines.slice(middle), target, deadline),
+    ]);
+    return [...left, ...right];
+  }
+
+  async function fetchGoogleTranslations(lines, target, deadline) {
+    const batches = buildGoogleBatches(lines);
+    const translations = (await Promise.all(
+      batches.map((batch) => translateGoogleBatch(batch, target, deadline)),
+    )).flat();
+    if (translations.length !== lines.length) throw new Error("Incomplete Google lyric translation");
+    return { translations, provider: "google-translate" };
+  }
+
   async function fetchTranslations(lines, target, deadline, accessToken) {
     let lastError;
     for (let attempt = 0; attempt <= MAX_BUSY_RETRIES; attempt++) {
@@ -430,7 +545,13 @@
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
-    throw lastError || new Error("Lyrics translation failed");
+    const status = Number(lastError?.status || 0);
+    if (status && status !== 429 && status < 500) throw lastError;
+    try {
+      return await fetchGoogleTranslations(lines, target, deadline);
+    } catch (googleError) {
+      throw new Error(`Worker failed (${String(lastError)}); Google fallback failed (${String(googleError)})`);
+    }
   }
 
   async function main() {
