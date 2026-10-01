@@ -5,6 +5,7 @@
   const WORKER_ENDPOINT = "https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/lyrics";
   const GOOGLE_TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
   const LYRICS_RENDERER_FIELD = 465160965;
+  const LYRICS_SOURCE_FIELD = 2;
   const TRANSLATE_CONTROL_FIELD = 24;
   const TRANSLATION_ATTRIBUTION_FIELD = 26;
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -204,11 +205,19 @@
     return "Translated by Cloudflare AI";
   }
 
+  function visibleAttribution(source, attribution) {
+    const cleaned = String(source || "")
+      .replace(/\s*(?:[·•|—-]\s*)?Translated by (?:Cloudflare AI|Google Translate|Cloudflare AI \+ Google Translate)\s*$/i, "")
+      .trim();
+    return cleaned ? `${cleaned}\n${attribution}` : attribution;
+  }
+
   function rewriteLyricsRenderer(rendererBytes, translatedByOriginal, hideTranslateControl, attribution) {
     const lyrics = lyricList(rendererBytes);
     if (!lyrics) return [rendererBytes, false];
     let listChanged = false;
     let attributionHandled = false;
+    let visibleAttributionHandled = false;
     const listChunks = [];
 
     for (const itemField of lyrics.listFields) {
@@ -219,6 +228,13 @@
       if (attribution && itemField.number === TRANSLATION_ATTRIBUTION_FIELD && itemField.wireType === 2) {
         listChunks.push(encodeField(itemField.number, TEXT_ENCODER.encode(attribution)));
         attributionHandled = true;
+        listChanged = true;
+        continue;
+      }
+      if (attribution && itemField.number === LYRICS_SOURCE_FIELD && itemField.wireType === 2) {
+        const source = decodeText(fieldData(lyrics.listBytes, itemField));
+        listChunks.push(encodeField(itemField.number, TEXT_ENCODER.encode(visibleAttribution(source, attribution))));
+        visibleAttributionHandled = true;
         listChanged = true;
         continue;
       }
@@ -250,6 +266,10 @@
 
     if (attribution && !attributionHandled) {
       listChunks.push(encodeField(TRANSLATION_ATTRIBUTION_FIELD, TEXT_ENCODER.encode(attribution)));
+      listChanged = true;
+    }
+    if (attribution && !visibleAttributionHandled) {
+      listChunks.push(encodeField(LYRICS_SOURCE_FIELD, TEXT_ENCODER.encode(attribution)));
       listChanged = true;
     }
 
