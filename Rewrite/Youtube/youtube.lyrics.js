@@ -13,8 +13,8 @@
   const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v3";
   const AI_RETRY_BACKOFF_MS = [30 * 60 * 1000, 60 * 60 * 1000, 2 * 60 * 60 * 1000, 4 * 60 * 60 * 1000, 6 * 60 * 60 * 1000];
   const AI_RETRY_BUDGET_MS = 5000;
-  const MAX_BATCH_ITEMS = 4;
-  const MAX_BATCH_TOTAL_CHARS = 180;
+  const MAX_BATCH_ITEMS = 12;
+  const MAX_BATCH_TOTAL_CHARS = 600;
   const CONCURRENCY = 3;
   const RESPONSE_BUDGET_MS = 9000;
   const TRANSLATE_TIMEOUT_SECONDS = 110;

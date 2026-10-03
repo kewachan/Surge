@@ -1,6 +1,6 @@
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v4-adaptive-4-line-batches";
+const WORKER_BUILD = "lyrics-translate-v5-fast-client-fallback";
 const GOOGLE_TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -182,7 +182,7 @@ function splitAIInput(texts) {
   return [texts.slice(0, middle), texts.slice(middle)];
 }
 
-async function translateLyricsAdaptive(texts, source, target, env) {
+async function translateLyricsAdaptive(texts, source, target, env, retryInvalidSingle = true) {
   if (shouldSplitAIInput(texts)) {
     const [leftTexts, rightTexts] = splitAIInput(texts);
     const [left, right] = await Promise.all([
@@ -195,7 +195,11 @@ async function translateLyricsAdaptive(texts, source, target, env) {
   try {
     return await translateLyrics(texts, source, target, env);
   } catch (error) {
-    if (error?.code !== AI_INVALID_TRANSLATION_CODE || texts.length < 2) throw error;
+    if (error?.code !== AI_INVALID_TRANSLATION_CODE) throw error;
+    if (texts.length < 2) {
+      if (!retryInvalidSingle) throw error;
+      return translateLyricsAdaptive(texts, source, target, env, false);
+    }
     const [leftTexts, rightTexts] = splitAIInput(texts);
     const [left, right] = await Promise.all([
       translateLyricsAdaptive(leftTexts, source, target, env),
@@ -377,6 +381,7 @@ async function translateCached(texts, source, target, env, context) {
       try {
         result = await translateLyricsAdaptive(texts, source, target, env);
       } catch (error) {
+        if (error?.code === AI_INVALID_TRANSLATION_CODE) throw error;
         console.warn("YouTube lyric Workers AI unavailable; using Google Translate:", error?.message || String(error));
         result = await translateWithGoogle(texts, source, target);
       }
