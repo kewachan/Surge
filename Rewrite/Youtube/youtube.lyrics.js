@@ -10,7 +10,8 @@
   const TRANSLATION_ATTRIBUTION_FIELD = 26;
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
-  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v3";
+  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v4";
+  const LEGACY_CACHE_INDEX_KEYS = ["YouTubeLyrics.CacheIndex.v3"];
   const AI_RETRY_BACKOFF_MS = [30 * 60 * 1000, 60 * 60 * 1000, 2 * 60 * 60 * 1000, 4 * 60 * 60 * 1000, 6 * 60 * 60 * 1000];
   const AI_RETRY_BUDGET_MS = 5000;
   const MAX_BATCH_ITEMS = 12;
@@ -321,7 +322,7 @@
       hash ^= value.charCodeAt(index);
       hash = Math.imul(hash, 16777619);
     }
-    return `YouTubeLyrics.v2.${(hash >>> 0).toString(16)}`;
+    return `YouTubeLyrics.v3.${(hash >>> 0).toString(16)}`;
   }
 
   function buildTranslationBatches(lines) {
@@ -377,6 +378,21 @@
       aiRetryCount,
       nextAiRetryAt: Date.now() + aiRetryDelay(aiRetryCount),
     };
+  }
+
+  function clearLegacyCaches() {
+    if (typeof $persistentStore === "undefined") return;
+    for (const indexKey of LEGACY_CACHE_INDEX_KEYS) {
+      try {
+        const stored = JSON.parse($persistentStore.read(indexKey) || "[]");
+        if (Array.isArray(stored)) {
+          stored.forEach((item) => {
+            if (item?.key) $persistentStore.write("", item.key);
+          });
+        }
+      } catch (_) {}
+      $persistentStore.write("", indexKey);
+    }
   }
 
   function readCache(key, expectedLength) {
@@ -632,6 +648,7 @@
       return $done({});
     }
 
+    clearLegacyCaches();
     const [inputWithoutControl, controlChanged] = rewriteNested(input, new Map(), 0, true);
     const lines = findLyrics(inputWithoutControl);
     if (!lines) return $done(controlChanged ? { body: inputWithoutControl } : {});
