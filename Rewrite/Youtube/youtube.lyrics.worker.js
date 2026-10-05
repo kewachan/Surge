@@ -1,6 +1,6 @@
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v6-context-aware";
+const WORKER_BUILD = "lyrics-translate-v8-exact-target-aware";
 const GOOGLE_TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -15,7 +15,7 @@ const PREFERRED_AI_TOTAL_CHARS = 180;
 const MAX_AI_CONCURRENCY = 3;
 const MAX_GOOGLE_ENCODED_QUERY_CHARS = 6000;
 const GOOGLE_TRANSLATE_TIMEOUT_MS = 6500;
-const CACHE_VERSION = "v4";
+const CACHE_VERSION = "v6";
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
@@ -144,6 +144,10 @@ async function translateLyrics(texts, source, target, env, contextTexts = texts)
   const thaiLyrics = texts.some((text) => /[\u0e00-\u0e7f]/.test(text));
   const prompt = [
     `Translate every target lyric line from ${source === "auto" ? "its detected language" : source} into ${targetDescription(target)}.`,
+    "Apply the requested target language, writing system, and regional variant to each line independently. A line matches only when it already uses the exact requested target writing system.",
+    "For script-specific Chinese targets, Simplified Chinese never matches Traditional Chinese, and Traditional Chinese never matches Simplified Chinese.",
+    "If a target line already exactly matches the requested target language and writing system, copy that line byte-for-byte into the output.",
+    "Never translate, rewrite, paraphrase, modernize, or normalize punctuation for a line that is already in the requested target language.",
     "Use the full lyric context only to understand the song's speaker, listener, relationships, tense, mood, metaphors, and recurring terms.",
     "Translate only the target lines. Keep names, pronouns, points of view, and repeated phrases consistent with the full context.",
     "Preserve the meaning, tone, speaker, listener, names, punctuation, and line boundaries.",

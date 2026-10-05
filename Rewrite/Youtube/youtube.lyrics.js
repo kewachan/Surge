@@ -10,8 +10,8 @@
   const TRANSLATION_ATTRIBUTION_FIELD = 26;
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
-  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v4";
-  const LEGACY_CACHE_INDEX_KEYS = ["YouTubeLyrics.CacheIndex.v3"];
+  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v5";
+  const LEGACY_CACHE_INDEX_KEYS = ["YouTubeLyrics.CacheIndex.v3", "YouTubeLyrics.CacheIndex.v4"];
   const AI_RETRY_BACKOFF_MS = [30 * 60 * 1000, 60 * 60 * 1000, 2 * 60 * 60 * 1000, 4 * 60 * 60 * 1000, 6 * 60 * 60 * 1000];
   const AI_RETRY_BUDGET_MS = 5000;
   const MAX_BATCH_ITEMS = 12;
@@ -201,6 +201,7 @@
 
   function providerLabel(providers) {
     const normalized = new Set(Array.from(providers || [], (value) => String(value || "").toLowerCase()));
+    if (normalized.size === 0) return "";
     const usedGoogle = Array.from(normalized).some((value) => value.includes("google"));
     const usedCloudflare = Array.from(normalized).some((value) => value.includes("cloudflare") || value.includes("workers-ai"));
     if (usedGoogle && usedCloudflare) return "Translated by Cloudflare AI + Google Translate";
@@ -322,7 +323,7 @@
       hash ^= value.charCodeAt(index);
       hash = Math.imul(hash, 16777619);
     }
-    return `YouTubeLyrics.v3.${(hash >>> 0).toString(16)}`;
+    return `YouTubeLyrics.v4.${(hash >>> 0).toString(16)}`;
   }
 
   function buildTranslationBatches(lines) {
@@ -690,8 +691,13 @@
               continue;
             }
           }
-          providers.add(result.provider);
-          batch.forEach((line, index) => translatedByOriginal.set(line, result.translations[index]));
+          let batchChanged = false;
+          batch.forEach((line, index) => {
+            const translatedLine = result.translations[index];
+            translatedByOriginal.set(line, translatedLine);
+            if (String(translatedLine || "").trim() !== line.trim()) batchChanged = true;
+          });
+          if (batchChanged) providers.add(result.provider);
         }
       }
       const work = Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
@@ -708,7 +714,7 @@
       const attribution = providerLabel(providers);
       const [output, translated] = rewriteNested(inputWithoutControl, translatedByOriginal, 0, false, attribution);
       const changed = controlChanged || translated;
-      if (options.debug) console.log(`YouTube lyrics: ${translated ? "translated" : "unchanged"}; ${attribution}; translate control ${controlChanged ? "hidden" : "absent"} (${translatedByOriginal.size}/${uniqueLines.length} unique lines)`);
+      if (options.debug) console.log(`YouTube lyrics: ${translated ? attribution : "already matches target language"}; translate control ${controlChanged ? "hidden" : "absent"} (${translatedByOriginal.size}/${uniqueLines.length} unique lines)`);
       return $done(changed ? { body: output } : {});
     } catch (error) {
       console.log(`YouTube lyrics translation failed: ${String(error)}`);
