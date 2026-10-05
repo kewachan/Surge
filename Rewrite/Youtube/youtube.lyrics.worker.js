@@ -1,6 +1,6 @@
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v11-single-pass-hant-guard";
+const WORKER_BUILD = "lyrics-translate-v12-cache-14d";
 const GOOGLE_TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -14,7 +14,7 @@ const MAX_AI_CONCURRENCY = 3;
 const MAX_GOOGLE_ENCODED_QUERY_CHARS = 6000;
 const GOOGLE_TRANSLATE_TIMEOUT_MS = 6500;
 const CACHE_VERSION = "v7";
-const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const CACHE_TTL_SECONDS = 14 * 24 * 60 * 60;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
 const TEXT_ENCODER = new TextEncoder();

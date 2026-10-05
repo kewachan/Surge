@@ -8,7 +8,7 @@
   const LYRICS_SOURCE_FIELD = 2;
   const TRANSLATE_CONTROL_FIELD = 24;
   const TRANSLATION_ATTRIBUTION_FIELD = 26;
-  const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
   const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v6";
   const LEGACY_CACHE_INDEX_KEYS = ["YouTubeLyrics.CacheIndex.v3", "YouTubeLyrics.CacheIndex.v4", "YouTubeLyrics.CacheIndex.v5"];
