@@ -10,8 +10,8 @@
   const TRANSLATION_ATTRIBUTION_FIELD = 26;
   const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const CACHE_LIMIT = 64;
-  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v5";
-  const LEGACY_CACHE_INDEX_KEYS = ["YouTubeLyrics.CacheIndex.v3", "YouTubeLyrics.CacheIndex.v4"];
+  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v6";
+  const LEGACY_CACHE_INDEX_KEYS = ["YouTubeLyrics.CacheIndex.v3", "YouTubeLyrics.CacheIndex.v4", "YouTubeLyrics.CacheIndex.v5"];
   const AI_RETRY_BACKOFF_MS = [30 * 60 * 1000, 60 * 60 * 1000, 2 * 60 * 60 * 1000, 4 * 60 * 60 * 1000, 6 * 60 * 60 * 1000];
   const AI_RETRY_BUDGET_MS = 5000;
   const MAX_BATCH_ITEMS = 12;
@@ -323,7 +323,7 @@
       hash ^= value.charCodeAt(index);
       hash = Math.imul(hash, 16777619);
     }
-    return `YouTubeLyrics.v4.${(hash >>> 0).toString(16)}`;
+    return `YouTubeLyrics.v5.${(hash >>> 0).toString(16)}`;
   }
 
   function buildTranslationBatches(lines) {

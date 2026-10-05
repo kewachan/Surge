@@ -1,6 +1,6 @@
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v10-request-local-cache-warm";
+const WORKER_BUILD = "lyrics-translate-v11-single-pass-hant-guard";
 const GOOGLE_TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -10,18 +10,18 @@ const MAX_REQUEST_BYTES = 48 * 1024;
 const MAX_ITEMS = 12;
 const MAX_LINE_CHARS = 500;
 const MAX_TOTAL_CHARS = 600;
-const PREFERRED_AI_ITEMS = 4;
-const PREFERRED_AI_TOTAL_CHARS = 180;
 const MAX_AI_CONCURRENCY = 3;
 const MAX_GOOGLE_ENCODED_QUERY_CHARS = 6000;
 const GOOGLE_TRANSLATE_TIMEOUT_MS = 6500;
-const CACHE_VERSION = "v6";
+const CACHE_VERSION = "v7";
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const AI_INVALID_TRANSLATION_CODE = "AI_INVALID_TRANSLATION";
+const AI_TARGET_SCRIPT_MISMATCH_CODE = "AI_TARGET_SCRIPT_MISMATCH";
+const SIMPLIFIED_CHINESE_MARKERS = /[这们爱为个会时来还过对没开关无国体从进远连边总应样实学变点动长难欢梦当将发听见够头块声写买习书\u7e9f-\u7f35\u8ba0-\u8c36\u8d1d-\u8d63\u8f66-\u8f9a\u9485-\u9576\u95e8-\u961b\u9875-\u98a7\u98ce-\u98da\u98de\u9963-\u9995\u9a6c-\u9aa7\u9c7c-\u9ce4\u9e1f-\u9e74]/u;
 
 function constantTimeEqual(left, right) {
   const leftBytes = TEXT_ENCODER.encode(left);
@@ -115,6 +115,11 @@ function parseAITranslations(result, expectedCount) {
   return null;
 }
 
+function hasTargetScriptMismatch(translations, target) {
+  return target === "zh-TW"
+    && translations.some((translation) => SIMPLIFIED_CHINESE_MARKERS.test(translation));
+}
+
 function targetDescription(target) {
   if (target === "zh-TW") {
     return "natural Traditional Chinese (繁體中文) suitable for Hong Kong and Macau; never use Simplified Chinese";
@@ -123,7 +128,7 @@ function targetDescription(target) {
   return target;
 }
 
-async function translateLyrics(texts, source, target, env, contextTexts = texts) {
+async function translateLyrics(texts, source, target, env, contextTexts = texts, strictScriptRetry = false) {
   if (!env?.AI || typeof env.AI.run !== "function") throw new Error("Workers AI binding is unavailable");
   const schema = {
     type: "object",
@@ -143,6 +148,8 @@ async function translateLyrics(texts, source, target, env, contextTexts = texts)
     `Translate every target lyric line from ${source === "auto" ? "its detected language" : source} into ${targetDescription(target)}.`,
     "Apply the requested target language, writing system, and regional variant to each line independently. A line matches only when it already uses the exact requested target writing system.",
     "For script-specific Chinese targets, Simplified Chinese never matches Traditional Chinese, and Traditional Chinese never matches Simplified Chinese.",
+    target === "zh-TW" ? "Before returning, inspect every output character and replace every Simplified Chinese glyph with its correct Traditional Chinese form. Mixed Simplified/Traditional output is invalid." : "",
+    strictScriptRetry && target === "zh-TW" ? "A previous attempt contained Simplified Chinese. This retry must contain Traditional Chinese characters only." : "",
     "If a target line already exactly matches the requested target language and writing system, copy that line byte-for-byte into the output.",
     "Never translate, rewrite, paraphrase, modernize, or normalize punctuation for a line that is already in the requested target language.",
     "Use the full lyric context only to understand the song's speaker, listener, relationships, tense, mood, metaphors, and recurring terms.",
@@ -172,13 +179,12 @@ async function translateLyrics(texts, source, target, env, contextTexts = texts)
     error.code = AI_INVALID_TRANSLATION_CODE;
     throw error;
   }
+  if (hasTargetScriptMismatch(translations, target)) {
+    const error = new Error("Workers AI returned Simplified Chinese for a Traditional Chinese target");
+    error.code = AI_TARGET_SCRIPT_MISMATCH_CODE;
+    throw error;
+  }
   return { translations, provider: "cloudflare-ai" };
-}
-
-function shouldSplitAIInput(texts) {
-  if (texts.length < 2) return false;
-  return texts.length > PREFERRED_AI_ITEMS
-    || texts.reduce((total, text) => total + text.length, 0) > PREFERRED_AI_TOTAL_CHARS;
 }
 
 function splitAIInput(texts) {
@@ -194,28 +200,21 @@ async function translateLyricsAdaptive(
   contextTexts = texts,
   retryInvalidSingle = true,
   runAI = (operation) => operation(),
+  strictScriptRetry = false,
 ) {
-  if (shouldSplitAIInput(texts)) {
-    const [leftTexts, rightTexts] = splitAIInput(texts);
-    const [left, right] = await Promise.all([
-      translateLyricsAdaptive(leftTexts, source, target, env, contextTexts, true, runAI),
-      translateLyricsAdaptive(rightTexts, source, target, env, contextTexts, true, runAI),
-    ]);
-    return { translations: [...left.translations, ...right.translations], provider: "cloudflare-ai" };
-  }
-
   try {
-    return await runAI(() => translateLyrics(texts, source, target, env, contextTexts));
+    return await runAI(() => translateLyrics(texts, source, target, env, contextTexts, strictScriptRetry));
   } catch (error) {
+    if (error?.code === AI_TARGET_SCRIPT_MISMATCH_CODE) throw error;
     if (error?.code !== AI_INVALID_TRANSLATION_CODE) throw error;
     if (texts.length < 2) {
       if (!retryInvalidSingle) throw error;
-      return translateLyricsAdaptive(texts, source, target, env, contextTexts, false, runAI);
+      return translateLyricsAdaptive(texts, source, target, env, contextTexts, false, runAI, true);
     }
     const [leftTexts, rightTexts] = splitAIInput(texts);
     const [left, right] = await Promise.all([
-      translateLyricsAdaptive(leftTexts, source, target, env, contextTexts, true, runAI),
-      translateLyricsAdaptive(rightTexts, source, target, env, contextTexts, true, runAI),
+      translateLyricsAdaptive(leftTexts, source, target, env, contextTexts, true, runAI, true),
+      translateLyricsAdaptive(rightTexts, source, target, env, contextTexts, true, runAI, true),
     ]);
     return { translations: [...left.translations, ...right.translations], provider: "cloudflare-ai" };
   }
@@ -341,7 +340,7 @@ async function cacheRequest(texts, source, target) {
   };
 }
 
-async function readCache(request, expectedCount) {
+async function readCache(request, expectedCount, target) {
   const cache = globalThis.caches?.default;
   if (!cache) return null;
   try {
@@ -349,7 +348,7 @@ async function readCache(request, expectedCount) {
     if (!cachedResponse) return null;
     const body = await cachedResponse.json();
     const translations = validatedTranslations(body?.translations, expectedCount);
-    if (!translations) return null;
+    if (!translations || hasTargetScriptMismatch(translations, target)) return null;
     return { translations, provider: String(body?.provider || "workers-ai-cache") };
   } catch (error) {
     console.error("YouTube lyric cache read failed:", error?.message || String(error));
@@ -376,7 +375,7 @@ async function writeCache(request, result) {
 
 async function translateCached(texts, source, target, env, context) {
   const key = await cacheRequest(texts, source, target);
-  const cached = await readCache(key.request, texts.length);
+  const cached = await readCache(key.request, texts.length, target);
   if (cached) return { ...cached, cacheStatus: "HIT" };
 
   const pending = (async () => {
@@ -385,7 +384,10 @@ async function translateCached(texts, source, target, env, context) {
     try {
       result = await translateLyricsAdaptive(texts, source, target, env, texts, true, runAI);
     } catch (error) {
-      if (error?.code === AI_INVALID_TRANSLATION_CODE) throw error;
+      if (
+        error?.code === AI_INVALID_TRANSLATION_CODE
+        || error?.code === AI_TARGET_SCRIPT_MISMATCH_CODE
+      ) throw error;
       console.warn("YouTube lyric Workers AI unavailable; using Google Translate:", error?.message || String(error));
       result = await translateWithGoogle(texts, source, target);
     }
@@ -472,6 +474,7 @@ async function handleRequest(request, env, context) {
 export const __test = {
   normalizeLanguage,
   parseAITranslations,
+  hasTargetScriptMismatch,
   translateLyrics,
   translateLyricsAdaptive,
   translateWithGoogle,

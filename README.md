@@ -78,7 +78,7 @@
 - LINE 靜態規則按類型分流：專用 hostname 放 `filters_block.list`，共享 hostname 的廣告／遙測 path 放 `Adrewrite.sgmodule`。
 - Bilibili 首頁 feed 由本地 response script 直接移除廣告及可選活動大圖，不改 request、亦不發補位 request；其他功能保留固定上游 script。
 - THIM script 驗證成功 envelope 後只將 `data` 改成空陣列；其他 API 或未知格式原樣放行。
-- 字幕 script 在約 7.5 秒 client 時限內分批並行呼叫 Google Translate，結果在 client 快取 7 日；歌詞 client 以最多 12 行／600 字組成邏輯批次，Worker 再拆成最多 4 行／180 字的 AI 請求，每個 request 內最多 3 路並行，但不跨 request 共用 Promise／waiter；每個小批次都會收到完整邏輯批次作語境，成功結果快取 7 日，client 提早取消時由同一 invocation 的 `waitUntil` 完成寫 cache。
+- 字幕 script 在約 7.5 秒 client 時限內分批並行呼叫 Google Translate，結果在 client 快取 7 日；歌詞 client 以最多 12 行／600 字組成邏輯批次，Worker 正常時以單次 AI inference 翻譯完整批次，只有 JSON 格式無效才拆細重試，成功結果快取 7 日，client 提早取消時由同一 invocation 的 `waitUntil` 完成寫 cache。
 - 歌詞 Worker 按用戶選擇的目標語言及文字系統逐行判斷；本身已精確符合目標的行必須原樣返回，client 不會重複疊加該行或顯示翻譯署名；`zh-Hant`／`zh-Hans` 仍會正確互轉。
 - 節點監察從 active Profile `[Proxy]` 動態發現節點；offline／resume 均須連續 5 次一致，每次相隔 5 秒，狀態不變時不重複通知。
 - 每日 UTC+8 04:25–05:15 維護靜默時段仍會檢測及記錄 log，但不通知或覆寫 persistent state；時段結束後才以原有狀態重新確認。
@@ -93,16 +93,18 @@
 - Bilibili feed 採用 fail-closed 過濾；網絡異常不得令廣告補位或原始廣告 response 回流。
 - Media 與 lyrics Worker 使用獨立 source 及部署；`youtube-init` 不含 AI binding 或翻譯路由。字幕直接連線 Google Translate，歌詞直接連線 `youtube-lyrics-translate`；兩者均設為 DIRECT，不使用 Durable Objects 或預先翻譯。
 - 歌詞 Worker 只可使用 request-local 並行控制；不可在 module scope 儲存跨 invocation 的 in-flight Promise、waiter 或 request-bound I/O。
+- `zh-Hant`／`zh-TW` AI 結果如含明確簡體字形必須拒絕且不可寫入 cache，交由 client 使用 Google Translate fallback；正常批次不可為了預先分拆而重複 AI inference。
 - 歌詞 Worker 的共用 access token 只存於 Cloudflare Secret；module 預設不包含有效 token，使用者可私下取得並在本機參數輸入；缺少或無效 token 時 client 必須直接改用 Google Translate，不可先呼叫 Worker。
 - Surge module 不可修改 `[Proxy Group]`；節點監察使用 `$httpAPI`，不硬編碼節點名。
 - Node Offline Monitor 的維護時段由 module arguments 控制，預設 UTC+8 04:25–05:15，包含 05:00 排程並避免計劃重啟產生 offline／resume 通知風暴。
 
 ### Recent Significant Changes
 
+- `2026-10-05` — 歌詞 AI 改為完整 12 行／600 字批次單次 inference，只有無效 JSON 才拆細；加入 `zh-Hant` 簡體字形 guard 並失效舊 Worker／client cache，降低延遲及防止混入簡體。
 - `2026-10-05` — 歌詞 client 在 access token 缺失或格式無效時改為直接使用 Google Translate；Google cache 亦只會在存在有效 token 時嘗試升級成 AI 翻譯。
 - `2026-10-05` — 歌詞 Worker 移除跨 invocation 的 in-flight Promise／全域等待隊列，改用 request-local 三路 AI 並行；同一 invocation 以 `waitUntil` 在 client 取消後完成 cache，頂層 handler 將早期錯誤轉為正常 HTTP response，避免 `scriptThrewException`。
 - `2026-10-05` — 歌詞翻譯改為以 `lyricsLang` 的 exact language／script／locale 逐行判斷；相同行不再重複顯示，繁簡仍按 parameter 互轉，舊 target-unaware cache 同步失效。
-- `2026-10-03` — 歌詞 client 恢復 12 行／600 字邏輯批次，Worker 保留 4 行／180 字內部分拆，並為每個小批次提供完整 12 行語境以改善代詞、視角及重複詞一致性；同步更新 cache 版本，避免沿用舊的無語境翻譯。單行 AI 格式錯誤重試一次後立即交由裝置 Google fallback，避免多輪排隊及 Worker 端長時間等待。
+- `2026-10-03` — 歌詞 client 恢復 12 行／600 字邏輯批次及完整批次語境，以改善代詞、視角及重複詞一致性；同步更新 cache 版本，避免沿用舊的無語境翻譯。
 - `2026-10-01` — 歌詞 Worker 加入私人 Bearer token 驗證；Surge／Loon 均由本機 module 參數傳入，未授權請求不會消耗 Workers AI。
 - `2026-10-01` — 字幕改回 Google Translate 並採用限時分批並行；歌詞 Worker 更名為 `youtube-lyrics-translate`、升級語意模型並與 media source 完全分離，舊 caption Worker／AI 分支移除。
 - `2026-09-30` — YouTube media 與 translation Worker 分拆；translation 加入 7 日 Cache API，module 將 translation Worker 明確設為 DIRECT。
