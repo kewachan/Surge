@@ -1,6 +1,6 @@
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v8-exact-target-aware";
+const WORKER_BUILD = "lyrics-translate-v10-request-local-cache-warm";
 const GOOGLE_TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -19,12 +19,9 @@ const CACHE_VERSION = "v6";
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
-const INFLIGHT = new Map();
-const WAITERS = [];
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const AI_INVALID_TRANSLATION_CODE = "AI_INVALID_TRANSLATION";
-let activeTranslations = 0;
 
 function constantTimeEqual(left, right) {
   const leftBytes = TEXT_ENCODER.encode(left);
@@ -189,28 +186,36 @@ function splitAIInput(texts) {
   return [texts.slice(0, middle), texts.slice(middle)];
 }
 
-async function translateLyricsAdaptive(texts, source, target, env, contextTexts = texts, retryInvalidSingle = true) {
+async function translateLyricsAdaptive(
+  texts,
+  source,
+  target,
+  env,
+  contextTexts = texts,
+  retryInvalidSingle = true,
+  runAI = (operation) => operation(),
+) {
   if (shouldSplitAIInput(texts)) {
     const [leftTexts, rightTexts] = splitAIInput(texts);
     const [left, right] = await Promise.all([
-      translateLyricsAdaptive(leftTexts, source, target, env, contextTexts),
-      translateLyricsAdaptive(rightTexts, source, target, env, contextTexts),
+      translateLyricsAdaptive(leftTexts, source, target, env, contextTexts, true, runAI),
+      translateLyricsAdaptive(rightTexts, source, target, env, contextTexts, true, runAI),
     ]);
     return { translations: [...left.translations, ...right.translations], provider: "cloudflare-ai" };
   }
 
   try {
-    return await translateLyrics(texts, source, target, env, contextTexts);
+    return await runAI(() => translateLyrics(texts, source, target, env, contextTexts));
   } catch (error) {
     if (error?.code !== AI_INVALID_TRANSLATION_CODE) throw error;
     if (texts.length < 2) {
       if (!retryInvalidSingle) throw error;
-      return translateLyricsAdaptive(texts, source, target, env, contextTexts, false);
+      return translateLyricsAdaptive(texts, source, target, env, contextTexts, false, runAI);
     }
     const [leftTexts, rightTexts] = splitAIInput(texts);
     const [left, right] = await Promise.all([
-      translateLyricsAdaptive(leftTexts, source, target, env, contextTexts),
-      translateLyricsAdaptive(rightTexts, source, target, env, contextTexts),
+      translateLyricsAdaptive(leftTexts, source, target, env, contextTexts, true, runAI),
+      translateLyricsAdaptive(rightTexts, source, target, env, contextTexts, true, runAI),
     ]);
     return { translations: [...left.translations, ...right.translations], provider: "cloudflare-ai" };
   }
@@ -308,27 +313,22 @@ function response(body, status = 200, extraHeaders = {}) {
   });
 }
 
-async function acquireSlot() {
-  if (activeTranslations < MAX_AI_CONCURRENCY) {
-    activeTranslations++;
-    return;
-  }
-  await new Promise((resolve) => WAITERS.push(resolve));
-}
-
-function releaseSlot() {
-  const next = WAITERS.shift();
-  if (next) next();
-  else activeTranslations--;
-}
-
-async function withSlot(operation) {
-  await acquireSlot();
-  try {
-    return await operation();
-  } finally {
-    releaseSlot();
-  }
+function createRequestLimiter(limit) {
+  let active = 0;
+  const waiters = [];
+  return async function run(operation) {
+    if (active >= limit) {
+      await new Promise((resolve) => waiters.push(resolve));
+    }
+    active++;
+    try {
+      return await operation();
+    } finally {
+      active--;
+      const next = waiters.shift();
+      if (next) next();
+    }
+  };
 }
 
 async function cacheRequest(texts, source, target) {
@@ -379,32 +379,23 @@ async function translateCached(texts, source, target, env, context) {
   const cached = await readCache(key.request, texts.length);
   if (cached) return { ...cached, cacheStatus: "HIT" };
 
-  let pending = INFLIGHT.get(key.identifier);
-  let cacheStatus = "COALESCED";
-  if (!pending) {
-    cacheStatus = "MISS";
-    pending = withSlot(async () => {
-      let result;
-      try {
-        result = await translateLyricsAdaptive(texts, source, target, env);
-      } catch (error) {
-        if (error?.code === AI_INVALID_TRANSLATION_CODE) throw error;
-        console.warn("YouTube lyric Workers AI unavailable; using Google Translate:", error?.message || String(error));
-        result = await translateWithGoogle(texts, source, target);
-      }
-      await writeCache(key.request, result);
-      return result;
-    });
-    INFLIGHT.set(key.identifier, pending);
-    void pending.finally(() => {
-      if (INFLIGHT.get(key.identifier) === pending) INFLIGHT.delete(key.identifier);
-    }).catch(() => {});
-  }
-
+  const pending = (async () => {
+    const runAI = createRequestLimiter(MAX_AI_CONCURRENCY);
+    let result;
+    try {
+      result = await translateLyricsAdaptive(texts, source, target, env, texts, true, runAI);
+    } catch (error) {
+      if (error?.code === AI_INVALID_TRANSLATION_CODE) throw error;
+      console.warn("YouTube lyric Workers AI unavailable; using Google Translate:", error?.message || String(error));
+      result = await translateWithGoogle(texts, source, target);
+    }
+    await writeCache(key.request, result);
+    return result;
+  })();
   if (typeof context?.waitUntil === "function") {
     context.waitUntil(pending.then(() => undefined, () => undefined));
   }
-  return { ...await pending, cacheStatus };
+  return { ...await pending, cacheStatus: "MISS" };
 }
 
 async function handleLyricsRequest(request, env, context) {
@@ -462,15 +453,20 @@ async function handleLyricsRequest(request, env, context) {
 }
 
 async function handleRequest(request, env, context) {
-  if (request.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
+  try {
+    if (request.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
+    }
+    if (new URL(request.url).pathname !== LYRICS_PATH) return new Response("Not Found", { status: 404 });
+    if (!env?.LYRICS_ACCESS_TOKEN) return response("Service Unavailable", 503);
+    if (!hasValidAccessToken(request, env)) {
+      return response("Unauthorized", 401, { "WWW-Authenticate": "Bearer" });
+    }
+    return await handleLyricsRequest(request, env, context);
+  } catch (error) {
+    console.error("YouTube lyric request failed before a response was generated:", error?.message || String(error));
+    return response("Internal Server Error", 500);
   }
-  if (new URL(request.url).pathname !== LYRICS_PATH) return new Response("Not Found", { status: 404 });
-  if (!env?.LYRICS_ACCESS_TOKEN) return response("Service Unavailable", 503);
-  if (!hasValidAccessToken(request, env)) {
-    return response("Unauthorized", 401, { "WWW-Authenticate": "Bearer" });
-  }
-  return handleLyricsRequest(request, env, context);
 }
 
 export const __test = {
@@ -480,9 +476,11 @@ export const __test = {
   translateLyricsAdaptive,
   translateWithGoogle,
   translateCached,
+  createRequestLimiter,
   cacheRequest,
   constantTimeEqual,
   hasValidAccessToken,
+  handleRequest,
 };
 
 export default { fetch: handleRequest };
