@@ -623,6 +623,8 @@
   }
 
   async function fetchTranslations(lines, target, deadline, accessToken) {
+    if (!accessToken) return fetchGoogleTranslations(lines, target, deadline);
+
     let workerError;
     try {
       return await fetchWorkerTranslations(lines, target, deadline, accessToken);
@@ -644,9 +646,8 @@
     const accessToken = normalizeAccessToken(options.lyricsToken);
     const input = responseBytes();
     if (target === "off" || !input) return $done({});
-    if (!accessToken) {
-      if (options.debug) console.log("YouTube lyrics translation skipped: access token is missing or invalid");
-      return $done({});
+    if (!accessToken && options.debug) {
+      console.log("YouTube lyrics access token is missing or invalid; using Google Translate");
     }
 
     clearLegacyCaches();
@@ -666,7 +667,7 @@
           const key = cacheKey(batch, target);
           let result = readCache(key, batch.length);
           if (
-            result && isGoogleProvider(result.provider)
+            accessToken && result && isGoogleProvider(result.provider)
             && Date.now() >= Number(result.nextAiRetryAt || 0)
             && Date.now() < deadline
           ) {

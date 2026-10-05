@@ -54,7 +54,7 @@
 - LINE：專用 domain／path reject 廣告及遙測；`getConfigurations` binary Thrift response 關閉 News tab，同時保留共用 `/S4` endpoint。
 - Bilibili：合併 BiliUniverse Enhanced／ADBlock → 本地 fail-closed feed 過濾 → 其餘功能使用固定上游版本 → 額外 PlayPause reject。
 - THIM Home：`exclusive-banners` response → 清空 `data` → App 隱藏 Privilege Offers carousel。
-- YouTube／YouTube Music：播放初始化 request → `youtube-init` media Worker；字幕 → Google Translate public endpoint；歌詞 → 私人 Bearer token → `youtube-lyrics-translate` Worker → Cache API → Workers AI。
+- YouTube／YouTube Music：播放初始化 request → `youtube-init` media Worker；字幕 → Google Translate public endpoint；歌詞有有效私人 Bearer token 時 → `youtube-lyrics-translate` Worker → Cache API → Workers AI，否則由裝置直接使用 Google Translate。
 - Node Offline Monitor：cron → active Profile `[Proxy]` → policy test → 5 次狀態確認 → 維護時段閘門 → 狀態轉變通知。
 
 ### Key Files
@@ -93,12 +93,13 @@
 - Bilibili feed 採用 fail-closed 過濾；網絡異常不得令廣告補位或原始廣告 response 回流。
 - Media 與 lyrics Worker 使用獨立 source 及部署；`youtube-init` 不含 AI binding 或翻譯路由。字幕直接連線 Google Translate，歌詞直接連線 `youtube-lyrics-translate`；兩者均設為 DIRECT，不使用 Durable Objects 或預先翻譯。
 - 歌詞 Worker 只可使用 request-local 並行控制；不可在 module scope 儲存跨 invocation 的 in-flight Promise、waiter 或 request-bound I/O。
-- 歌詞 Worker 的共用 access token 只存於 Cloudflare Secret；module 預設不包含有效 token，使用者須私下取得並在本機參數輸入。
+- 歌詞 Worker 的共用 access token 只存於 Cloudflare Secret；module 預設不包含有效 token，使用者可私下取得並在本機參數輸入；缺少或無效 token 時 client 必須直接改用 Google Translate，不可先呼叫 Worker。
 - Surge module 不可修改 `[Proxy Group]`；節點監察使用 `$httpAPI`，不硬編碼節點名。
 - Node Offline Monitor 的維護時段由 module arguments 控制，預設 UTC+8 04:25–05:15，包含 05:00 排程並避免計劃重啟產生 offline／resume 通知風暴。
 
 ### Recent Significant Changes
 
+- `2026-10-05` — 歌詞 client 在 access token 缺失或格式無效時改為直接使用 Google Translate；Google cache 亦只會在存在有效 token 時嘗試升級成 AI 翻譯。
 - `2026-10-05` — 歌詞 Worker 移除跨 invocation 的 in-flight Promise／全域等待隊列，改用 request-local 三路 AI 並行；同一 invocation 以 `waitUntil` 在 client 取消後完成 cache，頂層 handler 將早期錯誤轉為正常 HTTP response，避免 `scriptThrewException`。
 - `2026-10-05` — 歌詞翻譯改為以 `lyricsLang` 的 exact language／script／locale 逐行判斷；相同行不再重複顯示，繁簡仍按 parameter 互轉，舊 target-unaware cache 同步失效。
 - `2026-10-03` — 歌詞 client 恢復 12 行／600 字邏輯批次，Worker 保留 4 行／180 字內部分拆，並為每個小批次提供完整 12 行語境以改善代詞、視角及重複詞一致性；同步更新 cache 版本，避免沿用舊的無語境翻譯。單行 AI 格式錯誤重試一次後立即交由裝置 Google fallback，避免多輪排隊及 Worker 端長時間等待。
@@ -117,7 +118,7 @@
 - Module 使用 GitHub raw JS URL；修改本機工作檔不會自動發佈，發佈時須同步 JS 與 module 版本。
 - `youtube-init` 使用 `wrangler.jsonc`；`youtube-lyrics-translate` 使用 `wrangler.lyrics.jsonc`，兩者沒有 service binding，可獨立部署。
 - Cloudflare request context 不可跨 invocation 共用；歌詞 Worker 不可重新加入 module-scope Promise coalescing 或全域 waiter queue。
-- 啟用歌詞翻譯前，須在 module 的 `Lyrics Access Token` 參數輸入私下取得的 64 字元 token；不可將實際 token commit 到 repository。
+- `Lyrics Access Token` 留空或無效時歌詞仍會使用 Google Translate；輸入私下取得的 64 字元 token 才會啟用 Workers AI。不可將實際 token commit 到 repository。
 - Reddit `HomeFeedWithDefer` 使用 `multipart/mixed; boundary=graphql`；不可退回只接受單一 JSON 的 JQ rule。
 - HAR 可驗證 API 已清空；整個 section 是否收合仍須以 THIM 真機 UI 驗收。
 - Node Offline Monitor 預設沿用 Profile `proxy-test-url`，未設定時才使用內置 fallback URL。
