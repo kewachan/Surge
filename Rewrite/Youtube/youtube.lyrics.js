@@ -9,11 +9,10 @@
   const TRANSLATE_CONTROL_FIELD = 24;
   const TRANSLATION_ATTRIBUTION_FIELD = 26;
   const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+  const PROVISIONAL_CACHE_TTL_MS = 2 * 60 * 1000;
   const CACHE_LIMIT = 64;
-  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v6";
-  const LEGACY_CACHE_INDEX_KEYS = ["YouTubeLyrics.CacheIndex.v3", "YouTubeLyrics.CacheIndex.v4", "YouTubeLyrics.CacheIndex.v5"];
-  const AI_RETRY_BACKOFF_MS = [30 * 60 * 1000, 60 * 60 * 1000, 2 * 60 * 60 * 1000, 4 * 60 * 60 * 1000, 6 * 60 * 60 * 1000];
-  const AI_RETRY_BUDGET_MS = 5000;
+  const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v7";
+  const LEGACY_CACHE_INDEX_KEYS = ["YouTubeLyrics.CacheIndex.v3", "YouTubeLyrics.CacheIndex.v4", "YouTubeLyrics.CacheIndex.v5", "YouTubeLyrics.CacheIndex.v6"];
   const MAX_BATCH_ITEMS = 12;
   const MAX_BATCH_TOTAL_CHARS = 600;
   const CONCURRENCY = 3;
@@ -323,7 +322,7 @@
       hash ^= value.charCodeAt(index);
       hash = Math.imul(hash, 16777619);
     }
-    return `YouTubeLyrics.v5.${(hash >>> 0).toString(16)}`;
+    return `YouTubeLyrics.v6.${(hash >>> 0).toString(16)}`;
   }
 
   function buildTranslationBatches(lines) {
@@ -343,41 +342,20 @@
     return batches;
   }
 
-  function isGoogleProvider(provider) {
-    return String(provider || "").toLowerCase().includes("google");
-  }
-
-  function aiRetryDelay(retryCount) {
-    const index = Math.min(Math.max(0, Number(retryCount) || 0), AI_RETRY_BACKOFF_MS.length - 1);
-    return AI_RETRY_BACKOFF_MS[index];
+  function isProvisionalResult(result) {
+    return String(result?.provider || "").toLowerCase().includes("provisional")
+      || String(result?.cacheStatus || "").toUpperCase() === "WARMING";
   }
 
   function cacheRecord(result) {
     const savedAt = Number(result?.savedAt || Date.now());
-    const record = {
+    const provisional = isProvisionalResult(result);
+    return {
       savedAt,
+      expiresAt: Number(result?.expiresAt || (savedAt + (provisional ? PROVISIONAL_CACHE_TTL_MS : CACHE_TTL_MS))),
       translations: result.translations,
       provider: result.provider,
-    };
-    if (isGoogleProvider(result.provider)) {
-      record.aiRetryCount = Math.min(
-        Math.max(0, Number(result.aiRetryCount) || 0),
-        AI_RETRY_BACKOFF_MS.length - 1,
-      );
-      record.nextAiRetryAt = Number(result.nextAiRetryAt || (savedAt + aiRetryDelay(record.aiRetryCount)));
-    }
-    return record;
-  }
-
-  function scheduleNextAiRetry(result) {
-    const aiRetryCount = Math.min(
-      Math.max(0, Number(result?.aiRetryCount) || 0) + 1,
-      AI_RETRY_BACKOFF_MS.length - 1,
-    );
-    return {
-      ...result,
-      aiRetryCount,
-      nextAiRetryAt: Date.now() + aiRetryDelay(aiRetryCount),
+      cacheStatus: String(result?.cacheStatus || ""),
     };
   }
 
@@ -400,12 +378,13 @@
     if (typeof $persistentStore === "undefined") return null;
     try {
       const cached = JSON.parse($persistentStore.read(key) || "null");
+      const record = cached ? cacheRecord(cached) : null;
       if (
-        cached && Array.isArray(cached.translations)
-        && cached.translations.length === expectedLength
-        && Date.now() - Number(cached.savedAt || 0) < CACHE_TTL_MS
-        && typeof cached.provider === "string" && cached.provider
-      ) return cacheRecord(cached);
+        record && Array.isArray(record.translations)
+        && record.translations.length === expectedLength
+        && Date.now() < record.expiresAt
+        && typeof record.provider === "string" && record.provider
+      ) return record;
       if (cached) $persistentStore.write("", key);
     } catch (_) {}
     return null;
@@ -418,9 +397,13 @@
       const savedAt = record.savedAt;
       $persistentStore.write(JSON.stringify(record), key);
       const stored = JSON.parse($persistentStore.read(CACHE_INDEX_KEY) || "[]");
+      const now = Date.now();
       const index = (Array.isArray(stored) ? stored : [])
-        .filter((item) => item?.key && item.key !== key && savedAt - Number(item.savedAt || 0) < CACHE_TTL_MS);
-      index.push({ key, savedAt });
+        .filter((item) => (
+          item?.key && item.key !== key
+          && Number(item.expiresAt || (Number(item.savedAt || 0) + CACHE_TTL_MS)) > now
+        ));
+      index.push({ key, savedAt, expiresAt: record.expiresAt });
       while (index.length > CACHE_LIMIT) {
         const expired = index.shift();
         if (expired?.key) $persistentStore.write("", expired.key);
@@ -459,6 +442,7 @@
             resolve({
               translations: result.translations.map((line) => String(line || "")),
               provider: String(result.provider || "cloudflare-ai"),
+              cacheStatus: String(result.cacheStatus || ""),
             });
           } catch (parseError) {
             reject(parseError);
@@ -486,6 +470,7 @@
         return {
           translations: result.translations.map((line) => String(line || "")),
           provider: String(result.provider || "cloudflare-ai"),
+          cacheStatus: String(result.cacheStatus || ""),
         };
       });
     }
@@ -666,21 +651,6 @@
           const batch = batches[cursor++];
           const key = cacheKey(batch, target);
           let result = readCache(key, batch.length);
-          if (
-            accessToken && result && isGoogleProvider(result.provider)
-            && Date.now() >= Number(result.nextAiRetryAt || 0)
-            && Date.now() < deadline
-          ) {
-            try {
-              const retryDeadline = Math.min(deadline, Date.now() + AI_RETRY_BUDGET_MS);
-              result = await fetchWorkerTranslations(batch, target, retryDeadline, accessToken);
-              writeCache(key, result);
-            } catch (error) {
-              result = scheduleNextAiRetry(result);
-              writeCache(key, result);
-              if (options.debug) console.log(`YouTube lyrics AI retry deferred: ${String(error)}`);
-            }
-          }
           if (!result) {
             const remaining = deadline - Date.now();
             if (remaining <= 0) break;
