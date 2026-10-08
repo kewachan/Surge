@@ -17,10 +17,12 @@
   const MAX_BATCH_TOTAL_CHARS = 600;
   const CONCURRENCY = 3;
   const RESPONSE_BUDGET_MS = 9000;
+  const WORKER_RESPONSE_BUDGET_MS = 3000;
+  const GOOGLE_FALLBACK_RESERVE_MS = 5500;
   const TRANSLATE_TIMEOUT_SECONDS = 110;
   const MAX_BUSY_RETRIES = 0;
   const MAX_GOOGLE_ENCODED_QUERY_CHARS = 6000;
-  const GOOGLE_TRANSLATE_TIMEOUT_SECONDS = 6;
+  const GOOGLE_TRANSLATE_TIMEOUT_SECONDS = 5;
   const GOOGLE_TRANSLATE_RETRIES = 1;
   const TEXT_ENCODER = new TextEncoder();
   const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
@@ -611,10 +613,19 @@
     if (!accessToken) return fetchGoogleTranslations(lines, target, deadline);
 
     let workerError;
-    try {
-      return await fetchWorkerTranslations(lines, target, deadline, accessToken);
-    } catch (error) {
-      workerError = error;
+    const now = Date.now();
+    const workerDeadline = Math.min(
+      deadline - GOOGLE_FALLBACK_RESERVE_MS,
+      now + WORKER_RESPONSE_BUDGET_MS,
+    );
+    if (workerDeadline > now) {
+      try {
+        return await fetchWorkerTranslations(lines, target, workerDeadline, accessToken);
+      } catch (error) {
+        workerError = error;
+      }
+    } else {
+      workerError = new Error("Worker skipped to preserve Google fallback budget");
     }
     const status = Number(workerError?.status || 0);
     if (status && status !== 429 && status < 500) throw workerError;
