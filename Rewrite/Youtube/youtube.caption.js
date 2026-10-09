@@ -3,10 +3,11 @@
 
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 const MAX_ENCODED_QUERY_CHARS = 6000;
-const CONCURRENCY = 8;
-const RESPONSE_BUDGET_MS = 7500;
-const TRANSLATE_TIMEOUT_SECONDS = 6;
+const CONCURRENCY = 3;
+const RESPONSE_BUDGET_MS = 4500;
+const TRANSLATE_TIMEOUT_SECONDS = 4;
 const MAX_RETRIES = 1;
+const MIN_RETRY_WINDOW_MS = 1200;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_LIMIT = 96;
 const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v4";
@@ -150,7 +151,7 @@ async function fetchTranslation(query, source, target, deadline) {
       lastError = error;
       if (attempt === MAX_RETRIES) break;
       const delay = 200;
-      if (Date.now() + delay >= deadline) break;
+      if (Date.now() + delay + MIN_RETRY_WINDOW_MS >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
