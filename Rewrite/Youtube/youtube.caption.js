@@ -82,6 +82,18 @@ function encodeXml(text) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+function rewrittenResponseHeaders(headers) {
+  const output = {};
+  for (const [name, value] of Object.entries(headers || {})) {
+    const normalized = name.toLowerCase();
+    if (normalized === "content-type" || normalized === "content-encoding"
+      || normalized === "content-length" || normalized === "transfer-encoding") continue;
+    output[name] = value;
+  }
+  output["Content-Type"] = "text/xml; charset=utf-8";
+  return output;
+}
+
 function separator(index) {
   return `\n[[YTS:${index}]]\n`;
 }
@@ -219,7 +231,7 @@ async function translateCaptionResponse() {
     position = caption.end;
   });
   output += body.slice(position);
-  $done({body: output, headers: {...$response.headers, "Content-Type": "text/xml; charset=utf-8"}});
+  $done({body: output, headers: rewrittenResponseHeaders($response.headers)});
 }
 
 if (typeof $response === "undefined") {
