@@ -33,6 +33,12 @@ DOMAIN-SUFFIX, ts-analysis.shoalter.com
 DOMAIN, ads.dfgd-os.com
 DOMAIN, event-cep.dfiretailgroup.com
 
+# New Media Group
+URL-REGEX,^https:\/\/static\.nmg\.com\.hk\/html\/uuid\/index\.htm(?:\?.*)?$
+URL-REGEX,^https:\/\/static\.nmg\.com\.hk\/js\/prebid[^\/?]*\.js(?:\?.*)?$
+URL-REGEX,^https:\/\/www\.sundaykiss\.com\/wp-content\/plugins\/nmg-lazy-load\/assets\/js\/adgpt\.js(?:\?.*)?$
+URL-REGEX,^https:\/\/www\.sundaykiss\.com\/wp-content\/themes\/bucket\/theme-content\/js\/single_tag_ga\.js(?:\?.*)?$
+
 ##### China #####
 
 # Alibaba
@@ -114,6 +120,9 @@ DOMAIN-SUFFIX, itadstatic.ithome.com.tw
 # XFastest
 DOMAIN-SUFFIX, ads.xfastest.com
 
+# UDN
+URL-REGEX,^https:\/\/misc\.udn\.com\/record\/pageview\/
+
 # Baidu
 DOMAIN-SUFFIX, tsn.baidu.com
 
@@ -167,6 +176,12 @@ DOMAIN-SUFFIX, samsung-com.112.2o7.net
 DOMAIN-SUFFIX, samsungadhub.com
 DOMAIN-SUFFIX, samsungads.com
 DOMAIN-SUFFIX, smetrics.samsung.com
+
+# Yonhap News Agency
+DOMAIN, cdp.yna.co.kr
+DOMAIN, eas.yna.co.kr
+URL-REGEX,^https:\/\/cb\.yna\.co\.kr\/gate\/big5\/(?:ad\.yna\.co\.kr\/|lib\.wtg-ads\.com\/)
+URL-REGEX,^https:\/\/rd\.yna\.co\.kr\/global\/js\/(?:yna_stat|eas\/eas\.min)\.js(?:\?.*)?$
 
 # Facebook
 DOMAIN-SUFFIX, ads.facebook.com
@@ -275,7 +290,7 @@ DOMAIN-SUFFIX, ssl.google-analytics.com
 DOMAIN-SUFFIX, static.doubleclick.net
 DOMAIN-SUFFIX, stats.g.doubleclick.net
 DOMAIN-SUFFIX, youtube.cleverads.vn
-URL-REGEX,^https:\/\/cdn\.ampproject\.org\/(?:rtv\/[^\/]+\/)?v0\/(?:amp-ad(?:-network-doubleclick-impl)?|amp-analytics)-0\.1\.(?:js|mjs)(?:\?.*)?$
+URL-REGEX,^https:\/\/cdn\.ampproject\.org\/(?:rtv\/[^\/]+\/)?v0\/(?:(?:amp-ad(?:-network-doubleclick-impl)?|amp-analytics)-0\.1|amp-sticky-ad-1\.0)\.(?:js|mjs)(?:\?.*)?$
 URL-REGEX,^https:\/\/play\.google\.com\/newsstand\/api\/v3\/people\/me\/analytics(?:\?.*)?$
 URL-REGEX,^https:\/\/play\.googleapis\.com\/log\/batch(?:\?.*)?$
 
