@@ -3,7 +3,6 @@
 #Apple Pay
 DOMAIN, bag.itunes.apple.com
 DOMAIN, smp-device-content.apple.com
-DOMAIN-SUFFIX, ess.apple.com
 
 #Apple Subscription
 DOMAIN, speedysub.itunes.apple.com

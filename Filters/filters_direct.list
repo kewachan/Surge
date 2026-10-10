@@ -3,6 +3,10 @@
 #Recaptcha
 DOMAIN-SUFFIX, recaptcha.net
 
+#Apple Messages
+DOMAIN, push.apple.com
+DOMAIN, ess.apple.com
+
 #Pokemon TCGP
 DOMAIN-KEYWORD, player-api-prod
 
