@@ -46,6 +46,7 @@ DOMAIN, client-upload.cn-shanghai.log.aliyuncs.com
 DOMAIN, poplayer.template.alibaba.com
 
 # Damai
+DOMAIN, gm.mmstat.com
 DOMAIN, h-adashx.ut.hzshudian.com
 DOMAIN, log.mmstat.com
 DOMAIN, px.effirst.com
@@ -71,6 +72,10 @@ DOMAIN-SUFFIX, metrics5.data.hicloud.com
 DOMAIN, mars.jd.com
 DOMAIN, mllog.jd.com
 DOMAIN, perf.m.jd.com
+
+# Tuhu
+DOMAIN, analytics.tuhu.com
+DOMAIN, ta.tuhu.cn
 
 # OnePlus
 DOMAIN-SUFFIX, analytics.oneplus.cn
@@ -123,6 +128,9 @@ DOMAIN-SUFFIX, ads.xfastest.com
 # UDN
 URL-REGEX,^https:\/\/misc\.udn\.com\/record\/pageview\/
 
+# Dcard
+DOMAIN, bilanx.dcard.tw
+
 # Baidu
 DOMAIN-SUFFIX, tsn.baidu.com
 
@@ -137,6 +145,8 @@ DOMAIN-SUFFIX, ibytedtos.com
 DOMAIN-SUFFIX, log.byteoversea.com
 DOMAIN-SUFFIX, pangle.io
 DOMAIN-SUFFIX, pglstatp-toutiao.com
+DOMAIN, api16-access-ttp.tiktokpangle.us
+DOMAIN, api16-access-wf-sg.pangle-b.io
 
 # RedNote
 DOMAIN, ads-i2.xhscdn.com
@@ -383,6 +393,8 @@ DOMAIN-SUFFIX, startup.mobile.yandex.net
 DOMAIN-SUFFIX, yandexadexchange.net
 
 # Analytics and Diagnostics
+DOMAIN, analytics.adjust.com
+DOMAIN, analytics.adjust.io
 DOMAIN, ali-stats.jpush.cn
 DOMAIN, analytics.shareaholic.com
 DOMAIN, analytics.theradioapp.com
@@ -390,7 +402,10 @@ DOMAIN, api3.branch.io
 DOMAIN, app-analytics-services.com
 DOMAIN, assets.adobedtm.com
 DOMAIN, astat.nikkei.com
+DOMAIN, b.karte.io
+DOMAIN, census-app-x.scorecardresearch.com
 DOMAIN, cdn-settings.segment.com
+DOMAIN, cnam4c.cdn-settings.appsflyersdk.com
 DOMAIN, cnlogs.umengcloud.com
 DOMAIN, d1dns4zpgsd7rz.cloudfront.net
 DOMAIN, ep1.adtrafficquality.google
@@ -398,8 +413,11 @@ DOMAIN, ep2.adtrafficquality.google
 DOMAIN, errnewlog.umeng.com
 DOMAIN, gd-stats.jpush.cn
 DOMAIN, h-adashx.ut.taobao.com
+DOMAIN, hv.survicate.com
 DOMAIN, logx.optimizely.com
 DOMAIN, matomo2.tdm.com.mo
+DOMAIN, mmfayl-cdn-settings.appsflyersdk.com
+DOMAIN, mmfayl-launches.appsflyersdk.com
 DOMAIN, oslogs.umeng.com
 DOMAIN, partner.shareaholic.com
 DOMAIN, pixel.wp.com
@@ -412,7 +430,11 @@ DOMAIN, static.getclicky.com
 DOMAIN, statistics.tdm.com.mo
 DOMAIN, stats-ipv6.jpush.cn
 DOMAIN, stats.jpush.cn
+DOMAIN, survey-prd.survicate-cdn.com
 DOMAIN, tags.tiqcdn.com
+DOMAIN, uooh2y.cdn-settings.appsflyersdk.com
+DOMAIN, uooh2y.conversions.appsflyersdk.com
+DOMAIN, uooh2y.skadsdk.appsflyersdk.com
 URL-REGEX,^https:\/\/app\.termly\.io\/api\/v1\/snippets\/websites\/[^\/]+\/statistics(?:\?.*)?$
 URL-REGEX,^https:\/\/[^\/]+\.device\.marketingcloudapis\.com\/device\/v1\/event\/analytic(?:\?.*)?$
 URL-REGEX,^https:\/\/s0\.wp\.com\/wp-content\/js\/bilmur\.min\.js(?:\?.*)?$
@@ -465,6 +487,7 @@ DOMAIN-SUFFIX, w1.luckyorange.com
 DOMAIN, a.teads.tv
 DOMAIN, abc.hkepc.net
 DOMAIN, ad2.apx.appier.net
+DOMAIN, adx.apx.appier.net
 DOMAIN, ad-specs.guoshipartners.com
 DOMAIN, ads.adthrive.com
 DOMAIN, ads.yieldmo.com
@@ -476,12 +499,14 @@ DOMAIN, au.adhacker.online
 DOMAIN, bd.raptivecdn.com
 DOMAIN, beacon.bidder.taboola.com
 DOMAIN, cdn.caprofitx.com
+DOMAIN, cdn2.inner-active.mobi
 DOMAIN, cdn.taboola.com
 DOMAIN, config.ads.vungle.com
 DOMAIN, config.inmobi.com
 DOMAIN, cpm.bidmyqps.xyz
 DOMAIN, currency.prebid.org
 DOMAIN, d.applovin.com
+DOMAIN, d.applvn.com
 DOMAIN, dmp.im-apps.net
 DOMAIN, display.bidder.taboola.com
 DOMAIN, fastlane.rubiconproject.com
@@ -495,16 +520,21 @@ DOMAIN, js-sec.indexww.com
 DOMAIN, jwpltx.com
 DOMAIN, l.logly.co.jp
 DOMAIN, log.outbrainimg.com
+DOMAIN, m.vpon.com
 DOMAIN, micro.rubiconproject.com
 DOMAIN, ms.applovin.com
 DOMAIN, ms.applvn.com
+DOMAIN, ms4.applovin.com
+DOMAIN, ms4.applvn.com
 DOMAIN, mwtw.presage.io
 DOMAIN, nt.compass-fit.jp
 DOMAIN, prebid.a-mo.net
 DOMAIN, prebid.ad.smaato.net
+DOMAIN, prod-mediate-events.applovin.com
 DOMAIN, pv.ltn.com.tw
 DOMAIN, qcloud20.qno.com.tw
 DOMAIN, r.skimresources.com
+DOMAIN, r2d2.aotter.net
 DOMAIN, rt.applovin.com
 DOMAIN, rt.applvn.com
 DOMAIN, rtb.openx.net
@@ -518,15 +548,19 @@ DOMAIN, sync.inmobi.com
 DOMAIN, sync.logly.co.jp
 DOMAIN, ssp-sync.criteo.com
 DOMAIN, static.adsafeprotected.com
+DOMAIN, static.aottercdn.com
 DOMAIN, static.criteo.net
 DOMAIN, static.dable.io
+DOMAIN, skadnetworks.fyber.com
 DOMAIN, stormgate.production.raptive.com
+DOMAIN, sts.applovin.com
 DOMAIN, t.skimresources.com
 DOMAIN, t.ssp.hinet.net
 DOMAIN, tag.adbro.me
 DOMAIN, tcheck.outbrainimg.com
 DOMAIN, telemetry.sdk.inmobi.com
 DOMAIN, tlx.3lift.com
+DOMAIN, trek-fp-dmp.aotter.net
 DOMAIN, trc.taboola.com
 DOMAIN, widget-pixels.outbrain.com
 URL-REGEX,^https:\/\/cache\.ltn\.com\.tw\/(?:css|js)\/cache_ads_h1(?:\.min)?\.(?:css|js)(?:\?.*)?$
