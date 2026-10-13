@@ -1,8 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const JOBS_PATH = "/caption/jobs";
-const TRANSLATE_PATH = "/caption/translate";
-const WORKER_BUILD = "caption-stream-v3";
+const WORKER_BUILD = "caption-queue-v1";
 const GOOGLE_TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -17,30 +16,13 @@ const MAX_BATCH_ENCODED_QUERY_CHARS = 5500;
 const MAX_SEND_BATCH_MESSAGES = 100;
 const MAX_SEND_BATCH_BYTES = 220 * 1024;
 const GOOGLE_TRANSLATE_TIMEOUT_MS = 8000;
-const CAPTION_UPSTREAM_TIMEOUT_MS = 5000;
-const CAPTION_STREAM_TIMEOUT_MS = 110000;
-const CAPTION_STREAM_POLL_MS = 2500;
-const MAX_CAPTION_XML_BYTES = 4 * 1024 * 1024;
-const EAGER_BATCH_LIMIT = 10;
 const MAX_QUEUE_ATTEMPTS = 4;
 const JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const PUBLIC_RATE_WINDOW_MS = 60 * 1000;
-const PUBLIC_RATE_LIMIT = 12;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-async function captionJobId(payload) {
-  const canonical = JSON.stringify([payload.source, payload.target, payload.texts]);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", TEXT_ENCODER.encode(canonical)));
-  const bytes = digest.slice(0, 16);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 
 function constantTimeEqual(left, right) {
   const leftBytes = TEXT_ENCODER.encode(left);
@@ -73,63 +55,6 @@ function normalizeLanguage(value, allowAuto = false) {
     "zh-tw": "zh-TW",
     "zh-cn": "zh-CN",
   }[language.toLowerCase()] || language;
-}
-
-function isAllowedCaptionSource(url) {
-  return url.protocol === "https:"
-    && url.hostname === "www.youtube.com"
-    && url.pathname === "/api/timedtext"
-    && !url.port
-    && !url.username
-    && !url.password
-    && !url.hash;
-}
-
-function decodeXml(text) {
-  return text
-    .replace(/&#(\d+);/g, (_, value) => String.fromCodePoint(Number(value)))
-    .replace(/&#x([\da-f]+);/gi, (_, value) => String.fromCodePoint(parseInt(value, 16)))
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-}
-
-function encodeXml(text) {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-
-function parseCaptionXml(body) {
-  const captions = [];
-  const paragraph = /<p(\s[^>]*)?>([\s\S]*?)<\/p>/g;
-  const segment = /<s(?:\s[^>]*)?>([\s\S]*?)<\/s>/g;
-  let match;
-  while ((match = paragraph.exec(body))) {
-    const pieces = [];
-    let part;
-    segment.lastIndex = 0;
-    while ((part = segment.exec(match[2]))) pieces.push(part[1]);
-    const rawText = pieces.length ? pieces.join("") : match[2].replace(/<[^>]*>/g, "");
-    const text = decodeXml(rawText).replace(/\s+/g, " ").trim();
-    if (text) captions.push({
-      start: match.index,
-      end: paragraph.lastIndex,
-      attributes: match[1] || "",
-      text,
-    });
-  }
-  return captions;
-}
-
-function rebuildCaptionXml(body, captions, translations) {
-  let output = "";
-  let position = 0;
-  captions.forEach((caption, index) => {
-    output += body.slice(position, caption.start);
-    const translated = String(translations?.[index] || "").trim();
-    output += `<p${caption.attributes}><s ac="0">${encodeXml(translated || caption.text)}</s></p>`;
-    position = caption.end;
-  });
-  return output + body.slice(position);
 }
 
 function jsonResponse(body, status = 200, extraHeaders = {}) {
@@ -268,26 +193,6 @@ async function initializeJob(env, jobId, itemCount, batchCount) {
     body: JSON.stringify({ jobId, itemCount, batchCount, createdAt: Date.now() }),
   });
   if (!response.ok) throw new Error(`Job initialization failed with ${response.status}`);
-  return response.json();
-}
-
-async function readJobStatus(env, jobId) {
-  const response = await jobStub(env, jobId).fetch("https://caption-job/internal/status");
-  if (!response.ok) return null;
-  return response.json();
-}
-
-async function resetFailedJob(env, jobId) {
-  const response = await jobStub(env, jobId).fetch("https://caption-job/internal/retry", {method: "POST"});
-  if (!response.ok) throw new Error(`Job retry reset failed with ${response.status}`);
-}
-
-async function allowPublicJob(request, env) {
-  const client = request.headers.get("CF-Connecting-IP") || "unknown-client";
-  const response = await jobStub(env, `rate:${client}`).fetch("https://caption-job/internal/rate-limit", {
-    method: "POST",
-  });
-  return response.ok;
 }
 
 async function failJob(env, jobId, reason) {
@@ -338,7 +243,7 @@ function validateJobPayload(payload) {
   return { texts: normalizedTexts, source, target };
 }
 
-async function createJob(request, env, context, authenticated = false) {
+async function createJob(request, env) {
   if (!env?.CAPTION_QUEUE || !env?.CAPTION_JOBS) return textResponse("Service Unavailable", 503);
   let payload;
   try {
@@ -347,31 +252,10 @@ async function createJob(request, env, context, authenticated = false) {
     return textResponse(error?.message || "Invalid Caption Job", Number(error?.status) || 400);
   }
 
+  const jobId = crypto.randomUUID();
   const batches = buildTranslationBatches(payload.texts);
-  const jobId = await captionJobId(payload);
   try {
-    const existing = await readJobStatus(env, jobId);
-    if (existing?.status === "complete") {
-      return jsonResponse({...existing, statusUrl: `${JOBS_PATH}/${jobId}`, reused: true});
-    }
-    if (existing?.status === "queued" || existing?.status === "processing") {
-      return jsonResponse({...existing, statusUrl: `${JOBS_PATH}/${jobId}`, pollAfterMs: 250, reused: true}, 202);
-    }
-    if (!authenticated && !(await allowPublicJob(request, env))) {
-      return textResponse("Too Many Requests", 429, {"Retry-After": "60"});
-    }
-
-    const initialized = await initializeJob(env, jobId, payload.texts.length, batches.length);
-    if (!initialized.created) {
-      const raced = await readJobStatus(env, jobId);
-      if (raced?.status === "complete") {
-        return jsonResponse({...raced, statusUrl: `${JOBS_PATH}/${jobId}`, reused: true});
-      }
-      if (raced?.status === "queued" || raced?.status === "processing") {
-        return jsonResponse({...raced, statusUrl: `${JOBS_PATH}/${jobId}`, pollAfterMs: 250, reused: true}, 202);
-      }
-      await resetFailedJob(env, jobId);
-    }
+    await initializeJob(env, jobId, payload.texts.length, batches.length);
     const messages = batches.map((batch, batchIndex) => ({
       jobId,
       batchIndex,
@@ -381,16 +265,6 @@ async function createJob(request, env, context, authenticated = false) {
       target: payload.target,
     }));
     for (const group of splitQueueMessages(messages)) await env.CAPTION_QUEUE.sendBatch(group);
-    if (context?.waitUntil && messages.length <= EAGER_BATCH_LIMIT) {
-      context.waitUntil(Promise.all(messages.map((body) => processQueueMessage({
-        body,
-        attempts: 1,
-        ack() {},
-        retry() {},
-      }, env))).catch((error) => {
-        console.error("YouTube caption eager processing failed:", error?.message || String(error));
-      }));
-    }
   } catch (error) {
     console.error("YouTube caption job enqueue failed:", error?.message || String(error));
     try {
@@ -405,7 +279,7 @@ async function createJob(request, env, context, authenticated = false) {
     jobId,
     status: "queued",
     statusUrl: `${JOBS_PATH}/${jobId}`,
-    pollAfterMs: 250,
+    pollAfterMs: 500,
     itemCount: payload.texts.length,
     batchCount: batches.length,
   }, 202, { Location: `${JOBS_PATH}/${jobId}` });
@@ -416,143 +290,18 @@ async function getJobStatus(jobId, env) {
   return jobStub(env, jobId).fetch("https://caption-job/internal/status");
 }
 
-function captionXmlResponse(body, status = "source") {
-  return new Response(body, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/xml; charset=utf-8",
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-      "X-YouTube-Caption-Status": status,
-      "X-YouTube-Worker-Build": WORKER_BUILD,
-    },
-  });
-}
-
-function streamingCaptionResponse(body, captions, initialStatus, env, context) {
-  const prefix = body.slice(0, captions[0].start);
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(TEXT_ENCODER.encode(prefix));
-      const work = (async () => {
-        let latest = initialStatus;
-        const deadline = Date.now() + CAPTION_STREAM_TIMEOUT_MS;
-        while (latest?.status !== "complete" && latest?.status !== "failed" && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, CAPTION_STREAM_POLL_MS));
-          latest = await readJobStatus(env, initialStatus.jobId) || latest;
-          if (latest?.status !== "complete" && latest?.status !== "failed") {
-            controller.enqueue(TEXT_ENCODER.encode("\n"));
-          }
-        }
-        const translated = rebuildCaptionXml(body, captions, latest?.translations);
-        controller.enqueue(TEXT_ENCODER.encode(translated.slice(prefix.length)));
-        controller.close();
-      })().catch((error) => {
-        console.error("YouTube caption stream failed:", error?.message || String(error));
-        try {
-          controller.enqueue(TEXT_ENCODER.encode(body.slice(prefix.length)));
-          controller.close();
-        } catch (_) {}
-      });
-      if (context?.waitUntil) context.waitUntil(work);
-    },
-  });
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/xml; charset=utf-8",
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-      "X-YouTube-Caption-Status": "streaming",
-      "X-YouTube-Worker-Build": WORKER_BUILD,
-    },
-  });
-}
-
-async function translateCaptionRequest(request, env, context, authenticated) {
-  if (!env?.CAPTION_QUEUE || !env?.CAPTION_JOBS) return textResponse("Service Unavailable", 503);
-  const requestUrl = new URL(request.url);
-  const target = normalizeLanguage(requestUrl.searchParams.get("target"), false);
-  let sourceUrl;
-  try {
-    sourceUrl = new URL(requestUrl.searchParams.get("url") || "");
-  } catch {
-    return textResponse("Invalid Caption Source", 400);
-  }
-  if (!target || !isAllowedCaptionSource(sourceUrl)) return textResponse("Caption Source Not Allowed", 403);
-  if (!authenticated && !(await allowPublicJob(request, env))) {
-    return textResponse("Too Many Requests", 429, {"Retry-After": "60"});
-  }
-  sourceUrl.searchParams.delete("tlang");
-  sourceUrl.searchParams.delete("enhance_tlang");
-  sourceUrl.searchParams.set("format", "srv3");
-  const source = normalizeLanguage(sourceUrl.searchParams.get("lang") || "auto", true);
-  if (!source) return textResponse("Invalid Caption Language", 400);
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CAPTION_UPSTREAM_TIMEOUT_MS);
-  let upstream;
-  try {
-    upstream = await fetch(sourceUrl, {
-      headers: {Accept: "text/xml, application/xml;q=0.9, */*;q=0.1"},
-      signal: controller.signal,
-    });
-  } catch (error) {
-    clearTimeout(timeout);
-    return textResponse(controller.signal.aborted ? "Caption Source Timeout" : "Caption Source Failed", controller.signal.aborted ? 504 : 502);
-  }
-  clearTimeout(timeout);
-  if (!upstream.ok) return textResponse(`Caption Source Status ${upstream.status}`, 502);
-  const declaredLength = Number(upstream.headers.get("content-length") || 0);
-  if (declaredLength > MAX_CAPTION_XML_BYTES) return textResponse("Caption Source Too Large", 413);
-  const bytes = new Uint8Array(await upstream.arrayBuffer());
-  if (bytes.length > MAX_CAPTION_XML_BYTES) return textResponse("Caption Source Too Large", 413);
-  const body = TEXT_DECODER.decode(bytes);
-  const captions = parseCaptionXml(body);
-  if (!captions.length) return captionXmlResponse(body, "empty");
-
-  const jobHeaders = new Headers({"Content-Type": "application/json"});
-  const clientIp = request.headers.get("CF-Connecting-IP");
-  const authorization = request.headers.get("authorization");
-  if (clientIp) jobHeaders.set("CF-Connecting-IP", clientIp);
-  if (authorization) jobHeaders.set("Authorization", authorization);
-  const createdResponse = await createJob(new Request("https://caption-worker/caption/jobs", {
-    method: "POST",
-    headers: jobHeaders,
-    body: JSON.stringify({
-      purpose: "captions",
-      source,
-      target,
-      texts: captions.map((caption) => caption.text),
-    }),
-  }), env, context, true);
-  if (!createdResponse.ok) return captionXmlResponse(body, `queue-${createdResponse.status}`);
-  const created = await createdResponse.json();
-  if (!JOB_ID_PATTERN.test(String(created?.jobId || ""))) return captionXmlResponse(body, "queue-invalid");
-  if (created.status === "complete" || created.status === "failed") {
-    return captionXmlResponse(rebuildCaptionXml(body, captions, created.translations), created.status);
-  }
-  return streamingCaptionResponse(body, captions, created, env, context);
-}
-
-async function handleRequest(request, env, context) {
+async function handleRequest(request, env) {
   try {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
       return jsonResponse({ status: "ok", build: WORKER_BUILD });
     }
-    const authorization = request.headers.get("authorization") || "";
-    const authenticated = hasValidAccessToken(request, env);
-    if (authorization && !authenticated) {
+    if (!url.pathname.startsWith(JOBS_PATH)) return textResponse("Not Found", 404);
+    if (!env?.CAPTION_ACCESS_TOKEN) return textResponse("Service Unavailable", 503);
+    if (!hasValidAccessToken(request, env)) {
       return textResponse("Unauthorized", 401, { "WWW-Authenticate": "Bearer" });
     }
-    if (request.method === "GET" && url.pathname === TRANSLATE_PATH) {
-      return translateCaptionRequest(request, env, context, authenticated);
-    }
-    if (!url.pathname.startsWith(JOBS_PATH)) return textResponse("Not Found", 404);
-    if (request.method === "POST" && url.pathname === JOBS_PATH) {
-      return createJob(request, env, context, authenticated);
-    }
+    if (request.method === "POST" && url.pathname === JOBS_PATH) return createJob(request, env);
     if (request.method === "GET" && url.pathname.startsWith(`${JOBS_PATH}/`)) {
       return getJobStatus(url.pathname.slice(JOBS_PATH.length + 1), env);
     }
@@ -629,30 +378,7 @@ export class CaptionJob extends DurableObject {
         const meta = await request.json();
         await this.ctx.storage.put("meta", meta);
         await this.ctx.storage.setAlarm(Number(meta.createdAt) + JOB_RETENTION_MS);
-        return jsonResponse({created: true});
       }
-      const requested = await request.json();
-      if (existing.itemCount !== requested.itemCount || existing.batchCount !== requested.batchCount) {
-        return textResponse("Job Conflict", 409);
-      }
-      return jsonResponse({created: false});
-    }
-    if (request.method === "POST" && url.pathname === "/internal/rate-limit") {
-      const now = Date.now();
-      const saved = await this.ctx.storage.get("rate");
-      const state = saved && now - Number(saved.startedAt || 0) < PUBLIC_RATE_WINDOW_MS
-        ? saved
-        : {startedAt: now, count: 0};
-      if (state.count >= PUBLIC_RATE_LIMIT) return textResponse("Too Many Requests", 429);
-      state.count += 1;
-      await this.ctx.storage.put("rate", state);
-      await this.ctx.storage.setAlarm(state.startedAt + PUBLIC_RATE_WINDOW_MS);
-      return textResponse("OK", 200);
-    }
-    if (request.method === "POST" && url.pathname === "/internal/retry") {
-      const failures = await this.ctx.storage.list({prefix: "failure:"});
-      for (const key of failures.keys()) await this.ctx.storage.delete(key);
-      await this.ctx.storage.delete("fatal");
       return textResponse("OK", 200);
     }
     if (request.method === "POST" && url.pathname === "/internal/result") {
@@ -732,7 +458,6 @@ export class CaptionJob extends DurableObject {
 }
 
 export const __test = {
-  captionJobId,
   buildTranslationBatches,
   splitQueueMessages,
   translateGoogleBatch,
@@ -740,7 +465,6 @@ export const __test = {
   validateJobPayload,
   constantTimeEqual,
   hasValidAccessToken,
-  allowPublicJob,
   handleRequest,
   handleQueue,
 };
