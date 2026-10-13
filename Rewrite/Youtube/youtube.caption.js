@@ -5,10 +5,12 @@ const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 const CAPTION_WORKER_ENDPOINT = "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/jobs";
 const MAX_ENCODED_QUERY_CHARS = 6000;
 const CONCURRENCY = 3;
-const RESPONSE_BUDGET_MS = 4500;
 const TRANSLATE_TIMEOUT_SECONDS = 4;
 const MAX_RETRIES = 1;
 const MIN_RETRY_WINDOW_MS = 1200;
+const RETRY_DELAY_MS = 200;
+const MIN_RESPONSE_BUDGET_MS = 12000;
+const MAX_RESPONSE_BUDGET_MS = 100000;
 const QUEUE_RESPONSE_BUDGET_MS = 100000;
 const QUEUE_SUBMIT_TIMEOUT_SECONDS = 10;
 const QUEUE_POLL_TIMEOUT_SECONDS = 5;
@@ -259,9 +261,8 @@ async function fetchTranslation(query, source, target, deadline) {
     } catch (error) {
       lastError = error;
       if (attempt === MAX_RETRIES) break;
-      const delay = 200;
-      if (Date.now() + delay + MIN_RETRY_WINDOW_MS >= deadline) break;
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (Date.now() + RETRY_DELAY_MS + MIN_RETRY_WINDOW_MS >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
     }
   }
   throw lastError || new Error("Caption translation failed");
@@ -276,7 +277,14 @@ function rebuildBatch(items, captions) {
 
 async function translateBatches(batches, captions, source, target) {
   const queue = [...batches];
-  const deadline = Date.now() + RESPONSE_BUDGET_MS;
+  const waves = Math.max(1, Math.ceil(batches.length / CONCURRENCY));
+  const retryWindow = (MAX_RETRIES + 1) * TRANSLATE_TIMEOUT_SECONDS * 1000
+    + RETRY_DELAY_MS + MIN_RETRY_WINDOW_MS;
+  const responseBudget = Math.min(
+    MAX_RESPONSE_BUDGET_MS,
+    Math.max(MIN_RESPONSE_BUDGET_MS, waves * retryWindow),
+  );
+  const deadline = Date.now() + responseBudget;
   let cursor = 0;
   async function worker() {
     while (cursor < queue.length && Date.now() < deadline) {
@@ -305,7 +313,7 @@ async function translateBatches(batches, captions, source, target) {
   }
   const work = Promise.all(Array.from({length: Math.min(CONCURRENCY, queue.length)}, worker));
   let timer;
-  await Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, RESPONSE_BUDGET_MS); })]);
+  await Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, responseBudget); })]);
   if (timer) clearTimeout(timer);
 }
 
