@@ -1407,7 +1407,7 @@
     {
       "mitmHostCount": 153,
       "role": "source",
-      "url": "https://yfamilys.com/module/AdBlock.module",
+      "url": "https://raw.githubusercontent.com/deezertidal/shadowrocket-rules/main/modules/AdBlock.module",
       "urlRewriteCount": 264
     },
     {

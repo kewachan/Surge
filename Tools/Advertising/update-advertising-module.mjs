@@ -12,7 +12,6 @@ const MAX_SOURCE_BYTES = 1_500_000;
 const ALLOWED_SOURCE_HOSTS = new Set([
   "raw.githubusercontent.com",
   "ruleset.skk.moe",
-  "yfamilys.com",
 ]);
 const SUPPORTED_REWRITE_ACTIONS = new Set(["reject", "302", "header"]);
 const DENIED_URL_REWRITES = new Set([

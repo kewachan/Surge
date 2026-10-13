@@ -6,7 +6,7 @@
 # Imported Sources:
 # Source: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Surge/Advertising/Advertising.sgmodule
 # MITM audit: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Surge/AdvertisingLite/AdvertisingLite.sgmodule
-# Source: https://yfamilys.com/module/AdBlock.module
+# Source: https://raw.githubusercontent.com/deezertidal/shadowrocket-rules/main/modules/AdBlock.module
 # Source: https://ruleset.skk.moe/Modules/sukka_url_rewrite.sgmodule
 # Source: https://raw.githubusercontent.com/fmz200/wool_scripts/main/Surge/module/blockAds.module
 # Source: https://raw.githubusercontent.com/fmz200/wool_scripts/main/Surge/module/blockHTTPDNS.module
