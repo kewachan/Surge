@@ -16,10 +16,9 @@ const TYPE_ORDER = new Map(
     (type, index) => [type, index],
   ),
 );
-const DEFAULT_TARGET = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../Filters/filters_block.list",
-);
+const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_TARGET = path.resolve(SCRIPT_DIRECTORY, "../../Filters/filters_block.list");
+const DEFAULT_STATE = path.resolve(SCRIPT_DIRECTORY, "block-list-source-state.json");
 
 function normalizeText(text) {
   return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
@@ -185,6 +184,69 @@ export function mergeImportedRules(ruleGroups, manualRuleKeys = new Set()) {
   });
 }
 
+function sortedRules(rules) {
+  return mergeImportedRules([rules]);
+}
+
+export function buildSnapshot(sourceResults) {
+  return {
+    rules: sortedRules(sourceResults.flatMap(({ rules }) => rules)).map((rule) => rule.line),
+    schemaVersion: 1,
+    sources: sourceResults.map(({ rules, url }) => ({
+      ruleCount: rules.length,
+      url,
+    })),
+  };
+}
+
+function validateSnapshot(value, sourceUrls, label) {
+  if (!value || value.schemaVersion !== 1 || !Array.isArray(value.sources)) {
+    throw new Error(`${label}: unsupported or malformed state file`);
+  }
+  if (!Array.isArray(value.rules) || !value.rules.every((line) => typeof line === "string")) {
+    throw new Error(`${label}: invalid tracked rules`);
+  }
+
+  const expected = JSON.stringify(sourceUrls);
+  const actual = JSON.stringify(value.sources.map(({ url }) => url));
+  if (expected !== actual) {
+    throw new Error(`${label}: source definitions do not match ${MARKER}`);
+  }
+
+  return {
+    ...value,
+    rules: parseRuleText(value.rules.join("\n"), label),
+  };
+}
+
+export function applyUpstreamDelta(
+  currentRules,
+  previousRules,
+  nextRules,
+  manualRuleKeys = new Set(),
+) {
+  const previousKeys = new Set(previousRules.map((rule) => rule.key));
+  const nextByKey = new Map(nextRules.map((rule) => [rule.key, rule]));
+  const removedKeys = new Set(
+    previousRules.filter((rule) => !nextByKey.has(rule.key)).map((rule) => rule.key),
+  );
+  const proposed = currentRules.filter((rule) => !removedKeys.has(rule.key));
+  const presentKeys = new Set(proposed.map((rule) => rule.key));
+
+  for (const rule of nextRules) {
+    if (
+      !previousKeys.has(rule.key) &&
+      !presentKeys.has(rule.key) &&
+      !manualRuleKeys.has(rule.key)
+    ) {
+      presentKeys.add(rule.key);
+      proposed.push(rule);
+    }
+  }
+
+  return sortedRules(proposed);
+}
+
 export function renderTargetFile({ manualText, sourceUrls, importedRules }) {
   const sourceLines = sourceUrls.map((url) => `${SOURCE_PREFIX}${url}`);
   const ruleLines = importedRules.map((rule) => rule.line);
@@ -245,21 +307,28 @@ async function fetchSource(url) {
 function parseArguments(argv) {
   const options = {
     allowLargeChange: false,
+    bootstrap: false,
     check: false,
     dryRun: false,
     maxChangeRatio: Number(process.env.MAX_IMPORTED_FILTER_CHANGE_RATIO || DEFAULT_MAX_CHANGE_RATIO),
+    statePath: DEFAULT_STATE,
     targetPath: DEFAULT_TARGET,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--allow-large-change") options.allowLargeChange = true;
+    else if (argument === "--bootstrap") options.bootstrap = true;
     else if (argument === "--check") options.check = true;
     else if (argument === "--dry-run") options.dryRun = true;
     else if (argument === "--file") {
       index += 1;
       if (!argv[index]) throw new Error("--file requires a path");
       options.targetPath = path.resolve(argv[index]);
+    } else if (argument === "--state-file") {
+      index += 1;
+      if (!argv[index]) throw new Error("--state-file requires a path");
+      options.statePath = path.resolve(argv[index]);
     } else {
       throw new Error(`Unknown argument: ${argument}`);
     }
@@ -267,6 +336,9 @@ function parseArguments(argv) {
 
   if (!Number.isFinite(options.maxChangeRatio) || options.maxChangeRatio < 0) {
     throw new Error("MAX_IMPORTED_FILTER_CHANGE_RATIO must be a non-negative number");
+  }
+  if (options.bootstrap && (options.check || options.dryRun)) {
+    throw new Error("--bootstrap cannot be combined with --check or --dry-run");
   }
 
   return options;
@@ -287,30 +359,77 @@ export async function run(argv = process.argv.slice(2)) {
   const currentContent = await readFile(options.targetPath, "utf8");
   const target = parseTargetFile(currentContent);
   const sourceGroups = await Promise.all(target.sourceUrls.map((url) => fetchSource(url)));
-  const importedRules = mergeImportedRules(sourceGroups, target.manualRuleKeys);
+  const nextSnapshot = buildSnapshot(
+    target.sourceUrls.map((url, index) => ({ rules: sourceGroups[index], url })),
+  );
+
+  if (options.bootstrap) {
+    try {
+      await readFile(options.statePath, "utf8");
+      throw new Error(`State file already exists: ${options.statePath}`);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    await atomicWrite(options.statePath, `${JSON.stringify(nextSnapshot, null, 2)}\n`);
+    console.log(
+      `Bootstrapped ${nextSnapshot.rules.length} upstream rules without changing the block list.`,
+    );
+    return;
+  }
+
+  const stateText = await readFile(options.statePath, "utf8");
+  let previousSnapshot;
+  try {
+    previousSnapshot = validateSnapshot(
+      JSON.parse(stateText),
+      target.sourceUrls,
+      options.statePath,
+    );
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error(`${options.statePath}: invalid JSON`);
+    throw error;
+  }
+
+  const nextRules = parseRuleText(nextSnapshot.rules.join("\n"), "current upstream state");
+  const importedRules = applyUpstreamDelta(
+    target.existingRules,
+    previousSnapshot.rules,
+    nextRules,
+    target.manualRuleKeys,
+  );
   const proposedContent = renderTargetFile({
     importedRules,
     manualText: target.manualText,
     sourceUrls: target.sourceUrls,
   });
-  const change = calculateChange(target.existingRules, importedRules);
-  const changed = proposedContent !== normalizeText(currentContent);
+  const proposedState = `${JSON.stringify(nextSnapshot, null, 2)}\n`;
+  const targetChange = calculateChange(target.existingRules, importedRules);
+  const sourceChange = calculateChange(previousSnapshot.rules, nextRules);
+  const targetChanged = proposedContent !== normalizeText(currentContent);
+  const stateChanged = proposedState !== normalizeText(stateText);
 
-  if (changed && change.ratio > options.maxChangeRatio && !options.allowLargeChange) {
-    throw new Error(
-      `Imported rule churn ${(change.ratio * 100).toFixed(1)}% exceeds ` +
-        `${(options.maxChangeRatio * 100).toFixed(1)}% ` +
-        `(${change.added} added, ${change.removed} removed). ` +
-        "Review upstream changes and rerun manually with --allow-large-change if safe.",
-    );
+  for (const [label, change] of [
+    ["Target churn", targetChange],
+    ["Upstream churn", sourceChange],
+  ]) {
+    if (change.ratio > options.maxChangeRatio && !options.allowLargeChange) {
+      throw new Error(
+        `${label} ${(change.ratio * 100).toFixed(1)}% exceeds ` +
+          `${(options.maxChangeRatio * 100).toFixed(1)}% ` +
+          `(${change.added} added, ${change.removed} removed). ` +
+          "Review upstream changes and rerun manually with --allow-large-change if safe.",
+      );
+    }
   }
 
   const summary =
-    `${changed ? "Update available" : "Already current"}: ` +
-    `${importedRules.length} imported rules, ${change.added} added, ${change.removed} removed.`;
+    `${targetChanged || stateChanged ? "Update available" : "Already current"}: ` +
+    `${importedRules.length} imported rules; target ${targetChange.added} added, ` +
+    `${targetChange.removed} removed; upstream ${sourceChange.added} added, ` +
+    `${sourceChange.removed} removed.`;
 
   if (options.check) {
-    if (changed) {
+    if (targetChanged || stateChanged) {
       console.error(summary);
       process.exitCode = 1;
     } else {
@@ -319,12 +438,13 @@ export async function run(argv = process.argv.slice(2)) {
     return;
   }
 
-  if (options.dryRun || !changed) {
+  if (options.dryRun || (!targetChanged && !stateChanged)) {
     console.log(summary);
     return;
   }
 
-  await atomicWrite(options.targetPath, proposedContent);
+  if (targetChanged) await atomicWrite(options.targetPath, proposedContent);
+  await atomicWrite(options.statePath, proposedState);
   console.log(summary);
 }
 
