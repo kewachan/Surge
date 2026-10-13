@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const JOBS_PATH = "/caption/jobs";
-const WORKER_BUILD = "caption-queue-v1";
+const WORKER_BUILD = "caption-queue-v2";
 const GOOGLE_TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -18,6 +18,8 @@ const MAX_SEND_BATCH_BYTES = 220 * 1024;
 const GOOGLE_TRANSLATE_TIMEOUT_MS = 8000;
 const MAX_QUEUE_ATTEMPTS = 4;
 const JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const PUBLIC_RATE_WINDOW_MS = 60 * 1000;
+const PUBLIC_RATE_LIMIT = 12;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
 const TEXT_ENCODER = new TextEncoder();
@@ -186,6 +188,14 @@ function jobStub(env, jobId) {
   return env.CAPTION_JOBS.get(env.CAPTION_JOBS.idFromName(jobId));
 }
 
+async function allowPublicJob(request, env) {
+  const client = request.headers.get("CF-Connecting-IP") || "unknown-client";
+  const response = await jobStub(env, `rate:${client}`).fetch("https://caption-job/internal/rate-limit", {
+    method: "POST",
+  });
+  return response.ok;
+}
+
 async function initializeJob(env, jobId, itemCount, batchCount) {
   const response = await jobStub(env, jobId).fetch("https://caption-job/internal/initialize", {
     method: "POST",
@@ -243,13 +253,16 @@ function validateJobPayload(payload) {
   return { texts: normalizedTexts, source, target };
 }
 
-async function createJob(request, env) {
+async function createJob(request, env, authenticated = false) {
   if (!env?.CAPTION_QUEUE || !env?.CAPTION_JOBS) return textResponse("Service Unavailable", 503);
   let payload;
   try {
     payload = validateJobPayload(await readRequestJson(request));
   } catch (error) {
     return textResponse(error?.message || "Invalid Caption Job", Number(error?.status) || 400);
+  }
+  if (!authenticated && !(await allowPublicJob(request, env))) {
+    return textResponse("Too Many Requests", 429, {"Retry-After": "60"});
   }
 
   const jobId = crypto.randomUUID();
@@ -297,11 +310,14 @@ async function handleRequest(request, env) {
       return jsonResponse({ status: "ok", build: WORKER_BUILD });
     }
     if (!url.pathname.startsWith(JOBS_PATH)) return textResponse("Not Found", 404);
-    if (!env?.CAPTION_ACCESS_TOKEN) return textResponse("Service Unavailable", 503);
-    if (!hasValidAccessToken(request, env)) {
+    const authorization = request.headers.get("authorization") || "";
+    const authenticated = hasValidAccessToken(request, env);
+    if (authorization && !authenticated) {
       return textResponse("Unauthorized", 401, { "WWW-Authenticate": "Bearer" });
     }
-    if (request.method === "POST" && url.pathname === JOBS_PATH) return createJob(request, env);
+    if (request.method === "POST" && url.pathname === JOBS_PATH) {
+      return createJob(request, env, authenticated);
+    }
     if (request.method === "GET" && url.pathname.startsWith(`${JOBS_PATH}/`)) {
       return getJobStatus(url.pathname.slice(JOBS_PATH.length + 1), env);
     }
@@ -379,6 +395,18 @@ export class CaptionJob extends DurableObject {
         await this.ctx.storage.put("meta", meta);
         await this.ctx.storage.setAlarm(Number(meta.createdAt) + JOB_RETENTION_MS);
       }
+      return textResponse("OK", 200);
+    }
+    if (request.method === "POST" && url.pathname === "/internal/rate-limit") {
+      const now = Date.now();
+      const saved = await this.ctx.storage.get("rate");
+      const state = saved && now - Number(saved.startedAt || 0) < PUBLIC_RATE_WINDOW_MS
+        ? saved
+        : {startedAt: now, count: 0};
+      if (state.count >= PUBLIC_RATE_LIMIT) return textResponse("Too Many Requests", 429);
+      state.count += 1;
+      await this.ctx.storage.put("rate", state);
+      await this.ctx.storage.setAlarm(state.startedAt + PUBLIC_RATE_WINDOW_MS);
       return textResponse("OK", 200);
     }
     if (request.method === "POST" && url.pathname === "/internal/result") {

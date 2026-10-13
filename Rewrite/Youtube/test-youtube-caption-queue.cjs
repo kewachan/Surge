@@ -126,11 +126,37 @@ async function verifyWorkerQueue(worker) {
   assert.equal(created.itemCount, texts.length);
   assert(queuedBodies.length > 1, "long caption jobs must be split into multiple queue messages");
 
-  const unauthorized = await worker.default.fetch(
+  const publicStatus = await worker.default.fetch(
     new Request(`https://worker.test/caption/jobs/${created.jobId}`),
     env,
   );
+  assert.equal(publicStatus.status, 200);
+  const unauthorized = await worker.default.fetch(new Request(
+    `https://worker.test/caption/jobs/${created.jobId}`,
+    {headers: {Authorization: "Bearer invalid-caption-token"}},
+  ), env);
   assert.equal(unauthorized.status, 401);
+
+  const publicEnv = {
+    CAPTION_JOBS: new MockDurableObjectNamespace(worker.CaptionJob),
+    CAPTION_QUEUE: {async sendBatch() {}},
+  };
+  const publicStatuses = [];
+  for (let index = 0; index <= 12; index++) {
+    const response = await worker.default.fetch(new Request("https://worker.test/caption/jobs", {
+      method: "POST",
+      headers: {"CF-Connecting-IP": "198.51.100.9", "Content-Type": "application/json"},
+      body: JSON.stringify({
+        purpose: "captions",
+        source: "en",
+        target: "zh-Hant",
+        texts: [`Public caption ${index}`],
+      }),
+    }), publicEnv);
+    publicStatuses.push(response.status);
+  }
+  assert.deepEqual(publicStatuses.slice(0, 12), Array(12).fill(202));
+  assert.equal(publicStatuses[12], 429);
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, options) => {
@@ -206,19 +232,21 @@ async function verifyWorkerQueue(worker) {
     jobId: created.jobId,
     itemCount: texts.length,
     batchCount: queuedBodies.length,
+    publicRateLimitedAccess: true,
     waitsForAllBatches: true,
     lateSuccessRecovery: true,
   };
 }
 
-function runCaptionClient(queueResult) {
+function runCaptionClient(queueResults, captionToken = "", options = {}) {
   const source = fs.readFileSync(clientPath, "utf8");
   const xml = '<?xml version="1.0"?><timedtext format="3"><body>'
     + '<p t="0" d="1000"><s>A</s></p><p t="1000" d="1000"><s>B</s></p>'
     + '<p t="2000" d="1000"><s>C</s></p></body></timedtext>';
-  const requests = {queuePosts: 0, queuePolls: 0, googleGets: 0};
+  const requests = {queuePosts: 0, queuePolls: 0, googleGets: 0, rejectedAuthorization: 0};
   const store = new Map();
   const jobId = "123e4567-e89b-42d3-a456-426614174000";
+  const queuedResults = Array.isArray(queueResults) ? queueResults : [queueResults];
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("caption client test timed out")), 8000);
     const context = {
@@ -227,7 +255,7 @@ function runCaptionClient(queueResult) {
       decodeURIComponent,
       setTimeout,
       clearTimeout,
-      $argument: JSON.stringify({captionToken: accessToken, debug: false}),
+      $argument: JSON.stringify({captionToken, debug: false}),
       $request: {url: "https://www.youtube.com/api/timedtext?v=test&lang=en&enhance_tlang=zh-TW&format=srv3"},
       $response: {body: xml, headers: {"Content-Type": "text/xml"}},
       $persistentStore: {
@@ -243,8 +271,15 @@ function runCaptionClient(queueResult) {
           try {
             requests.queuePosts++;
             assert.equal(request.url, "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/jobs");
-            assert.equal(request.headers.Authorization, `Bearer ${accessToken}`);
+            if (request.headers.Authorization) {
+              assert.equal(request.headers.Authorization, `Bearer ${captionToken}`);
+            }
             assert.deepEqual(JSON.parse(request.body).texts, ["A", "B", "C"]);
+            if (options.rejectAuthorizedOnce && request.headers.Authorization && !requests.rejectedAuthorization) {
+              requests.rejectedAuthorization++;
+              callback(null, {status: 401}, "Unauthorized");
+              return;
+            }
             callback(null, {status: 202}, JSON.stringify({jobId, pollAfterMs: 250}));
           } catch (error) {
             reject(error);
@@ -254,7 +289,9 @@ function runCaptionClient(queueResult) {
           try {
             if (request.url.startsWith("https://youtube-caption-translate.hmtw47cv7m.workers.dev/")) {
               requests.queuePolls++;
-              callback(null, {status: 200}, JSON.stringify(queueResult));
+              const queueResult = queuedResults[Math.min(requests.queuePolls - 1, queuedResults.length - 1)];
+              if (queueResult instanceof Error) callback(queueResult);
+              else callback(null, {status: 200}, JSON.stringify(queueResult));
               return;
             }
             requests.googleGets++;
@@ -281,18 +318,37 @@ function runCaptionClient(queueResult) {
 }
 
 async function verifyClientQueue() {
-  const complete = await runCaptionClient({
-    status: "complete",
-    translations: ["隊列:A", "隊列:B", "隊列:C"],
-    completedBatches: 1,
-    batchCount: 1,
-  });
+  const complete = await runCaptionClient([
+    new Error("transient queue polling timeout"),
+    {
+      status: "processing",
+      translations: [null, null, null],
+      completedBatches: 0,
+      batchCount: 1,
+    },
+    {
+      status: "complete",
+      translations: ["隊列:A", "隊列:B", "隊列:C"],
+      completedBatches: 1,
+      batchCount: 1,
+    },
+  ]);
   assert.equal(complete.requests.queuePosts, 1);
-  assert.equal(complete.requests.queuePolls, 1);
+  assert.equal(complete.requests.queuePolls, 3);
   assert.equal(complete.requests.googleGets, 0);
   assert.match(complete.result.body, /隊列:A/);
   assert.match(complete.result.body, /隊列:B/);
   assert.match(complete.result.body, /隊列:C/);
+
+  const staleToken = await runCaptionClient({
+    status: "complete",
+    translations: ["隊列:A", "隊列:B", "隊列:C"],
+    completedBatches: 1,
+    batchCount: 1,
+  }, accessToken, {rejectAuthorizedOnce: true});
+  assert.equal(staleToken.requests.queuePosts, 2);
+  assert.equal(staleToken.requests.rejectedAuthorization, 1);
+  assert.equal(staleToken.requests.googleGets, 0);
 
   const partial = await runCaptionClient({
     status: "failed",
@@ -308,7 +364,13 @@ async function verifyClientQueue() {
   assert.match(partial.result.body, /譯:B/);
   assert.match(partial.result.body, /隊列:C/);
 
-  return {completeQueueOnly: true, partialDirectFallback: true};
+  return {
+    publicQueueByDefault: true,
+    transientPollRecovery: true,
+    staleTokenPublicRetry: true,
+    completeQueueOnly: true,
+    partialDirectFallback: true,
+  };
 }
 
 (async () => {

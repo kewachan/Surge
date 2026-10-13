@@ -163,11 +163,9 @@ function captionWorkerRequest(method, url, token, body, timeoutSeconds) {
     const request = {
       url,
       timeout: typeof $loon !== "undefined" ? timeoutSeconds * 1000 : timeoutSeconds,
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
+      headers: {Accept: "application/json"},
     };
+    if (validCaptionToken(token)) request.headers.Authorization = `Bearer ${token.trim()}`;
     if (body !== undefined) {
       request.headers["Content-Type"] = "application/json";
       request.body = JSON.stringify(body);
@@ -176,7 +174,11 @@ function captionWorkerRequest(method, url, token, body, timeoutSeconds) {
       if (error) return reject(error);
       try {
         const status = response.status || response.statusCode;
-        if (status < 200 || status >= 300) throw new Error(`Caption Worker status ${status}`);
+        if (status < 200 || status >= 300) {
+          const requestError = new Error(`Caption Worker status ${status}`);
+          requestError.status = status;
+          throw requestError;
+        }
         const parsed = responseBody ? JSON.parse(responseBody) : {};
         resolve(parsed);
       } catch (parseError) {
@@ -189,12 +191,25 @@ function captionWorkerRequest(method, url, token, body, timeoutSeconds) {
 }
 
 async function translateWithQueue(entries, source, target, token, options) {
-  const created = await captionWorkerRequest("POST", CAPTION_WORKER_ENDPOINT, token, {
+  const payload = {
     purpose: "captions",
     source,
     target,
     texts: entries.map((entry) => entry.text),
-  }, QUEUE_SUBMIT_TIMEOUT_SECONDS);
+  };
+  let queueToken = validCaptionToken(token) ? token.trim() : "";
+  let created;
+  try {
+    created = await captionWorkerRequest(
+      "POST", CAPTION_WORKER_ENDPOINT, queueToken, payload, QUEUE_SUBMIT_TIMEOUT_SECONDS,
+    );
+  } catch (error) {
+    if (error?.status !== 401 || !queueToken) throw error;
+    queueToken = "";
+    created = await captionWorkerRequest(
+      "POST", CAPTION_WORKER_ENDPOINT, queueToken, payload, QUEUE_SUBMIT_TIMEOUT_SECONDS,
+    );
+  }
   if (!/^[0-9a-f-]{36}$/i.test(String(created?.jobId || ""))) throw new Error("Invalid Caption Worker job response");
 
   const statusUrl = `${CAPTION_WORKER_ENDPOINT}/${created.jobId}`;
@@ -203,7 +218,17 @@ async function translateWithQueue(entries, source, target, token, options) {
   let latest = null;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, pollMs));
-    latest = await captionWorkerRequest("GET", statusUrl, token, undefined, QUEUE_POLL_TIMEOUT_SECONDS);
+    try {
+      latest = await captionWorkerRequest("GET", statusUrl, queueToken, undefined, QUEUE_POLL_TIMEOUT_SECONDS);
+    } catch (error) {
+      if (error?.status === 401 && queueToken) {
+        queueToken = "";
+        continue;
+      }
+      if (error?.status >= 400 && error.status < 500) throw error;
+      debugLog(options, `queue poll retry: ${error}`);
+      continue;
+    }
     if (!Array.isArray(latest?.translations) || latest.translations.length !== entries.length) {
       throw new Error("Invalid Caption Worker status response");
     }
@@ -334,19 +359,17 @@ async function translateCaptionResponse() {
   if (!captions.length) return $done({});
 
   applyCachedTranslations(captions, source, target);
-  if (validCaptionToken(options.captionToken)) {
-    const entries = captions
-      .map((caption, captionIndex) => ({captionIndex, text: caption.text, translated: caption.translated}))
-      .filter((entry) => !entry.translated);
-    if (entries.length) {
-      try {
-        const queued = await translateWithQueue(entries, source, target, options.captionToken.trim(), options);
-        const applied = applyQueuedTranslations(entries, queued, captions);
-        debugLog(options, `queue returned ${applied}/${entries.length} captions`);
-        writeResolvedCaches(captions, source, target);
-      } catch (error) {
-        console.log(`Caption Worker queue failed: ${error}`);
-      }
+  const entries = captions
+    .map((caption, captionIndex) => ({captionIndex, text: caption.text, translated: caption.translated}))
+    .filter((entry) => !entry.translated);
+  if (entries.length) {
+    try {
+      const queued = await translateWithQueue(entries, source, target, options.captionToken, options);
+      const applied = applyQueuedTranslations(entries, queued, captions);
+      debugLog(options, `queue returned ${applied}/${entries.length} captions`);
+      writeResolvedCaches(captions, source, target);
+    } catch (error) {
+      console.log(`Caption Worker queue failed: ${error}`);
     }
   }
   await translateBatches(buildBatches(captions, true), captions, source, target);
