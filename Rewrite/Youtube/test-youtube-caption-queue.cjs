@@ -260,6 +260,9 @@ async function verifyWorkerQueue(worker) {
 
 function runCaptionClient(queueResult, captionToken = "") {
   const source = fs.readFileSync(clientPath, "utf8");
+  assert.match(source, /const QUEUE_RESPONSE_BUDGET_MS = 100000;/);
+  assert.doesNotMatch(source, /SCRIPT_RESPONSE_BUDGET_MS/);
+  const queueResults = Array.isArray(queueResult) ? queueResult : [queueResult];
   const xml = '<?xml version="1.0"?><timedtext format="3"><body>'
     + '<p t="0" d="1000"><s>A</s></p><p t="1000" d="1000"><s>B</s></p>'
     + '<p t="2000" d="1000"><s>C</s></p></body></timedtext>';
@@ -302,7 +305,10 @@ function runCaptionClient(queueResult, captionToken = "") {
           try {
             if (request.url.startsWith("https://youtube-caption-translate.hmtw47cv7m.workers.dev/")) {
               requests.queuePolls++;
-              callback(null, {status: 200}, JSON.stringify(queueResult));
+              const resultIndex = Math.min(requests.queuePolls - 1, queueResults.length - 1);
+              const queueResponse = queueResults[resultIndex];
+              if (queueResponse instanceof Error) callback(queueResponse);
+              else callback(null, {status: 200}, JSON.stringify(queueResponse));
               return;
             }
             requests.googleGets++;
@@ -329,14 +335,29 @@ function runCaptionClient(queueResult, captionToken = "") {
 }
 
 async function verifyClientQueue() {
-  const complete = await runCaptionClient({
-    status: "complete",
-    translations: ["隊列:A", "隊列:B", "隊列:C"],
-    completedBatches: 1,
-    batchCount: 1,
-  });
+  const complete = await runCaptionClient([
+    new Error("transient queue poll timeout"),
+    {
+      status: "processing",
+      translations: [null, null, null],
+      completedBatches: 0,
+      batchCount: 1,
+    },
+    {
+      status: "processing",
+      translations: [null, null, null],
+      completedBatches: 0,
+      batchCount: 1,
+    },
+    {
+      status: "complete",
+      translations: ["隊列:A", "隊列:B", "隊列:C"],
+      completedBatches: 1,
+      batchCount: 1,
+    },
+  ]);
   assert.equal(complete.requests.queuePosts, 1);
-  assert.equal(complete.requests.queuePolls, 1);
+  assert.equal(complete.requests.queuePolls, 4);
   assert.equal(complete.requests.googleGets, 0);
   assert.match(complete.result.body, /隊列:A/);
   assert.match(complete.result.body, /隊列:B/);
@@ -356,7 +377,13 @@ async function verifyClientQueue() {
   assert.match(partial.result.body, /譯:B/);
   assert.match(partial.result.body, /隊列:C/);
 
-  return {publicQueueByDefault: true, completeQueueOnly: true, partialDirectFallback: true};
+  return {
+    publicQueueByDefault: true,
+    backgroundPollingBeyondInitialRequestWindow: true,
+    transientPollRecovery: true,
+    completeQueueOnly: true,
+    partialDirectFallback: true,
+  };
 }
 
 (async () => {

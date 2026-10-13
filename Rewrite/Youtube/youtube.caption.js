@@ -9,9 +9,9 @@ const TRANSLATE_TIMEOUT_SECONDS = 2;
 const MAX_RETRIES = 0;
 const MIN_RETRY_WINDOW_MS = 1200;
 const RETRY_DELAY_MS = 200;
-const SCRIPT_RESPONSE_BUDGET_MS = 7200;
+const QUEUE_RESPONSE_BUDGET_MS = 100000;
 const MIN_RESPONSE_BUDGET_MS = 1000;
-const MAX_RESPONSE_BUDGET_MS = SCRIPT_RESPONSE_BUDGET_MS;
+const MAX_RESPONSE_BUDGET_MS = 7200;
 const QUEUE_SUBMIT_TIMEOUT_SECONDS = 3;
 const QUEUE_POLL_TIMEOUT_SECONDS = 1;
 const QUEUE_DEFAULT_POLL_MS = 250;
@@ -188,7 +188,8 @@ function captionWorkerRequest(method, url, token, body, timeoutSeconds) {
   });
 }
 
-async function translateWithQueue(entries, source, target, token, options, deadline) {
+async function translateWithQueue(entries, source, target, token, options) {
+  const deadline = Date.now() + QUEUE_RESPONSE_BUDGET_MS;
   const created = await captionWorkerRequest("POST", CAPTION_WORKER_ENDPOINT, token, {
     purpose: "captions",
     source,
@@ -209,12 +210,16 @@ async function translateWithQueue(entries, source, target, token, options, deadl
       QUEUE_POLL_TIMEOUT_SECONDS,
       Math.ceil((deadline - Date.now()) / 1000),
     ));
-    latest = await captionWorkerRequest("GET", statusUrl, token, undefined, remainingSeconds);
-    if (!Array.isArray(latest?.translations) || latest.translations.length !== entries.length) {
-      throw new Error("Invalid Caption Worker status response");
+    try {
+      latest = await captionWorkerRequest("GET", statusUrl, token, undefined, remainingSeconds);
+      if (!Array.isArray(latest?.translations) || latest.translations.length !== entries.length) {
+        throw new Error("Invalid Caption Worker status response");
+      }
+      debugLog(options, `queue ${latest.status} ${latest.completedBatches || 0}/${latest.batchCount || 0}`);
+      if (latest.status === "complete" || latest.status === "failed") return latest;
+    } catch (error) {
+      debugLog(options, `queue poll delayed: ${error}`);
     }
-    debugLog(options, `queue ${latest.status} ${latest.completedBatches || 0}/${latest.batchCount || 0}`);
-    if (latest.status === "complete" || latest.status === "failed") return latest;
   }
   return latest;
 }
@@ -279,8 +284,8 @@ function rebuildBatch(items, captions) {
   };
 }
 
-async function translateBatches(batches, captions, source, target, hardDeadline) {
-  if (!batches.length || Date.now() >= hardDeadline) return;
+async function translateBatches(batches, captions, source, target) {
+  if (!batches.length) return;
   const queue = [...batches];
   const waves = Math.max(1, Math.ceil(batches.length / CONCURRENCY));
   const retryWindow = (MAX_RETRIES + 1) * TRANSLATE_TIMEOUT_SECONDS * 1000
@@ -289,7 +294,7 @@ async function translateBatches(batches, captions, source, target, hardDeadline)
     MAX_RESPONSE_BUDGET_MS,
     Math.max(MIN_RESPONSE_BUDGET_MS, waves * retryWindow),
   );
-  const deadline = Math.min(hardDeadline, Date.now() + calculatedBudget);
+  const deadline = Date.now() + calculatedBudget;
   const responseBudget = Math.max(0, deadline - Date.now());
   if (!responseBudget) return;
   let cursor = 0;
@@ -326,7 +331,6 @@ async function translateBatches(batches, captions, source, target, hardDeadline)
 
 async function translateCaptionResponse() {
   const options = scriptOptions();
-  const responseDeadline = Date.now() + SCRIPT_RESPONSE_BUDGET_MS;
   const target = mapTargetLanguage(getQueryValue($request.url, "enhance_tlang") || getQueryValue($request.url, "tlang"));
   const source = getQueryValue($request.url, "lang") || "auto";
   if (!target || !$response.body) return $done({});
@@ -353,6 +357,7 @@ async function translateCaptionResponse() {
   const entries = captions
     .map((caption, captionIndex) => ({captionIndex, text: caption.text, translated: caption.translated}))
     .filter((entry) => !entry.translated);
+  let useDirectFallback = false;
   if (entries.length) {
     try {
       const queued = await translateWithQueue(
@@ -361,16 +366,19 @@ async function translateCaptionResponse() {
         target,
         options.captionToken,
         options,
-        responseDeadline,
       );
       const applied = applyQueuedTranslations(entries, queued, captions);
       debugLog(options, `queue returned ${applied}/${entries.length} captions`);
+      useDirectFallback = queued?.status === "failed";
       writeResolvedCaches(captions, source, target);
     } catch (error) {
       console.log(`Caption Worker queue failed: ${error}`);
+      useDirectFallback = true;
     }
   }
-  await translateBatches(buildBatches(captions, true), captions, source, target, responseDeadline);
+  if (useDirectFallback) {
+    await translateBatches(buildBatches(captions, true), captions, source, target);
+  }
   writeResolvedCaches(captions, source, target);
   let output = "";
   let position = 0;
