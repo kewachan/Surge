@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "youtube-caption-translate",
+  "main": "youtube.caption.worker.js",
+  "compatibility_date": "2026-10-13",
+  "secrets": {
+    "required": ["CAPTION_ACCESS_TOKEN"]
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "CAPTION_QUEUE",
+        "queue": "youtube-caption-translate"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "youtube-caption-translate",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 3,
+        "max_concurrency": 3
+      }
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CAPTION_JOBS",
+        "class_name": "CaptionJob"
+      }
+    ]
+  },
+  "exports": {
+    "CaptionJob": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  }
+}

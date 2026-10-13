@@ -40,6 +40,21 @@
 - Script pattern 應盡量精確，只加入必需的 MITM hostname；不要建立共用的 general response JavaScript。
 - 修改後應以 HAR 內的實際 response 測試，確認目標元素已移除且原有功能正常。
 
+## YouTube 長字幕工作隊列部署
+
+長影片字幕可選用獨立 Cloudflare Queue Worker，避免 Surge script 在一次同步請求內翻譯整段長字幕。未設定有效 `Caption Access Token`，或隊列暫時失敗時，client 仍會直接使用 Google Translate，保持原有 fail-open 行為。
+
+```sh
+cd Rewrite/Youtube
+npx wrangler@latest queues create youtube-caption-translate
+npx wrangler@latest secret put CAPTION_ACCESS_TOKEN -c wrangler.caption.jsonc
+npx wrangler@latest deploy -c wrangler.caption.jsonc
+```
+
+部署後，在 `YouTube.Enhance.sgmodule` 的本機參數填入同一個 token。實際 token 只可存於 Cloudflare Secret 及個人 Surge 設定，不可 commit 到 repository。
+
+Cloudflare 資源統一使用小寫 kebab-case `youtube-*`；翻譯 Worker 採用 `youtube-<content>-translate`，對應 source 使用 `youtube.<content>.worker.js`、Wrangler config 使用 `wrangler.<content>.jsonc`。因此字幕 Worker／Queue 為 `youtube-caption-translate`，與 `youtube-lyrics-translate` 命名一致。
+
 ## Codex Project Context
 
 ### Purpose
@@ -54,7 +69,7 @@
 - LINE：專用 domain／path reject 廣告及遙測；`getConfigurations` binary Thrift response 關閉 News tab，同時保留共用 `/S4` endpoint。
 - Bilibili：合併 BiliUniverse Enhanced／ADBlock → 本地 fail-closed feed 過濾 → 其餘功能使用固定上游版本 → 額外 PlayPause reject。
 - THIM Home：`exclusive-banners` response → 清空 `data` → App 隱藏 Privilege Offers carousel。
-- YouTube／YouTube Music：播放初始化 request → `youtube-init` media Worker；字幕 → Google Translate public endpoint；歌詞有有效私人 Bearer token 時 → `youtube-lyrics-translate` Worker → AI cache hit 即回 AI，cache miss 先回 Google 並以 `waitUntil` 背景預熱 Workers AI，否則由裝置直接使用 Google Translate。
+- YouTube／YouTube Music：播放初始化 request → `youtube-init` media Worker；字幕有有效私人 Bearer token 時 → `youtube-caption-translate` → Cloudflare Queue → Google Translate → Durable Object job 狀態 → client polling，無 token、局部失敗或逾時則由裝置直接補譯；歌詞有有效私人 Bearer token 時 → `youtube-lyrics-translate` Worker → AI cache hit 即回 AI，cache miss 先回 Google 並以 `waitUntil` 背景預熱 Workers AI，否則由裝置直接使用 Google Translate。
 - Node Offline Monitor：cron → active Profile `[Proxy]` → policy test → 5 次狀態確認 → 維護時段閘門 → 狀態轉變通知。
 
 ### Key Files
@@ -65,7 +80,7 @@
 - `Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule` — 統一 script 與 MITM 設定。
 - `Rewrite/GeneralAdBlock/reddit-adblock.js` — Reddit JSON／GraphQL multipart 廣告及 NSFW response 過濾。
 - `Rewrite/Bilibili/bilibili.feed.response.js` — 無網絡補位、失敗時不回退廣告內容的首頁 feed 過濾。
-- `Rewrite/Youtube/YouTube.Enhance.sgmodule`、`Rewrite/Youtube/youtube.worker.js`、`Rewrite/Youtube/youtube.lyrics.worker.js` — YouTube client scripts、media Worker 及獨立 lyrics Worker。
+- `Rewrite/Youtube/YouTube.Enhance.sgmodule`、`Rewrite/Youtube/youtube.worker.js`、`Rewrite/Youtube/youtube.caption.worker.js`、`Rewrite/Youtube/youtube.lyrics.worker.js` — YouTube client scripts、media Worker、長字幕隊列 Worker 及獨立 lyrics Worker。
 - `Tools/NodeOfflineMonitor/node-offline-monitor.js` — 節點發現、測試及狀態通知。
 
 ### Core Logic
@@ -78,7 +93,7 @@
 - LINE 靜態規則按類型分流：專用 hostname 放 `filters_block.list`，共享 hostname 的廣告／遙測 path 放 `Adrewrite.sgmodule`。
 - Bilibili 首頁 feed 由本地 response script 直接移除廣告及可選活動大圖，不改 request、亦不發補位 request；其他功能保留固定上游 script。
 - THIM script 驗證成功 envelope 後只將 `data` 改成空陣列；其他 API 或未知格式原樣放行。
-- 字幕 script 在約 7.5 秒 client 時限內分批並行呼叫 Google Translate，結果在 client 快取 7 日；歌詞 client 以最多 12 行／600 字組成邏輯批次。Worker 的 AI cache 命中時即回 Cloudflare AI；miss 時先回 Google、同時以 `waitUntil` 背景 AI 預熱。AI 結果快取 14 日，臨時 Google client cache 只保留 2 分鐘。
+- 字幕 script 先讀取 7 日 client cache；有效 token 會將未命中字幕一次提交到 Queue Worker，client 最多 polling 100 秒並套用已完成的 sparse 結果，其餘字幕才以約 4.5 秒預算直接並行呼叫 Google Translate。Worker 只在 Queue message 傳遞已分批文字，Durable Object 保存 job 結果 7 日，不保存完整字幕 XML。歌詞 client 以最多 12 行／600 字組成邏輯批次；Worker 的 AI cache 命中時即回 Cloudflare AI，miss 時先回 Google、同時以 `waitUntil` 背景 AI 預熱。AI 結果快取 14 日，臨時 Google client cache 只保留 2 分鐘。
 - 歌詞 Worker 按用戶選擇的目標語言及文字系統逐行判斷；本身已精確符合目標的行必須原樣返回，client 不會重複疊加該行或顯示翻譯署名；`zh-Hant`／`zh-Hans` 仍會正確互轉。
 - 節點監察從 active Profile `[Proxy]` 動態發現節點；offline／resume 均須連續 5 次一致，每次相隔 5 秒，狀態不變時不重複通知。
 - 每日 UTC+8 04:25–05:15 維護靜默時段仍會檢測及記錄 log，但不通知或覆寫 persistent state；時段結束後才以原有狀態重新確認。
@@ -91,7 +106,8 @@
 - LINE `/S4` 是共用核心 endpoint，不可封鎖；只可在 binary-body mode 精準修改已驗證的 News flag。
 - THIM 不封鎖共用圖片 CDN，只攔截獨立 `exclusive-banners` endpoint。
 - Bilibili feed 採用 fail-closed 過濾；網絡異常不得令廣告補位或原始廣告 response 回流。
-- Media 與 lyrics Worker 使用獨立 source 及部署；`youtube-init` 不含 AI binding 或翻譯路由。字幕直接連線 Google Translate，歌詞直接連線 `youtube-lyrics-translate`；兩者均設為 DIRECT。歌詞採用 request-local `waitUntil` 背景預熱及 Cache API 狀態／失敗冷卻，不使用 Durable Objects。
+- Media、caption 與 lyrics Worker 使用獨立 source 及部署；`youtube-init` 不含翻譯路由。Caption Worker 以私人 Bearer token 保護、Cloudflare Queue 執行 Google 翻譯、SQLite Durable Object 提供 job polling；缺少 token 或任何未完成部分必須由 client 直接 Google fallback。歌詞採用 request-local `waitUntil` 背景預熱及 Cache API 狀態／失敗冷卻，不使用 Durable Objects。Caption／lyrics Worker hostname 及 Google endpoint 均設為 DIRECT。
+- Cloudflare Worker 統一使用小寫 kebab-case `youtube-*`；翻譯服務採用 `youtube-<content>-translate`，其 Queue 沿用相同名稱，source／config 則分別使用 `youtube.<content>.worker.js`／`wrangler.<content>.jsonc`。
 - 歌詞 Worker 只可使用 request-local 並行控制；不可在 module scope 儲存跨 invocation 的 in-flight Promise、waiter 或 request-bound I/O。
 - `zh-Hant`／`zh-TW` AI 結果如含明確簡體字形必須拒絕且不可寫入 cache，交由 client 使用 Google Translate fallback；正常批次不可為了預先分拆而重複 AI inference。
 - 歌詞 Worker 的共用 access token 只存於 Cloudflare Secret；module 預設不包含有效 token，使用者可私下取得並在本機參數輸入；缺少或無效 token 時 client 必須直接改用 Google Translate，不可先呼叫 Worker。
@@ -100,6 +116,7 @@
 
 ### Recent Significant Changes
 
+- `2026-10-13` — 長影片字幕加入獨立 Cloudflare Queue 工作隊列：Durable Object 保存 job 進度，Surge client polling 後使用完整或局部結果，未完成字幕自動回退直接 Google 翻譯；無有效 Caption Access Token 時維持原有直譯流程。
 - `2026-10-06` — 歌詞改為 Google-first／AI background warm：AI cache hit 即回 AI，miss 先回 Google，背景成功後寫入 14 日 AI cache；臨時 Google client cache 只保留 2 分鐘，並以短期 warming marker／失敗 cooldown 避免重複消耗 AI。
 - `2026-10-05` — 歌詞 AI 改為完整 12 行／600 字批次單次 inference，只有無效 JSON 才拆細；加入 `zh-Hant` 簡體字形 guard 並失效舊 Worker／client cache，降低延遲及防止混入簡體。
 - `2026-10-05` — 歌詞 client 在 access token 缺失或格式無效時改為直接使用 Google Translate；Google cache 亦只會在存在有效 token 時嘗試升級成 AI 翻譯。
@@ -110,17 +127,14 @@
 - `2026-10-01` — 字幕改回 Google Translate 並採用限時分批並行；歌詞 Worker 更名為 `youtube-lyrics-translate`、升級語意模型並與 media source 完全分離，舊 caption Worker／AI 分支移除。
 - `2026-09-30` — YouTube media 與 translation Worker 分拆；translation 加入 7 日 Cache API，module 將 translation Worker 明確設為 DIRECT。
 - `2026-09-28` — Node Offline Monitor 維護靜默時段調整為 UTC+8 04:25–05:15，確保 05:00 排程仍靜默；檢測照常執行，但不通知或保存錯誤／狀態變更。
-- `2026-09-16` — LINE 加入專用 domain／path 廣告及遙測封鎖，並以 binary Thrift feature flag 隱藏 News tab；共用 `/S4` 保持可用。
-- `2026-09-16` — Reddit 去廣告由 JQ 改為專用 JSON／multipart parser，支援 deferred Home Feed 並保留 NSFW 解鎖。
-- `2026-09-12` — Bilibili 首頁 feed 改用本地純過濾 script，移除上游補位 request、5 秒 timeout 及原始廣告 fallback 路徑。
-- `2026-09-11` — 節點 offline／resume 改為連續 5 次確認後才更新狀態及通知。
 
 ### Watch Out
 
 - Module 使用 GitHub raw JS URL；修改本機工作檔不會自動發佈，發佈時須同步 JS 與 module 版本。
-- `youtube-init` 使用 `wrangler.jsonc`；`youtube-lyrics-translate` 使用 `wrangler.lyrics.jsonc`，兩者沒有 service binding，可獨立部署。
+- `youtube-init` 使用 `wrangler.jsonc`；`youtube-caption-translate` 使用 `wrangler.caption.jsonc` 並須先建立同名 Queue、設定 `CAPTION_ACCESS_TOKEN`；`youtube-lyrics-translate` 使用 `wrangler.lyrics.jsonc`。三者可獨立部署。
 - Cloudflare request context 不可跨 invocation 共用；歌詞 Worker 不可重新加入 module-scope Promise coalescing 或全域 waiter queue。
 - `Lyrics Access Token` 留空或無效時歌詞仍會使用 Google Translate；輸入私下取得的 64 字元 token 才會啟用 Workers AI。不可將實際 token commit 到 repository。
+- `Caption Access Token` 留空或無效時字幕仍會直接使用 Google Translate；token 必須與 Cloudflare Secret 完全相同，而且不可 commit 到 repository。
 - Reddit `HomeFeedWithDefer` 使用 `multipart/mixed; boundary=graphql`；不可退回只接受單一 JSON 的 JQ rule。
 - HAR 可驗證 API 已清空；整個 section 是否收合仍須以 THIM 真機 UI 驗收。
 - Node Offline Monitor 預設沿用 Profile `proxy-test-url`，未設定時才使用內置 fallback URL。
@@ -134,3 +148,4 @@
 - `Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule`
 - `Rewrite/GeneralAdBlock/reddit-adblock.js`
 - `Rewrite/Bilibili/bilibili.feed.response.js`
+- `Rewrite/Youtube/youtube.caption.worker.js`

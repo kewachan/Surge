@@ -1,16 +1,41 @@
-// Translate YouTube srv3 captions with Google's public web translation endpoint.
-// No account or API key is required. Public endpoint limits still apply.
+// Translate YouTube srv3 captions through an optional work queue with direct Google fallback.
+// Direct fallback requires no account or API key. Public endpoint limits still apply.
 
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
+const CAPTION_WORKER_ENDPOINT = "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/jobs";
 const MAX_ENCODED_QUERY_CHARS = 6000;
 const CONCURRENCY = 3;
 const RESPONSE_BUDGET_MS = 4500;
 const TRANSLATE_TIMEOUT_SECONDS = 4;
 const MAX_RETRIES = 1;
 const MIN_RETRY_WINDOW_MS = 1200;
+const QUEUE_RESPONSE_BUDGET_MS = 100000;
+const QUEUE_SUBMIT_TIMEOUT_SECONDS = 10;
+const QUEUE_POLL_TIMEOUT_SECONDS = 5;
+const QUEUE_DEFAULT_POLL_MS = 500;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_LIMIT = 96;
-const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v4";
+const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v5";
+
+function scriptOptions() {
+  const defaults = {captionToken: "", debug: false};
+  try {
+    if (typeof $argument === "string" && !$argument.includes("{{{")) {
+      return {...defaults, ...JSON.parse($argument)};
+    }
+    if (typeof $argument === "object" && $argument) return {...defaults, ...$argument};
+  } catch (_) {}
+  return defaults;
+}
+
+function validCaptionToken(value) {
+  const token = String(value || "").trim();
+  return token.length >= 32 && token.length <= 128 && !/\s/.test(token) && token !== "paste-token-here";
+}
+
+function debugLog(options, message) {
+  if (options.debug) console.log(`YouTube caption: ${message}`);
+}
 
 function getQueryValue(url, name) {
   const match = url.match(new RegExp(`[?&]${name}=([^&#]*)`));
@@ -29,7 +54,7 @@ function cacheKey(query, source, target) {
     hash ^= value.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
-  return `YouTubeCaption.v4.${(hash >>> 0).toString(16)}`;
+  return `YouTubeCaption.v5.${(hash >>> 0).toString(16)}`;
 }
 
 function readCachedParts(key, length) {
@@ -99,11 +124,12 @@ function separator(index) {
   return `\n[[YTS:${index}]]\n`;
 }
 
-function buildBatches(captions) {
+function buildBatches(captions, missingOnly = false) {
   const batches = [];
   let items = [];
   let query = "";
   captions.forEach((caption, index) => {
+    if (missingOnly && caption.translated) return;
     const addition = `${items.length ? separator(index) : ""}${caption.text}`;
     if (items.length && encodeURIComponent(query + addition).length > MAX_ENCODED_QUERY_CHARS) {
       batches.push({items, query});
@@ -115,6 +141,89 @@ function buildBatches(captions) {
   });
   if (items.length) batches.push({items, query});
   return batches;
+}
+
+function applyCachedTranslations(captions, source, target) {
+  for (const batch of buildBatches(captions)) {
+    const parts = readCachedParts(cacheKey(batch.query, source, target), batch.items.length);
+    if (!parts) continue;
+    batch.items.forEach((item, index) => { captions[item.captionIndex].translated = parts[index].trim(); });
+  }
+}
+
+function writeResolvedCaches(captions, source, target) {
+  for (const batch of buildBatches(captions)) {
+    const parts = batch.items.map((item) => String(captions[item.captionIndex].translated || "").trim());
+    if (parts.every(Boolean)) writeCachedParts(cacheKey(batch.query, source, target), parts);
+  }
+}
+
+function captionWorkerRequest(method, url, token, body, timeoutSeconds) {
+  return new Promise((resolve, reject) => {
+    const request = {
+      url,
+      timeout: typeof $loon !== "undefined" ? timeoutSeconds * 1000 : timeoutSeconds,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    };
+    if (body !== undefined) {
+      request.headers["Content-Type"] = "application/json";
+      request.body = JSON.stringify(body);
+    }
+    const callback = (error, response, responseBody) => {
+      if (error) return reject(error);
+      try {
+        const status = response.status || response.statusCode;
+        if (status < 200 || status >= 300) throw new Error(`Caption Worker status ${status}`);
+        const parsed = responseBody ? JSON.parse(responseBody) : {};
+        resolve(parsed);
+      } catch (parseError) {
+        reject(parseError);
+      }
+    };
+    if (method === "POST") $httpClient.post(request, callback);
+    else $httpClient.get(request, callback);
+  });
+}
+
+async function translateWithQueue(entries, source, target, token, options) {
+  const created = await captionWorkerRequest("POST", CAPTION_WORKER_ENDPOINT, token, {
+    purpose: "captions",
+    source,
+    target,
+    texts: entries.map((entry) => entry.text),
+  }, QUEUE_SUBMIT_TIMEOUT_SECONDS);
+  if (!/^[0-9a-f-]{36}$/i.test(String(created?.jobId || ""))) throw new Error("Invalid Caption Worker job response");
+
+  const statusUrl = `${CAPTION_WORKER_ENDPOINT}/${created.jobId}`;
+  const deadline = Date.now() + QUEUE_RESPONSE_BUDGET_MS;
+  const pollMs = Math.max(250, Math.min(2000, Number(created.pollAfterMs) || QUEUE_DEFAULT_POLL_MS));
+  let latest = null;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    latest = await captionWorkerRequest("GET", statusUrl, token, undefined, QUEUE_POLL_TIMEOUT_SECONDS);
+    if (!Array.isArray(latest?.translations) || latest.translations.length !== entries.length) {
+      throw new Error("Invalid Caption Worker status response");
+    }
+    debugLog(options, `queue ${latest.status} ${latest.completedBatches || 0}/${latest.batchCount || 0}`);
+    if (latest.status === "complete" || latest.status === "failed") return latest;
+  }
+  return latest;
+}
+
+function applyQueuedTranslations(entries, result, captions) {
+  if (!Array.isArray(result?.translations)) return 0;
+  let applied = 0;
+  result.translations.forEach((translation, index) => {
+    const text = String(translation || "").trim();
+    const entry = entries[index];
+    if (!text || !entry) return;
+    captions[entry.captionIndex].translated = text;
+    applied++;
+  });
+  return applied;
 }
 
 function requestTranslation(query, source, target, timeoutSeconds) {
@@ -201,6 +310,7 @@ async function translateBatches(batches, captions, source, target) {
 }
 
 async function translateCaptionResponse() {
+  const options = scriptOptions();
   const target = mapTargetLanguage(getQueryValue($request.url, "enhance_tlang") || getQueryValue($request.url, "tlang"));
   const source = getQueryValue($request.url, "lang") || "auto";
   if (!target || !$response.body) return $done({});
@@ -223,7 +333,24 @@ async function translateCaptionResponse() {
   }
   if (!captions.length) return $done({});
 
-  await translateBatches(buildBatches(captions), captions, source, target);
+  applyCachedTranslations(captions, source, target);
+  if (validCaptionToken(options.captionToken)) {
+    const entries = captions
+      .map((caption, captionIndex) => ({captionIndex, text: caption.text, translated: caption.translated}))
+      .filter((entry) => !entry.translated);
+    if (entries.length) {
+      try {
+        const queued = await translateWithQueue(entries, source, target, options.captionToken.trim(), options);
+        const applied = applyQueuedTranslations(entries, queued, captions);
+        debugLog(options, `queue returned ${applied}/${entries.length} captions`);
+        writeResolvedCaches(captions, source, target);
+      } catch (error) {
+        console.log(`Caption Worker queue failed: ${error}`);
+      }
+    }
+  }
+  await translateBatches(buildBatches(captions, true), captions, source, target);
+  writeResolvedCaches(captions, source, target);
   let output = "";
   let position = 0;
   captions.forEach((caption) => {
