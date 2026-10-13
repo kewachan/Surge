@@ -10,6 +10,7 @@ import {
   parseTargetModule,
   parseUrlRewriteSection,
   renderTargetModule,
+  setModuleUpdatedDate,
 } from "./update-advertising-module.mjs";
 
 const SOURCE = "https://raw.githubusercontent.com/example/repo/main/module.sgmodule";
@@ -106,4 +107,16 @@ test("renders a valid target and measures additions and removals", () => {
     ratio: 1,
     removed: 1,
   });
+});
+
+test("inserts and replaces the module update date", () => {
+  const module = "#!name=Fixture\n#!category=Advertising\n\n[URL Rewrite]\n";
+  const dated = setModuleUpdatedDate(module, "2026-10-13");
+
+  assert.equal(dated.includes("#!category=Advertising\n#!date=2026-10-13\n"), true);
+  assert.equal(
+    setModuleUpdatedDate(dated, "2026-10-14").includes("#!date=2026-10-14"),
+    true,
+  );
+  assert.equal(setModuleUpdatedDate(dated, "2026-10-14").match(/^#!date=/gmu)?.length, 1);
 });

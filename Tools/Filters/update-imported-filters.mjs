@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const MARKER = "# Imported List";
 const SOURCE_PREFIX = "# Source: ";
+const FILTER_DATE_PATTERN = /^# Last Updated:\s*.*$/mu;
 const DEFAULT_MAX_CHANGE_RATIO = 0.2;
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_SOURCE_BYTES = 2_000_000;
@@ -22,6 +23,35 @@ const DEFAULT_STATE = path.resolve(SCRIPT_DIRECTORY, "block-list-source-state.js
 
 function normalizeText(text) {
   return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+}
+
+function formatMacauDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Asia/Macau",
+    year: "numeric",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function setFilterUpdatedDate(text, date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) {
+    throw new Error(`Invalid filter update date: ${date}`);
+  }
+
+  const normalized = normalizeText(text);
+  const dateLine = `# Last Updated: ${date}`;
+  if (FILTER_DATE_PATTERN.test(normalized)) {
+    return normalized.replace(FILTER_DATE_PATTERN, dateLine);
+  }
+
+  const lines = normalized.split("\n");
+  const headerIndex = lines.findIndex((line) => line.trim() === "#AI Generated");
+  if (headerIndex === -1) throw new Error("Block list is missing the #AI Generated header");
+  lines.splice(headerIndex + 1, 0, dateLine);
+  return lines.join("\n");
 }
 
 function compareAscii(left, right) {
@@ -397,11 +427,16 @@ export async function run(argv = process.argv.slice(2)) {
     nextRules,
     target.manualRuleKeys,
   );
-  const proposedContent = renderTargetFile({
+  const renderedContent = renderTargetFile({
     importedRules,
     manualText: target.manualText,
     sourceUrls: target.sourceUrls,
   });
+  const rulesChanged = renderedContent !== normalizeText(currentContent);
+  const proposedContent =
+    rulesChanged || !FILTER_DATE_PATTERN.test(normalizeText(currentContent))
+      ? setFilterUpdatedDate(renderedContent, formatMacauDate())
+      : renderedContent;
   const proposedState = `${JSON.stringify(nextSnapshot, null, 2)}\n`;
   const targetChange = calculateChange(target.existingRules, importedRules);
   const sourceChange = calculateChange(previousSnapshot.rules, nextRules);

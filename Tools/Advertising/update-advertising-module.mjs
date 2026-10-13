@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SOURCE_PREFIX = "# Source: ";
 const MITM_AUDIT_PREFIX = "# MITM audit: ";
+const MODULE_DATE_PATTERN = /^#!date\s*=.*$/mu;
 const DEFAULT_MAX_CHANGE_RATIO = 0.2;
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_SOURCE_BYTES = 1_500_000;
@@ -29,6 +30,38 @@ const DEFAULT_STATE = path.resolve(SCRIPT_DIRECTORY, "advertising-source-state.j
 
 function normalizeText(text) {
   return text.replace(/^\uFEFF/u, "").replace(/\r\n?/gu, "\n");
+}
+
+function formatMacauDate(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Asia/Macau",
+    year: "numeric",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function setModuleUpdatedDate(text, date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) {
+    throw new Error(`Invalid module update date: ${date}`);
+  }
+
+  const normalized = normalizeText(text);
+  const dateLine = `#!date=${date}`;
+  if (MODULE_DATE_PATTERN.test(normalized)) {
+    return normalized.replace(MODULE_DATE_PATTERN, dateLine);
+  }
+
+  const lines = normalized.split("\n");
+  let insertIndex = 0;
+  while (insertIndex < lines.length && lines[insertIndex].startsWith("#!")) {
+    insertIndex += 1;
+  }
+  if (insertIndex === 0) throw new Error("Advertising module is missing metadata headers");
+  lines.splice(insertIndex, 0, dateLine);
+  return lines.join("\n");
 }
 
 function compareAscii(left, right) {
@@ -435,11 +468,16 @@ export async function run(argv = process.argv.slice(2)) {
     nextSnapshot.mitmHosts,
     DENIED_MITM_HOSTS,
   );
-  const proposedContent = renderTargetModule({
+  const renderedContent = renderTargetModule({
     mitmHosts: proposedHosts,
     preamble: target.preamble,
     urlRewrite: proposedRules,
   });
+  const rulesChanged = renderedContent !== normalizeText(currentContent);
+  const proposedContent =
+    rulesChanged || !MODULE_DATE_PATTERN.test(normalizeText(currentContent))
+      ? setModuleUpdatedDate(renderedContent, formatMacauDate())
+      : renderedContent;
   const proposedState = renderState(nextSnapshot);
 
   const targetChange = calculateChange(

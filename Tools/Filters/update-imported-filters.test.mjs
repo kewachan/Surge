@@ -10,6 +10,7 @@ import {
   parseRuleText,
   parseTargetFile,
   renderTargetFile,
+  setFilterUpdatedDate,
 } from "./update-imported-filters.mjs";
 
 test("normalizes supported rules and removes policy fields", () => {
@@ -123,5 +124,20 @@ test("builds deterministic source state", () => {
         url: "https://raw.githubusercontent.com/example/repo/main/two.list",
       },
     ],
+  );
+});
+
+test("inserts and replaces the filter update date", () => {
+  const filter = "#AI Generated\n\nDOMAIN, example.com\n";
+  const dated = setFilterUpdatedDate(filter, "2026-10-13");
+
+  assert.equal(dated.startsWith("#AI Generated\n# Last Updated: 2026-10-13\n"), true);
+  assert.equal(
+    setFilterUpdatedDate(dated, "2026-10-14").includes("# Last Updated: 2026-10-14"),
+    true,
+  );
+  assert.equal(
+    setFilterUpdatedDate(dated, "2026-10-14").match(/^# Last Updated:/gmu)?.length,
+    1,
   );
 });
