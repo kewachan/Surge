@@ -1,0 +1,92 @@
+name: Update Block List
+
+on:
+  schedule:
+    - cron: "37 4 * * *"
+      timezone: "Asia/Macau"
+  workflow_dispatch:
+    inputs:
+      allow_large_change:
+        description: Allow imported rule churn above the 20% safety limit
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-block-list
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Test updater
+        run: node --test Tools/Filters/update-imported-filters.test.mjs
+
+      - name: Update block list
+        env:
+          ALLOW_LARGE_CHANGE: ${{ inputs.allow_large_change || 'false' }}
+        run: |
+          if [[ "$ALLOW_LARGE_CHANGE" == "true" ]]; then
+            node Tools/Filters/update-imported-filters.mjs --allow-large-change
+          else
+            node Tools/Filters/update-imported-filters.mjs
+          fi
+
+      - name: Validate block list
+        run: |
+          node Tools/Filters/update-imported-filters.mjs --check --allow-large-change
+          git diff --check
+          unexpected_files="$(git diff --name-only | grep -Ev '^(Filters/filters_block\.list|Tools/Filters/block-list-source-state\.json)$' || true)"
+          if [[ -n "$unexpected_files" ]]; then
+            echo "Unexpected generated files:"
+            printf '%s\n' "$unexpected_files"
+            exit 1
+          fi
+
+      - name: Create or update pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "No upstream changes"
+            exit 0
+          fi
+
+          branch="automation/update-block-list"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" || true
+          remote_sha="$(git show-ref --verify --hash "refs/remotes/origin/$branch" 2>/dev/null || true)"
+          git switch -C "$branch"
+          git add Filters/filters_block.list Tools/Filters/block-list-source-state.json
+          git commit -m "Update block list"
+
+          if [[ -n "$remote_sha" ]]; then
+            git push origin "HEAD:refs/heads/$branch" \
+              "--force-with-lease=refs/heads/$branch:$remote_sha"
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+
+          open_pr="$(gh pr list --head "$branch" --base main --state open --json url --jq '.[0].url')"
+          if [[ -n "$open_pr" ]]; then
+            echo "Updated $open_pr"
+          else
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "Update Block List" \
+              --body "Automated incremental update of the external sources listed under # Imported List. Existing deliberate omissions remain omitted; only upstream additions and removals are applied. Unknown syntax, failed downloads, and rule churn above 20% are rejected."
+          fi

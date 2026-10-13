@@ -1,0 +1,92 @@
+name: Update Block Rewrite
+
+on:
+  schedule:
+    - cron: "7 5 * * *"
+      timezone: "Asia/Macau"
+  workflow_dispatch:
+    inputs:
+      allow_large_change:
+        description: Allow upstream or target churn above the 20% safety limit
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-block-rewrite
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Test updater
+        run: node --test Tools/Advertising/update-advertising-module.test.mjs
+
+      - name: Update block rewrite
+        env:
+          ALLOW_LARGE_CHANGE: ${{ inputs.allow_large_change || 'false' }}
+        run: |
+          if [[ "$ALLOW_LARGE_CHANGE" == "true" ]]; then
+            node Tools/Advertising/update-advertising-module.mjs --allow-large-change
+          else
+            node Tools/Advertising/update-advertising-module.mjs
+          fi
+
+      - name: Validate block rewrite
+        run: |
+          node Tools/Advertising/update-advertising-module.mjs --check --allow-large-change
+          git diff --check
+          unexpected_files="$(git diff --name-only | grep -Ev '^(Rewrite/Advertising\.sgmodule|Tools/Advertising/advertising-source-state\.json)$' || true)"
+          if [[ -n "$unexpected_files" ]]; then
+            echo "Unexpected generated files:"
+            printf '%s\n' "$unexpected_files"
+            exit 1
+          fi
+
+      - name: Create or update pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "No upstream changes"
+            exit 0
+          fi
+
+          branch="automation/update-block-rewrite"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" || true
+          remote_sha="$(git show-ref --verify --hash "refs/remotes/origin/$branch" 2>/dev/null || true)"
+          git switch -C "$branch"
+          git add Rewrite/Advertising.sgmodule Tools/Advertising/advertising-source-state.json
+          git commit -m "Update block rewrite"
+
+          if [[ -n "$remote_sha" ]]; then
+            git push origin "HEAD:refs/heads/$branch" \
+              "--force-with-lease=refs/heads/$branch:$remote_sha"
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+
+          open_pr="$(gh pr list --head "$branch" --base main --state open --json url --jq '.[0].url')"
+          if [[ -n "$open_pr" ]]; then
+            echo "Updated $open_pr"
+          else
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "Update Block Rewrite" \
+              --body "Automated incremental update of URL Rewrite rules and MITM hosts from the sources listed in Rewrite/Advertising.sgmodule. Invalid source content and churn above 20% are rejected."
+          fi
