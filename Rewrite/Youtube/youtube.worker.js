@@ -589,14 +589,13 @@ function buildEnhanceCaptionTrack(baseUrl, language) {
 function addCaptionTrackIndex(audioTrackBytes, captionTrackIndex) {
   const output = [];
   for (const field of parseProto(audioTrackBytes)) {
-    // Replace stale caption defaults from the previous app session.
-    if ([3, 4, 6, 7, 11].includes(field.no)) continue;
+    // Select and actively load the translated track after an app relaunch.
+    if ([3, 4, 7, 11].includes(field.no)) continue;
     output.push(field.raw);
   }
   output.push(encodeLengthDelimitedField(2, encodeProtoVarint(captionTrackIndex)));
   output.push(encodeVarintField(3, captionTrackIndex));
-  output.push(encodeVarintField(6, 1));
-  output.push(encodeVarintField(11, 2));
+  output.push(encodeVarintField(11, 3));
   return concatBytes(...output);
 }
 
