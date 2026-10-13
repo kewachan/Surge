@@ -181,10 +181,12 @@ async function verifyWorkerQueue(worker) {
   assert.equal(publicStatuses[12], 429);
 
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, options) => {
     googleRuns++;
-    const query = new URL(url).searchParams.get("q") || "";
-    return translatedGoogleResponse(query);
+    assert.equal(new URL(url).pathname, "/translate_a/t");
+    assert.equal(options.method, "POST");
+    const queries = new URLSearchParams(options.body).getAll("q");
+    return Response.json(queries.map((query) => query.split("\n").map((text) => `譯:${text}`).join("\n")));
   };
   try {
     for (const body of queuedBodies) {
@@ -260,6 +262,31 @@ async function verifyWorkerQueue(worker) {
   assert(retryMessage.retryOptions.delaySeconds >= 30);
   assert(googleRetryRequests > 0, "Google rate limits must stay in the queue retry path");
 
+  let alternateRuns = 0;
+  globalThis.fetch = async (url, options) => {
+    alternateRuns++;
+    if (new URL(url).hostname === "translate.googleapis.com") return new Response("Rate limited", {status: 429});
+    const query = new URLSearchParams(options.body).get("q");
+    return Response.json([query.split("\n").map((text) => `後備:${text}`).join("\n")]);
+  };
+  try {
+    assert.deepEqual(await worker.__test.translateGoogleBatch(["one", "two"], "en-US", "zh-TW"), ["後備:one", "後備:two"]);
+    assert.equal(alternateRuns, 2, "one rejected Google host must not prevent trying the other host");
+  } finally { globalThis.fetch = originalFetch; }
+
+  let alignmentRuns = 0;
+  globalThis.fetch = async (_url, options) => {
+    alignmentRuns++;
+    const queries = new URLSearchParams(options.body).getAll("q");
+    if (queries.length === 1 && queries[0].includes("\n")) return Response.json(["merged lines"]);
+    if (queries.length > 1) return Response.json(["獨立:one", ""]);
+    return Response.json([`補漏:${queries[0]}`]);
+  };
+  try {
+    assert.deepEqual(await worker.__test.translateGoogleBatch(["one", "two"], "en", "zh-TW"), ["獨立:one", "補漏:two"]);
+    assert.equal(alignmentRuns, 3, "changed line boundaries and missing translations must be repaired");
+  } finally { globalThis.fetch = originalFetch; }
+
   return {
     jobId: created.jobId,
     itemCount: texts.length,
@@ -268,6 +295,8 @@ async function verifyWorkerQueue(worker) {
     deterministicJobDedupe: true,
     googleTranslateOnly: true,
     googleRateLimitRetry: true,
+    alternateGoogleHost: true,
+    lineAlignmentAndEmptyRepair: true,
     waitsForAllBatches: true,
     lateSuccessRecovery: true,
   };
@@ -282,21 +311,27 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
   const xml = options.body || '<?xml version="1.0"?><timedtext format="3"><body>'
     + captionTexts.map((text, index) => `<p t="${index * 1000}" d="1000"><s>${text}</s></p>`).join("")
     + '</body></timedtext>';
-  const requests = {nativeGets: 0, queuePosts: 0, queuePolls: 0, googleGets: 0, rejectedAuthorization: 0};
+  const requests = {sourceGets: 0, queuePosts: 0, queuePolls: 0, googlePosts: 0, rejectedAuthorization: 0};
   const store = options.store || new Map();
   const jobId = "123e4567-e89b-42d3-a456-426614174000";
   const queuedResults = Array.isArray(queueResults) ? queueResults : [queueResults];
+  const pendingTimers = new Set();
+  let finished = false;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("caption client test timed out")), 8000);
     const context = {
       console,
       encodeURIComponent,
       decodeURIComponent,
-      setTimeout,
-      clearTimeout,
+      setTimeout(callback, delay) {
+        const pending = setTimeout(() => { pendingTimers.delete(pending); if (!finished) callback(); }, delay);
+        pendingTimers.add(pending);
+        return pending;
+      },
+      clearTimeout(pending) { clearTimeout(pending); pendingTimers.delete(pending); },
       $argument: JSON.stringify({captionToken, debug: false}),
       $request: {url: options.url || "https://www.youtube.com/api/timedtext?v=test&lang=en&enhance_tlang=zh-TW&format=srv3"},
-      $response: {body: xml, headers: {"Content-Type": "text/xml"}},
+      $response: {status: options.status || 200, body: xml, headers: {"Content-Type": "text/xml"}},
       $persistentStore: {
         read(key) { return store.get(key) || null; },
         write(value, key) {
@@ -308,12 +343,20 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
       $httpClient: {
         post(request, callback) {
           try {
+            if (new URL(request.url).pathname === "/translate_a/t") {
+              requests.googlePosts++;
+              assert(request.timeout > 0);
+              const queries = new URLSearchParams(request.body).getAll("q");
+              if (options.failGoogle) callback(null, {status: 429}, "Google unavailable");
+              else callback(null, {status: 200}, JSON.stringify(queries.map((query) => query.split("\n").map((text) => `譯:${text}`).join("\n"))));
+              return;
+            }
             requests.queuePosts++;
             assert.equal(request.url, "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/jobs");
             if (request.headers.Authorization) {
               assert.equal(request.headers.Authorization, `Bearer ${captionToken}`);
             }
-            assert.deepEqual(JSON.parse(request.body).texts, captionTexts);
+            if (!options.body && !options.sourceBody) assert.deepEqual(JSON.parse(request.body).texts, captionTexts);
             if (options.rejectAuthorizedOnce && request.headers.Authorization && !requests.rejectedAuthorization) {
               requests.rejectedAuthorization++;
               callback(null, {status: 401}, "Unauthorized");
@@ -327,13 +370,13 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
         get(request, callback) {
           try {
             if (request.url.startsWith("https://www.youtube.com/api/timedtext?")) {
-              requests.nativeGets++;
+              requests.sourceGets++;
               assert.equal(request.timeout, options.loon ? 3000 : 3);
               const url = new URL(request.url);
-              assert.equal(url.searchParams.get("tlang"), "zh-Hant");
-              assert.equal(url.searchParams.has("enhance_tlang"), false);
-              if (options.nativeBody) callback(null, {status: 200, headers: {"Content-Type": "text/xml", "Content-Length": "1"}}, options.nativeBody);
-              else callback(null, {status: 429}, "Native captions unavailable in this fallback test");
+              assert.equal(url.searchParams.has("tlang"), false);
+              assert.equal(url.searchParams.get("enhance_tlang"), "zh-TW");
+              if (options.sourceBody) callback(null, {status: 200, headers: {"Content-Type": "text/xml", "Content-Length": "1"}}, options.sourceBody);
+              else callback(null, {status: 429}, "Source captions unavailable in this recovery test");
               return;
             }
             if (request.url.startsWith("https://youtube-caption-translate.hmtw47cv7m.workers.dev/")) {
@@ -343,17 +386,17 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
               else callback(null, {status: 200}, JSON.stringify(queueResult));
               return;
             }
-            requests.googleGets++;
-            const url = new URL(request.url);
-            const query = url.searchParams.get("q") || "";
-            translatedGoogleResponse(query, "YTS").text().then((body) => callback(null, {status: 200}, body), reject);
+            throw new Error(`Unexpected GET endpoint: ${new URL(request.url).pathname}`);
           } catch (error) {
             reject(error);
           }
         },
       },
       $done(result) {
+        if (finished) return;
+        finished = true;
         clearTimeout(timer);
+        for (const pending of pendingTimers) clearTimeout(pending);
         resolve({result, requests, store, upstreamBody: xml});
       },
     };
@@ -377,13 +420,13 @@ function rewrittenCaptionUrl(url) {
   return result.url;
 }
 
-async function verifyNativeCaptions() {
+async function verifySourceCaptions() {
   const base = "https://www.youtube.com/api/timedtext?v=test&lang=th&signature=a%2Bb%2Fc&fmt=srv3";
-  assert.equal(rewrittenCaptionUrl(`${base}&tlang=zh-Hant`), `${base}&tlang=zh-Hant`);
-  assert.equal(rewrittenCaptionUrl(`${base}&tlang=zh-TW`), `${base}&tlang=zh-Hant`);
-  assert.equal(rewrittenCaptionUrl(`${base}&enhance_tlang=zh-TW`), `${base}&tlang=zh-Hant`);
-  assert.equal(rewrittenCaptionUrl(`${base}&tlang=zh-CN#caption`), `${base}&tlang=zh-Hans#caption`);
-  assert.equal(rewrittenCaptionUrl(`${base}&enhance_tlang=zh-TW&tlang=ja`), `${base}&tlang=ja`);
+  assert.equal(rewrittenCaptionUrl(`${base}&tlang=zh-Hant`), `${base}&enhance_tlang=zh-TW`);
+  assert.equal(rewrittenCaptionUrl(`${base}&tlang=zh-TW`), `${base}&enhance_tlang=zh-TW`);
+  assert.equal(rewrittenCaptionUrl(`${base}&enhance_tlang=zh-TW`), `${base}&enhance_tlang=zh-TW`);
+  assert.equal(rewrittenCaptionUrl(`${base}&tlang=zh-CN#caption`), `${base}&enhance_tlang=zh-CN#caption`);
+  assert.equal(rewrittenCaptionUrl(`${base}&enhance_tlang=zh-TW&tlang=ja`), `${base}&enhance_tlang=ja`);
   assert.equal(rewrittenCaptionUrl(base), base);
 
   const native = await runCaptionClient(null, "", {
@@ -399,38 +442,45 @@ async function verifyNativeCaptions() {
   });
   assert.equal(Object.keys(json3.result).length, 0, "native non-srv3 caption formats must be preserved");
 
-  const translated = '<?xml version="1.0"?><timedtext format="3"><body><p t="0" d="1000"><s>完整的繁體中文字幕。</s></p></body></timedtext>';
-  const recovered = await runCaptionClient(null, "", {nativeBody: translated});
-  assert.equal(recovered.result.body, translated);
-  assert.equal(recovered.requests.nativeGets, 1);
-  assert.equal(recovered.requests.queuePosts, 0);
-  assert.equal(recovered.requests.googleGets, 0);
+  const sourceBody = '<timedtext format="3"><body><p t="0" d="1000"><s>A</s></p><p t="1000" d="1000"><s>B</s></p><p t="2000" d="1000"><s>C</s></p></body></timedtext>';
+  const ready = {status: "complete", translations: ["復原:A", "復原:B", "復原:C"], completedBatches: 1, batchCount: 1};
+  const recoveryOptions = {url: `${base}&tlang=zh-Hant`, status: 429, body: "<html>Sorry automated queries</html>", sourceBody};
+  const recovered = await runCaptionClient(ready, "", recoveryOptions);
+  assert.equal(recovered.result.status, 200);
+  assert.match(recovered.result.body, /復原:A/);
+  assert.equal(recovered.requests.sourceGets, 1);
+  assert.equal(recovered.requests.queuePosts, 1);
+  assert.equal(recovered.requests.googlePosts, 0);
   assert.equal(recovered.result.headers["Content-Length"], undefined);
 
-  const loonRecovered = await runCaptionClient(null, "", {nativeBody: translated, loon: true});
-  assert.equal(loonRecovered.result.body, translated);
-  assert.equal(loonRecovered.requests.nativeGets, 1);
-  assert.equal(loonRecovered.requests.queuePosts, 0);
+  const loonRecovered = await runCaptionClient(ready, "", {...recoveryOptions, loon: true});
+  assert.equal(loonRecovered.result.status, 200);
+  assert.match(loonRecovered.result.body, /復原:C/);
+  assert.equal(loonRecovered.requests.sourceGets, 1);
 
   let harRequests = 0;
   if (process.env.CAPTION_HAR_PATH) {
     const har = JSON.parse(fs.readFileSync(process.env.CAPTION_HAR_PATH, "utf8"));
     for (const entry of har.log.entries) {
-      if (!entry.request.url.includes("/api/timedtext?") || entry.response.status !== 200) continue;
+      if (!entry.request.url.includes("/api/timedtext?") || new URL(entry.request.url).searchParams.has("tlang")) continue;
       const content = entry.response.content;
       const body = content.encoding === "base64" ? Buffer.from(content.text, "base64").toString("utf8") : content.text;
-      const url = rewrittenCaptionUrl(entry.request.url);
-      assert.equal(new URL(url).searchParams.has("enhance_tlang"), false);
-      assert.equal(new URL(url).searchParams.get("tlang"), "zh-Hant");
-      const replay = await runCaptionClient(null, "", {url, body});
-      assert.equal(Object.keys(replay.result).length, 0);
-      assert.equal(Object.values(replay.requests).reduce((a, b) => a + b, 0), 0);
+      const url = rewrittenCaptionUrl(`${entry.request.url}&tlang=zh-Hant`);
+      assert.equal(new URL(url).searchParams.has("tlang"), false);
+      assert.equal(new URL(url).searchParams.get("enhance_tlang"), "zh-TW");
+      const captionCount = [...body.matchAll(/<p(?:\s[^>]*)?>([\s\S]*?)<\/p>/g)]
+        .filter((match) => match[1].replace(/<[^>]*>/g, "").trim()).length;
+      const translations = Array.from({length: captionCount}, (_, index) => `繁中字幕${index}`);
+      const replay = await runCaptionClient({status: "complete", translations, batchCount: 1, completedBatches: 1}, "", {url, body});
+      assert.equal(replay.result.status, 200);
+      assert.match(replay.result.body, /繁中字幕0/);
+      assert.equal(replay.requests.googlePosts, 0);
       harRequests++;
     }
     assert(harRequests > 0, "HAR regression input must include caption requests");
   }
-  return {nativeTargetPreserved: true,legacyUrlMigration: true,longCaptionQueueBypass: true,
-    nativeFormatsPreserved: true,legacyNativeRecovery: true,loonNativeRecovery: true,harRequestRegressions: harRequests};
+  return {nativeTranslationParameterRemoved: true,signedParametersPreserved: true,
+    native429Recovery: true,loon429Recovery: true,harRequestRegressions: harRequests};
 }
 
 async function verifyClientQueue() {
@@ -449,17 +499,17 @@ async function verifyClientQueue() {
       completedBatches: 1,
       batchCount: 1,
     },
-  ], "", {store: sharedStore});
+  ], "", {store: sharedStore, failGoogle: true});
   assert.equal(complete.requests.queuePosts, 1);
   assert.equal(complete.requests.queuePolls, 3);
-  assert.equal(complete.requests.googleGets, 0);
+  assert(complete.requests.googlePosts <= 1, "a transient poll failure may start one bounded direct fallback");
   assert.match(complete.result.body, /隊列:A/);
   assert.match(complete.result.body, /隊列:B/);
   assert.match(complete.result.body, /隊列:C/);
-  assert([...sharedStore.keys()].some((key) => key.startsWith("YouTubeCaption.Job.v19.")));
+  assert([...sharedStore.keys()].some((key) => key.startsWith("YouTubeCaption.Job.v20.")));
 
   for (const key of [...sharedStore.keys()]) {
-    if (key.startsWith("YouTubeCaption.v5.") || key === "YouTubeCaption.CacheIndex.v5") {
+    if (key.startsWith("YouTubeCaption.v6.") || key === "YouTubeCaption.CacheIndex.v6") {
       sharedStore.delete(key);
     }
   }
@@ -471,7 +521,7 @@ async function verifyClientQueue() {
   }, "", {store: sharedStore});
   assert.equal(reusedJob.requests.queuePosts, 0, "a repeated caption request must poll its saved job");
   assert.equal(reusedJob.requests.queuePolls, 1);
-  assert.equal(reusedJob.requests.googleGets, 0);
+  assert.equal(reusedJob.requests.googlePosts, 0);
   assert.match(reusedJob.result.body, /重用:A/);
 
   const staleToken = await runCaptionClient({
@@ -482,7 +532,7 @@ async function verifyClientQueue() {
   }, accessToken, {rejectAuthorizedOnce: true});
   assert.equal(staleToken.requests.queuePosts, 2);
   assert.equal(staleToken.requests.rejectedAuthorization, 1);
-  assert.equal(staleToken.requests.googleGets, 0);
+  assert.equal(staleToken.requests.googlePosts, 0);
 
   const partial = await runCaptionClient({
     status: "failed",
@@ -493,7 +543,7 @@ async function verifyClientQueue() {
   });
   assert.equal(partial.requests.queuePosts, 1);
   assert.equal(partial.requests.queuePolls, 1);
-  assert.equal(partial.requests.googleGets, 1);
+  assert.equal(partial.requests.googlePosts, 1);
   assert.match(partial.result.body, /隊列:A/);
   assert.match(partial.result.body, /譯:B/);
   assert.match(partial.result.body, /隊列:C/);
@@ -508,26 +558,41 @@ async function verifyClientQueue() {
   }, "", {captionCount: longCount});
   assert.equal(longFailure.requests.queuePosts, 1);
   assert.equal(longFailure.requests.queuePolls, 1);
-  assert.equal(longFailure.requests.googleGets, 0, "long captions must not start another direct request storm");
-  assert.match(longFailure.result.body, /Caption 161/);
+  assert(longFailure.requests.googlePosts > 0, "a bounded long caption can use the working Google POST fallback");
+  assert.equal(longFailure.result.status, 200);
+  assert.match(longFailure.result.body, /譯:Caption 161/);
+
+  const pendingCount = 4000;
+  const waiting = await runCaptionClient({status: "processing", translations: Array(pendingCount).fill(null), batchCount: 70, completedBatches: 0}, "",
+    {captionCount: pendingCount});
+  assert.equal(waiting.result.status, 503);
+  assert.equal(waiting.result.headers["X-YouTube-Caption-State"], "pending");
+  assert.equal(waiting.requests.googlePosts, 0, "very large uncached transcripts must stay in the background queue");
+  assert.doesNotMatch(waiting.result.body, /Caption 4000/);
+  const finished = await runCaptionClient({status: "complete", translations: Array.from({length: pendingCount}, (_, i) => `完成${i}`), batchCount: 70, completedBatches: 70}, "",
+    {captionCount: pendingCount, store: waiting.store});
+  assert.equal(finished.requests.queuePosts, 0, "a retry after reopening must reuse the queued job");
+  assert.equal(finished.result.status, 200);
 
   return {
-    legacyQueueFallback: true,
+    googleQueueAndPostFallback: true,
     transientPollRecovery: true,
     savedJobReuse: true,
     staleTokenPublicRetry: true,
     completeQueueOnly: true,
     partialDirectFallback: true,
-    longCaptionNoDirectStorm: true,
+    boundedLongCaptionFallback: true,
+    pendingJobSurvivesReopening: true,
+    incompleteTranslationNeverMasqueradesAsComplete: true,
   };
 }
 
 (async () => {
   const worker = await loadWorker();
-  const nativeResult = await verifyNativeCaptions();
+  const sourceResult = await verifySourceCaptions();
   const workerResult = await verifyWorkerQueue(worker);
   const clientResult = await verifyClientQueue();
-  console.log(JSON.stringify({native: nativeResult, worker: workerResult, client: clientResult}, null, 2));
+  console.log(JSON.stringify({source: sourceResult, worker: workerResult, client: clientResult}, null, 2));
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

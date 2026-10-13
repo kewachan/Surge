@@ -1,17 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
 
 const JOBS_PATH = "/caption/jobs";
-const WORKER_BUILD = "caption-queue-v21";
+const WORKER_BUILD = "caption-queue-v22";
 const GOOGLE_TRANSLATE_ENDPOINTS = [
-  "https://translate.googleapis.com/translate_a/single",
-  "https://translate.google.com/translate_a/single",
+  "https://translate.googleapis.com/translate_a/t",
+  "https://translate.google.com/translate_a/t",
 ];
 const MAX_REQUEST_BYTES = 1024 * 1024;
 const MAX_ITEMS = 5000;
 const MAX_LINE_CHARS = 1000;
 const MAX_TOTAL_CHARS = 500000;
 const MAX_BATCH_ITEMS = 60;
-const MAX_BATCH_ENCODED_QUERY_CHARS = 6000;
+const MAX_BATCH_QUERY_CHARS = 1700;
 const MAX_SEND_BATCH_MESSAGES = 100;
 const MAX_SEND_BATCH_BYTES = 220 * 1024;
 const GOOGLE_TRANSLATE_TIMEOUT_MS = 8000;
@@ -21,7 +21,7 @@ const JOB_REQUEUE_AFTER_MS = 5 * 60 * 1000;
 const FAILED_JOB_REQUEUE_AFTER_MS = 30 * 1000;
 const PUBLIC_RATE_WINDOW_MS = 60 * 1000;
 const PUBLIC_RATE_LIMIT = 12;
-const UPSTREAM_MIN_INTERVAL_MS = 3000;
+const UPSTREAM_MIN_INTERVAL_MS = 150;
 const DEFAULT_UPSTREAM_BACKOFF_MS = 30 * 1000;
 const MAX_UPSTREAM_BACKOFF_MS = 5 * 60 * 1000;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
@@ -89,12 +89,8 @@ function textResponse(body, status, extraHeaders = {}) {
   });
 }
 
-function translationSeparator(index) {
-  return `\n\uE000YTC${index}\uE001\n`;
-}
-
 function translationQuery(texts) {
-  return texts.map((text, index) => `${index ? translationSeparator(index) : ""}${text}`).join("");
+  return texts.join("\n");
 }
 
 function buildTranslationBatches(texts) {
@@ -114,7 +110,7 @@ function buildTranslationBatches(texts) {
     if (
       batch.length
       && (batch.length >= MAX_BATCH_ITEMS
-        || encodeURIComponent(translationQuery(candidate)).length > MAX_BATCH_ENCODED_QUERY_CHARS)
+        || translationQuery(candidate).length > MAX_BATCH_QUERY_CHARS)
     ) {
       flush();
     }
@@ -151,24 +147,28 @@ function retryAfterMilliseconds(response) {
   return DEFAULT_UPSTREAM_BACKOFF_MS;
 }
 
-async function fetchGoogleTranslation(query, source, target, beforeRequest = async () => {}) {
+async function fetchGoogleTranslations(texts, source, target, beforeRequest = async () => {}) {
   let lastError;
   let rateLimitError;
   for (const endpoint of GOOGLE_TRANSLATE_ENDPOINTS) {
     await beforeRequest();
-    const url = `${endpoint}?client=gtx&sl=${encodeURIComponent(source)}&tl=${encodeURIComponent(target)}`
-      + `&dt=t&q=${encodeURIComponent(query)}`;
+    const language = source === "auto" ? source : source.split("-")[0];
+    const parameters = new URLSearchParams({client: "dict-chrome-ex", sl: language, tl: target});
+    for (const text of texts) parameters.append("q", text);
+    const url = `${endpoint}?client=dict-chrome-ex&sl=${encodeURIComponent(language)}&tl=${encodeURIComponent(target)}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), GOOGLE_TRANSLATE_TIMEOUT_MS);
     try {
       const response = await fetch(url, {
-        method: "GET",
+        method: "POST",
         headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
           Accept: "application/json, text/plain, */*",
           "Accept-Language": "en-US,en;q=0.9",
           Referer: "https://translate.google.com/",
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         },
+        body: parameters.toString(),
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -178,15 +178,19 @@ async function fetchGoogleTranslation(query, source, target, beforeRequest = asy
         throw statusError;
       }
       const result = await response.json();
-      if (!Array.isArray(result?.[0])) throw new Error("Invalid Google Translate response");
-      return result[0].map((part) => part?.[0] || "").join("");
+      if (!Array.isArray(result) || result.length !== texts.length) {
+        throw new Error("Invalid Google Translate batch response");
+      }
+      const translations = result.map((value) => typeof value === "string" ? value
+        : Array.isArray(value) && typeof value[0] === "string" ? value[0] : "");
+      if (!translations.some((value) => value.trim())) throw new Error("Empty Google Translate batch response");
+      return translations;
     } catch (error) {
       lastError = new Error(`${new URL(endpoint).hostname}: ${error?.message || String(error)}`);
       lastError.status = error?.status;
       lastError.retryAfterMs = error?.retryAfterMs;
       if (error?.status === 429) {
         rateLimitError = lastError;
-        break;
       }
     } finally {
       clearTimeout(timeout);
@@ -196,24 +200,34 @@ async function fetchGoogleTranslation(query, source, target, beforeRequest = asy
 }
 
 async function translateGoogleBatch(texts, source, target, beforeRequest = async () => {}) {
+  texts = texts.map((text) => text.replace(/\s+/g, " ").trim());
   if (
     texts.length > MAX_BATCH_ITEMS
-    || encodeURIComponent(translationQuery(texts)).length > MAX_BATCH_ENCODED_QUERY_CHARS
+    || translationQuery(texts).length > MAX_BATCH_QUERY_CHARS
   ) {
     const middle = Math.ceil(texts.length / 2);
     const left = await translateGoogleBatch(texts.slice(0, middle), source, target, beforeRequest);
     const right = await translateGoogleBatch(texts.slice(middle), source, target, beforeRequest);
     return [...left, ...right];
   }
-  const translated = await fetchGoogleTranslation(translationQuery(texts), source, target, beforeRequest);
-  if (texts.length === 1) return [translated.trim()];
-  const parts = translated.split(/\s*\uE000YTC\d+\uE001\s*/giu);
-  if (parts.length === texts.length) return parts.map((part) => part.trim());
+  try {
+    const [translated] = await fetchGoogleTranslations([translationQuery(texts)], source, target, beforeRequest);
+    const parts = translated.split(/\r?\n/).map((part) => part.trim());
+    if (parts.length === texts.length && parts.every(Boolean)) return parts;
+  } catch (error) {
+    if (error?.status === 429 || texts.length === 1) throw error;
+  }
 
-  const middle = Math.ceil(texts.length / 2);
-  const left = await translateGoogleBatch(texts.slice(0, middle), source, target, beforeRequest);
-  const right = await translateGoogleBatch(texts.slice(middle), source, target, beforeRequest);
-  return [...left, ...right];
+  // A changed line count must never shift translations onto the wrong timestamp.
+  const parts = await fetchGoogleTranslations(texts, source, target, beforeRequest);
+  for (let index = 0; index < parts.length; index++) {
+    if (!parts[index].trim()) {
+      const [replacement] = await fetchGoogleTranslations([texts[index]], source, target, beforeRequest);
+      parts[index] = replacement;
+    }
+  }
+  if (parts.some((part) => !part.trim())) throw new Error("Incomplete Google Translate batch response");
+  return parts.map((part) => part.trim());
 }
 
 function jobStub(env, jobId) {
@@ -313,7 +327,7 @@ function validateJobPayload(payload) {
       throw Object.assign(new Error("Invalid Caption Job"), { status: 400 });
     }
     const text = value.trim();
-    if (encodeURIComponent(text).length > MAX_BATCH_ENCODED_QUERY_CHARS) {
+    if (text.length > MAX_BATCH_QUERY_CHARS) {
       throw Object.assign(new Error("Caption Line Too Large"), { status: 413 });
     }
     totalCharacters += text.length;
