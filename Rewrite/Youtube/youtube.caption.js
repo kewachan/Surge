@@ -1,5 +1,5 @@
-// Translate YouTube srv3 captions through an optional work queue with direct Google fallback.
-// Direct fallback requires no account or API key. Public endpoint limits still apply.
+// Translate YouTube srv3 captions through a persistent background queue.
+// Small caption responses retain a bounded direct fallback; long videos reuse one background job.
 
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 const CAPTION_WORKER_ENDPOINT = "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/jobs";
@@ -9,13 +9,15 @@ const RESPONSE_BUDGET_MS = 4500;
 const TRANSLATE_TIMEOUT_SECONDS = 4;
 const MAX_RETRIES = 1;
 const MIN_RETRY_WINDOW_MS = 1200;
-const QUEUE_RESPONSE_BUDGET_MS = 100000;
-const QUEUE_SUBMIT_TIMEOUT_SECONDS = 10;
-const QUEUE_POLL_TIMEOUT_SECONDS = 5;
+const SCRIPT_RESPONSE_BUDGET_MS = 6500;
+const QUEUE_SUBMIT_TIMEOUT_SECONDS = 5;
+const QUEUE_POLL_TIMEOUT_SECONDS = 2;
 const QUEUE_DEFAULT_POLL_MS = 500;
+const DIRECT_FALLBACK_MAX_CAPTIONS = 160;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_LIMIT = 96;
 const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v5";
+const JOB_CACHE_PREFIX = "YouTubeCaption.Job.v19.";
 
 function scriptOptions() {
   const defaults = {captionToken: "", debug: false};
@@ -55,6 +57,45 @@ function cacheKey(query, source, target) {
     hash = Math.imul(hash, 16777619);
   }
   return `YouTubeCaption.v5.${(hash >>> 0).toString(16)}`;
+}
+
+function captionJobCacheKey(entries, source, target) {
+  let primary = 2166136261;
+  let secondary = 2246822519;
+  const values = [source, target, ...entries.map((entry) => entry.text)];
+  for (const value of values) {
+    const text = `${String(value).length}:${value}|`;
+    for (let index = 0; index < text.length; index++) {
+      const code = text.charCodeAt(index);
+      primary = Math.imul(primary ^ code, 16777619);
+      secondary = Math.imul(secondary ^ code, 3266489917);
+    }
+  }
+  return `${JOB_CACHE_PREFIX}${(primary >>> 0).toString(16)}${(secondary >>> 0).toString(16)}`;
+}
+
+function readCaptionJob(key, itemCount) {
+  try {
+    const saved = JSON.parse($persistentStore.read(key) || "null");
+    if (saved && /^[0-9a-f-]{36}$/i.test(String(saved.jobId || ""))
+      && saved.itemCount === itemCount && Date.now() - Number(saved.savedAt || 0) < CACHE_TTL_MS) {
+      return saved.jobId;
+    }
+    if (saved) $persistentStore.write("", key);
+  } catch (_) {
+    try { $persistentStore.write("", key); } catch (_) {}
+  }
+  return "";
+}
+
+function writeCaptionJob(key, jobId, itemCount) {
+  try {
+    $persistentStore.write(JSON.stringify({jobId, itemCount, savedAt: Date.now()}), key);
+  } catch (_) {}
+}
+
+function clearCaptionJob(key) {
+  try { $persistentStore.write("", key); } catch (_) {}
 }
 
 function readCachedParts(key, length) {
@@ -197,43 +238,80 @@ async function translateWithQueue(entries, source, target, token, options) {
     target,
     texts: entries.map((entry) => entry.text),
   };
+  const responseDeadline = Number(options.responseDeadline) || Date.now() + SCRIPT_RESPONSE_BUDGET_MS;
+  const jobKey = captionJobCacheKey(entries, source, target);
   let queueToken = validCaptionToken(token) ? token.trim() : "";
-  let created;
-  try {
-    created = await captionWorkerRequest(
-      "POST", CAPTION_WORKER_ENDPOINT, queueToken, payload, QUEUE_SUBMIT_TIMEOUT_SECONDS,
-    );
-  } catch (error) {
-    if (error?.status !== 401 || !queueToken) throw error;
-    queueToken = "";
-    created = await captionWorkerRequest(
-      "POST", CAPTION_WORKER_ENDPOINT, queueToken, payload, QUEUE_SUBMIT_TIMEOUT_SECONDS,
-    );
-  }
-  if (!/^[0-9a-f-]{36}$/i.test(String(created?.jobId || ""))) throw new Error("Invalid Caption Worker job response");
+  let jobId = readCaptionJob(jobKey, entries.length);
+  let submitted = false;
+  let pollMs = jobId ? 0 : QUEUE_DEFAULT_POLL_MS;
 
-  const statusUrl = `${CAPTION_WORKER_ENDPOINT}/${created.jobId}`;
-  const deadline = Date.now() + QUEUE_RESPONSE_BUDGET_MS;
-  const pollMs = Math.max(250, Math.min(2000, Number(created.pollAfterMs) || QUEUE_DEFAULT_POLL_MS));
-  let latest = null;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  async function submitJob() {
+    if (responseDeadline - Date.now() < 500) throw new Error("Caption Worker submit budget exhausted");
+    let created;
+    const timeout = Math.max(
+      1,
+      Math.min(QUEUE_SUBMIT_TIMEOUT_SECONDS, Math.ceil((responseDeadline - Date.now()) / 1000)),
+    );
     try {
-      latest = await captionWorkerRequest("GET", statusUrl, queueToken, undefined, QUEUE_POLL_TIMEOUT_SECONDS);
+      created = await captionWorkerRequest("POST", CAPTION_WORKER_ENDPOINT, queueToken, payload, timeout);
+    } catch (error) {
+      if (error?.status !== 401 || !queueToken) throw error;
+      queueToken = "";
+      created = await captionWorkerRequest("POST", CAPTION_WORKER_ENDPOINT, queueToken, payload, timeout);
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(String(created?.jobId || ""))) {
+      throw new Error("Invalid Caption Worker job response");
+    }
+    jobId = created.jobId;
+    submitted = true;
+    pollMs = Math.max(250, Math.min(2000, Number(created.pollAfterMs) || QUEUE_DEFAULT_POLL_MS));
+    writeCaptionJob(jobKey, jobId, entries.length);
+  }
+
+  if (!jobId) await submitJob();
+  let latest = null;
+  while (Date.now() < responseDeadline) {
+    const remainingBeforeWait = responseDeadline - Date.now();
+    if (pollMs > 0) {
+      if (remainingBeforeWait <= pollMs) break;
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+    const remaining = responseDeadline - Date.now();
+    if (remaining < 250) break;
+    try {
+      latest = await captionWorkerRequest(
+        "GET",
+        `${CAPTION_WORKER_ENDPOINT}/${jobId}`,
+        queueToken,
+        undefined,
+        Math.max(1, Math.min(QUEUE_POLL_TIMEOUT_SECONDS, Math.ceil(remaining / 1000))),
+      );
     } catch (error) {
       if (error?.status === 401 && queueToken) {
         queueToken = "";
         continue;
       }
+      if (error?.status === 404 && !submitted) {
+        clearCaptionJob(jobKey);
+        jobId = "";
+        await submitJob();
+        continue;
+      }
       if (error?.status >= 400 && error.status < 500) throw error;
       debugLog(options, `queue poll retry: ${error}`);
+      pollMs = QUEUE_DEFAULT_POLL_MS;
       continue;
     }
     if (!Array.isArray(latest?.translations) || latest.translations.length !== entries.length) {
       throw new Error("Invalid Caption Worker status response");
     }
     debugLog(options, `queue ${latest.status} ${latest.completedBatches || 0}/${latest.batchCount || 0}`);
-    if (latest.status === "complete" || latest.status === "failed") return latest;
+    if (latest.status === "complete") return latest;
+    if (latest.status === "failed") {
+      clearCaptionJob(jobKey);
+      return latest;
+    }
+    pollMs = Math.max(250, pollMs || QUEUE_DEFAULT_POLL_MS);
   }
   return latest;
 }
@@ -299,9 +377,12 @@ function rebuildBatch(items, captions) {
   };
 }
 
-async function translateBatches(batches, captions, source, target) {
+async function translateBatches(batches, captions, source, target, responseDeadline) {
   const queue = [...batches];
-  const deadline = Date.now() + RESPONSE_BUDGET_MS;
+  const available = Math.max(0, Number(responseDeadline || Infinity) - Date.now());
+  const budget = Math.min(RESPONSE_BUDGET_MS, available);
+  if (budget < 250) return;
+  const deadline = Date.now() + budget;
   let cursor = 0;
   async function worker() {
     while (cursor < queue.length && Date.now() < deadline) {
@@ -330,12 +411,13 @@ async function translateBatches(batches, captions, source, target) {
   }
   const work = Promise.all(Array.from({length: Math.min(CONCURRENCY, queue.length)}, worker));
   let timer;
-  await Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, RESPONSE_BUDGET_MS); })]);
+  await Promise.race([work, new Promise((resolve) => { timer = setTimeout(resolve, budget); })]);
   if (timer) clearTimeout(timer);
 }
 
 async function translateCaptionResponse() {
   const options = scriptOptions();
+  const responseDeadline = Date.now() + SCRIPT_RESPONSE_BUDGET_MS;
   const target = mapTargetLanguage(getQueryValue($request.url, "enhance_tlang") || getQueryValue($request.url, "tlang"));
   const source = getQueryValue($request.url, "lang") || "auto";
   if (!target || !$response.body) return $done({});
@@ -364,7 +446,17 @@ async function translateCaptionResponse() {
     .filter((entry) => !entry.translated);
   if (entries.length) {
     try {
-      const queued = await translateWithQueue(entries, source, target, options.captionToken, options);
+      const directFallbackAllowed = captions.length <= DIRECT_FALLBACK_MAX_CAPTIONS;
+      const queueDeadline = directFallbackAllowed
+        ? Math.min(responseDeadline, Date.now() + 2000)
+        : responseDeadline;
+      const queued = await translateWithQueue(
+        entries,
+        source,
+        target,
+        options.captionToken,
+        {...options, responseDeadline: queueDeadline},
+      );
       const applied = applyQueuedTranslations(entries, queued, captions);
       debugLog(options, `queue returned ${applied}/${entries.length} captions`);
       writeResolvedCaches(captions, source, target);
@@ -372,7 +464,9 @@ async function translateCaptionResponse() {
       console.log(`Caption Worker queue failed: ${error}`);
     }
   }
-  await translateBatches(buildBatches(captions, true), captions, source, target);
+  if (captions.length <= DIRECT_FALLBACK_MAX_CAPTIONS) {
+    await translateBatches(buildBatches(captions, true), captions, source, target, responseDeadline);
+  }
   writeResolvedCaches(captions, source, target);
   let output = "";
   let position = 0;

@@ -1,25 +1,29 @@
 import { DurableObject } from "cloudflare:workers";
 
 const JOBS_PATH = "/caption/jobs";
-const WORKER_BUILD = "caption-queue-v2";
-const GOOGLE_TRANSLATE_ATTEMPTS = [
-  ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
-  ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
-  ["https://translate.googleapis.com/translate_a/single", "gtx"],
+const WORKER_BUILD = "caption-queue-v21";
+const GOOGLE_TRANSLATE_ENDPOINTS = [
+  "https://translate.googleapis.com/translate_a/single",
+  "https://translate.google.com/translate_a/single",
 ];
 const MAX_REQUEST_BYTES = 1024 * 1024;
 const MAX_ITEMS = 5000;
 const MAX_LINE_CHARS = 1000;
 const MAX_TOTAL_CHARS = 500000;
-const MAX_BATCH_ITEMS = 120;
-const MAX_BATCH_ENCODED_QUERY_CHARS = 5500;
+const MAX_BATCH_ITEMS = 60;
+const MAX_BATCH_ENCODED_QUERY_CHARS = 6000;
 const MAX_SEND_BATCH_MESSAGES = 100;
 const MAX_SEND_BATCH_BYTES = 220 * 1024;
 const GOOGLE_TRANSLATE_TIMEOUT_MS = 8000;
-const MAX_QUEUE_ATTEMPTS = 4;
+const MAX_QUEUE_ATTEMPTS = 6;
 const JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const JOB_REQUEUE_AFTER_MS = 5 * 60 * 1000;
+const FAILED_JOB_REQUEUE_AFTER_MS = 30 * 1000;
 const PUBLIC_RATE_WINDOW_MS = 60 * 1000;
 const PUBLIC_RATE_LIMIT = 12;
+const UPSTREAM_MIN_INTERVAL_MS = 3000;
+const DEFAULT_UPSTREAM_BACKOFF_MS = 30 * 1000;
+const MAX_UPSTREAM_BACKOFF_MS = 5 * 60 * 1000;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
 const TEXT_ENCODER = new TextEncoder();
@@ -86,7 +90,7 @@ function textResponse(body, status, extraHeaders = {}) {
 }
 
 function translationSeparator(index) {
-  return `\n[[YTC:${index}]]\n`;
+  return `\n\uE000YTC${index}\uE001\n`;
 }
 
 function translationQuery(texts) {
@@ -138,54 +142,119 @@ function splitQueueMessages(messages) {
   return groups;
 }
 
-async function fetchGoogleTranslation(query, source, target) {
+function retryAfterMilliseconds(response) {
+  const value = String(response.headers.get("retry-after") || "").trim();
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds > 0) return Math.min(MAX_UPSTREAM_BACKOFF_MS, seconds * 1000);
+  const date = Date.parse(value);
+  if (Number.isFinite(date)) return Math.min(MAX_UPSTREAM_BACKOFF_MS, Math.max(1000, date - Date.now()));
+  return DEFAULT_UPSTREAM_BACKOFF_MS;
+}
+
+async function fetchGoogleTranslation(query, source, target, beforeRequest = async () => {}) {
   let lastError;
-  for (const [endpoint, client] of GOOGLE_TRANSLATE_ATTEMPTS) {
-    const body = new URLSearchParams({ client, sl: source, tl: target, dt: "t", q: query });
+  let rateLimitError;
+  for (const endpoint of GOOGLE_TRANSLATE_ENDPOINTS) {
+    await beforeRequest();
+    const url = `${endpoint}?client=gtx&sl=${encodeURIComponent(source)}&tl=${encodeURIComponent(target)}`
+      + `&dt=t&q=${encodeURIComponent(query)}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), GOOGLE_TRANSLATE_TIMEOUT_MS);
     try {
-      const response = await fetch(endpoint, {
-        method: "POST",
+      const response = await fetch(url, {
+        method: "GET",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
           Accept: "application/json, text/plain, */*",
           "Accept-Language": "en-US,en;q=0.9",
           Referer: "https://translate.google.com/",
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         },
-        body: body.toString(),
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`Google Translate status ${response.status}`);
+      if (!response.ok) {
+        const statusError = new Error(`Google Translate status ${response.status}`);
+        statusError.status = response.status;
+        if (response.status === 429) statusError.retryAfterMs = retryAfterMilliseconds(response);
+        throw statusError;
+      }
       const result = await response.json();
       if (!Array.isArray(result?.[0])) throw new Error("Invalid Google Translate response");
       return result[0].map((part) => part?.[0] || "").join("");
     } catch (error) {
       lastError = new Error(`${new URL(endpoint).hostname}: ${error?.message || String(error)}`);
+      lastError.status = error?.status;
+      lastError.retryAfterMs = error?.retryAfterMs;
+      if (error?.status === 429) {
+        rateLimitError = lastError;
+        break;
+      }
     } finally {
       clearTimeout(timeout);
     }
   }
-  throw lastError || new Error("Google Translate unavailable");
+  throw rateLimitError || lastError || new Error("Google Translate unavailable");
 }
 
-async function translateGoogleBatch(texts, source, target) {
-  const translated = await fetchGoogleTranslation(translationQuery(texts), source, target);
+async function translateGoogleBatch(texts, source, target, beforeRequest = async () => {}) {
+  if (
+    texts.length > MAX_BATCH_ITEMS
+    || encodeURIComponent(translationQuery(texts)).length > MAX_BATCH_ENCODED_QUERY_CHARS
+  ) {
+    const middle = Math.ceil(texts.length / 2);
+    const left = await translateGoogleBatch(texts.slice(0, middle), source, target, beforeRequest);
+    const right = await translateGoogleBatch(texts.slice(middle), source, target, beforeRequest);
+    return [...left, ...right];
+  }
+  const translated = await fetchGoogleTranslation(translationQuery(texts), source, target, beforeRequest);
   if (texts.length === 1) return [translated.trim()];
-  const parts = translated.split(/\s*\[\[\s*YTC\s*:\s*\d+\s*\]\]\s*/gi);
+  const parts = translated.split(/\s*\uE000YTC\d+\uE001\s*/giu);
   if (parts.length === texts.length) return parts.map((part) => part.trim());
 
   const middle = Math.ceil(texts.length / 2);
-  const [left, right] = await Promise.all([
-    translateGoogleBatch(texts.slice(0, middle), source, target),
-    translateGoogleBatch(texts.slice(middle), source, target),
-  ]);
+  const left = await translateGoogleBatch(texts.slice(0, middle), source, target, beforeRequest);
+  const right = await translateGoogleBatch(texts.slice(middle), source, target, beforeRequest);
   return [...left, ...right];
 }
 
 function jobStub(env, jobId) {
   return env.CAPTION_JOBS.get(env.CAPTION_JOBS.idFromName(jobId));
+}
+
+function formatDeterministicJobId(bytes) {
+  const value = new Uint8Array(bytes.slice(0, 16));
+  value[6] = (value[6] & 0x0f) | 0x40;
+  value[8] = (value[8] & 0x3f) | 0x80;
+  const hex = [...value].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+async function deterministicJobId(payload) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    TEXT_ENCODER.encode(JSON.stringify([WORKER_BUILD, payload.source, payload.target, payload.texts])),
+  );
+  return formatDeterministicJobId(new Uint8Array(digest));
+}
+
+async function waitForUpstreamSlot(env) {
+  const response = await jobStub(env, "upstream:google-translate").fetch(
+    "https://caption-job/internal/upstream-slot",
+    {method: "POST"},
+  );
+  if (!response.ok) throw new Error(`Upstream limiter failed with ${response.status}`);
+  const {waitMs = 0} = await response.json();
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+
+async function setUpstreamBackoff(env, delayMs) {
+  await jobStub(env, "upstream:google-translate").fetch(
+    "https://caption-job/internal/upstream-backoff",
+    {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({delayMs}),
+    },
+  );
 }
 
 async function allowPublicJob(request, env) {
@@ -196,13 +265,14 @@ async function allowPublicJob(request, env) {
   return response.ok;
 }
 
-async function initializeJob(env, jobId, itemCount, batchCount) {
-  const response = await jobStub(env, jobId).fetch("https://caption-job/internal/initialize", {
+async function prepareJob(env, jobId, itemCount, batchCount) {
+  const response = await jobStub(env, jobId).fetch("https://caption-job/internal/prepare", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jobId, itemCount, batchCount, createdAt: Date.now() }),
   });
   if (!response.ok) throw new Error(`Job initialization failed with ${response.status}`);
+  return response.json();
 }
 
 async function failJob(env, jobId, reason) {
@@ -265,19 +335,34 @@ async function createJob(request, env, authenticated = false) {
     return textResponse("Too Many Requests", 429, {"Retry-After": "60"});
   }
 
-  const jobId = crypto.randomUUID();
   const batches = buildTranslationBatches(payload.texts);
+  const jobId = await deterministicJobId(payload);
   try {
-    await initializeJob(env, jobId, payload.texts.length, batches.length);
-    const messages = batches.map((batch, batchIndex) => ({
+    const prepared = await prepareJob(env, jobId, payload.texts.length, batches.length);
+    if (prepared.enqueue) {
+      const completed = new Set(prepared.completedBatchIndexes || []);
+      const messages = batches
+        .map((batch, batchIndex) => ({
+          jobId,
+          batchIndex,
+          startIndex: batch.startIndex,
+          texts: batch.texts,
+          source: payload.source,
+          target: payload.target,
+        }))
+        .filter((message) => !completed.has(message.batchIndex));
+      for (const group of splitQueueMessages(messages)) await env.CAPTION_QUEUE.sendBatch(group);
+    }
+    return jsonResponse({
       jobId,
-      batchIndex,
-      startIndex: batch.startIndex,
-      texts: batch.texts,
-      source: payload.source,
-      target: payload.target,
-    }));
-    for (const group of splitQueueMessages(messages)) await env.CAPTION_QUEUE.sendBatch(group);
+      status: "queued",
+      statusUrl: `${JOBS_PATH}/${jobId}`,
+      pollAfterMs: 500,
+      itemCount: payload.texts.length,
+      batchCount: batches.length,
+      reused: !prepared.created,
+      enqueued: Boolean(prepared.enqueue),
+    }, 202, { Location: `${JOBS_PATH}/${jobId}` });
   } catch (error) {
     console.error("YouTube caption job enqueue failed:", error?.message || String(error));
     try {
@@ -287,15 +372,6 @@ async function createJob(request, env, authenticated = false) {
     }
     return textResponse("Caption Job Enqueue Failed", 502);
   }
-
-  return jsonResponse({
-    jobId,
-    status: "queued",
-    statusUrl: `${JOBS_PATH}/${jobId}`,
-    pollAfterMs: 500,
-    itemCount: payload.texts.length,
-    batchCount: batches.length,
-  }, 202, { Location: `${JOBS_PATH}/${jobId}` });
 }
 
 async function getJobStatus(jobId, env) {
@@ -349,9 +425,15 @@ async function processQueueMessage(message, env) {
   }
 
   try {
-    const translations = await translateGoogleBatch(body.texts, body.source, body.target);
+    const provider = "google-translate";
+    const translations = await translateGoogleBatch(
+      body.texts,
+      body.source,
+      body.target,
+      () => waitForUpstreamSlot(env),
+    );
     if (translations.length !== body.texts.length || translations.some((text) => !text)) {
-      throw new Error("Incomplete Google Translate response");
+      throw new Error("Incomplete caption translation response");
     }
     const stored = await stub.fetch("https://caption-job/internal/result", {
       method: "POST",
@@ -360,7 +442,7 @@ async function processQueueMessage(message, env) {
         batchIndex: body.batchIndex,
         startIndex: body.startIndex,
         translations,
-        provider: "google-translate",
+        provider,
       }),
     });
     if (!stored.ok) throw new Error(`Caption result storage failed with ${stored.status}`);
@@ -368,8 +450,14 @@ async function processQueueMessage(message, env) {
   } catch (error) {
     const reason = error?.message || String(error);
     console.error(`YouTube caption batch ${body.batchIndex} failed on attempt ${message.attempts}:`, reason);
+    if (error?.status === 429) {
+      await setUpstreamBackoff(env, error?.retryAfterMs || DEFAULT_UPSTREAM_BACKOFF_MS);
+    }
     if (Number(message.attempts || 1) < MAX_QUEUE_ATTEMPTS) {
-      message.retry({ delaySeconds: Math.min(30, 2 ** Number(message.attempts || 1)) });
+      const delaySeconds = error?.status === 429
+        ? Math.min(300, 30 * (2 ** Math.max(0, Number(message.attempts || 1) - 1)))
+        : Math.min(30, 2 ** Number(message.attempts || 1));
+      message.retry({ delaySeconds });
       return;
     }
     await stub.fetch("https://caption-job/internal/failure", {
@@ -388,6 +476,69 @@ async function handleQueue(batch, env) {
 export class CaptionJob extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/internal/upstream-slot") {
+      const now = Date.now();
+      const state = await this.ctx.storage.get("upstream") || {};
+      const scheduledAt = Math.max(now, Number(state.nextAt || 0), Number(state.blockedUntil || 0));
+      await this.ctx.storage.put("upstream", {
+        ...state,
+        nextAt: scheduledAt + UPSTREAM_MIN_INTERVAL_MS,
+      });
+      return jsonResponse({waitMs: Math.max(0, scheduledAt - now)});
+    }
+    if (request.method === "POST" && url.pathname === "/internal/upstream-backoff") {
+      const now = Date.now();
+      const state = await this.ctx.storage.get("upstream") || {};
+      const body = await request.json();
+      const delayMs = Math.max(
+        1000,
+        Math.min(MAX_UPSTREAM_BACKOFF_MS, Number(body.delayMs) || DEFAULT_UPSTREAM_BACKOFF_MS),
+      );
+      const blockedUntil = Math.max(Number(state.blockedUntil || 0), now + delayMs);
+      await this.ctx.storage.put("upstream", {
+        ...state,
+        blockedUntil,
+        nextAt: Math.max(Number(state.nextAt || 0), blockedUntil),
+      });
+      return jsonResponse({blockedUntil});
+    }
+    if (request.method === "POST" && url.pathname === "/internal/prepare") {
+      const incoming = await request.json();
+      const now = Date.now();
+      const existing = await this.ctx.storage.get("meta");
+      if (!existing) {
+        await this.ctx.storage.put("meta", {...incoming, lastEnqueuedAt: now});
+        await this.ctx.storage.setAlarm(Number(incoming.createdAt) + JOB_RETENTION_MS);
+        return jsonResponse({created: true, enqueue: true, completedBatchIndexes: []});
+      }
+      if (existing.itemCount !== incoming.itemCount || existing.batchCount !== incoming.batchCount) {
+        return textResponse("Job Shape Conflict", 409);
+      }
+      const [results, failures, fatal] = await Promise.all([
+        this.ctx.storage.list({prefix: "batch:"}),
+        this.ctx.storage.list({prefix: "failure:"}),
+        this.ctx.storage.get("fatal"),
+      ]);
+      const completedBatchIndexes = [...results.values()].map((result) => result.batchIndex);
+      if (results.size >= existing.batchCount && !failures.size && !fatal) {
+        return jsonResponse({created: false, enqueue: false, completedBatchIndexes});
+      }
+      const settled = results.size + failures.size;
+      let updatedAt = Number(existing.lastEnqueuedAt || existing.createdAt || 0);
+      for (const failure of failures.values()) updatedAt = Math.max(updatedAt, Number(failure.savedAt || 0));
+      if (fatal) updatedAt = Math.max(updatedAt, Number(fatal.savedAt || 0));
+      const failed = Boolean(fatal) || (settled >= existing.batchCount && failures.size > 0);
+      const retryable = failed
+        ? now - updatedAt >= FAILED_JOB_REQUEUE_AFTER_MS
+        : now - Number(existing.lastEnqueuedAt || existing.createdAt || 0) >= JOB_REQUEUE_AFTER_MS;
+      if (!retryable) {
+        return jsonResponse({created: false, enqueue: false, completedBatchIndexes});
+      }
+      for (const key of failures.keys()) await this.ctx.storage.delete(key);
+      if (fatal) await this.ctx.storage.delete("fatal");
+      await this.ctx.storage.put("meta", {...existing, lastEnqueuedAt: now});
+      return jsonResponse({created: false, enqueue: true, completedBatchIndexes});
+    }
     if (request.method === "POST" && url.pathname === "/internal/initialize") {
       const existing = await this.ctx.storage.get("meta");
       if (!existing) {

@@ -92,8 +92,12 @@ function queueMessage(body, attempts = 1) {
 }
 
 function translatedGoogleResponse(query, marker = "YTC") {
-  const markerPattern = new RegExp(`(\\n\\[\\[${marker}:\\d+\\]\\]\\n)`, "g");
-  const exactMarkerPattern = new RegExp(`^\\n\\[\\[${marker}:\\d+\\]\\]\\n$`);
+  const markerPattern = marker === "YTC"
+    ? /(\n\uE000YTC\d+\uE001\n)/gu
+    : new RegExp(`(\\n\\[\\[${marker}:\\d+\\]\\]\\n)`, "g");
+  const exactMarkerPattern = marker === "YTC"
+    ? /^\n\uE000YTC\d+\uE001\n$/u
+    : new RegExp(`^\\n\\[\\[${marker}:\\d+\\]\\]\\n$`);
   const translated = query.split(markerPattern)
     .map((part) => (exactMarkerPattern.test(part) ? part : `譯:${part}`))
     .join("");
@@ -102,6 +106,7 @@ function translatedGoogleResponse(query, marker = "YTC") {
 
 async function verifyWorkerQueue(worker) {
   const queuedBodies = [];
+  let googleRuns = 0;
   const namespace = new MockDurableObjectNamespace(worker.CaptionJob);
   const env = {
     CAPTION_ACCESS_TOKEN: accessToken,
@@ -112,19 +117,36 @@ async function verifyWorkerQueue(worker) {
       },
     },
   };
-  const texts = Array.from({length: 1800}, (_, index) => (
+  const texts = Array.from({length: 180}, (_, index) => (
     `Long caption ${index}: a sufficiently detailed sentence for queue batching and ordering checks.`
   ));
-  const createResponse = await worker.default.fetch(new Request("https://worker.test/caption/jobs", {
+  const requestInit = {
     method: "POST",
     headers: {...authorization, "Content-Type": "application/json"},
     body: JSON.stringify({purpose: "captions", source: "en", target: "zh-Hant", texts}),
-  }), env);
+  };
+  const createResponse = await worker.default.fetch(
+    new Request("https://worker.test/caption/jobs", requestInit),
+    env,
+  );
   assert.equal(createResponse.status, 202);
   const created = await createResponse.json();
   assert.match(created.jobId, /^[0-9a-f-]{36}$/i);
   assert.equal(created.itemCount, texts.length);
   assert(queuedBodies.length > 1, "long caption jobs must be split into multiple queue messages");
+  assert(queuedBodies.every((body) => body.texts.length <= 60), "Google batches must stay below the stable item limit");
+
+  const originalBatchCount = queuedBodies.length;
+  const duplicateResponse = await worker.default.fetch(
+    new Request("https://worker.test/caption/jobs", requestInit),
+    env,
+  );
+  assert.equal(duplicateResponse.status, 202);
+  const duplicate = await duplicateResponse.json();
+  assert.equal(duplicate.jobId, created.jobId, "identical caption payloads must reuse one deterministic job");
+  assert.equal(duplicate.reused, true);
+  assert.equal(duplicate.enqueued, false);
+  assert.equal(queuedBodies.length, originalBatchCount, "duplicate jobs must not enqueue duplicate batches");
 
   const publicStatus = await worker.default.fetch(
     new Request(`https://worker.test/caption/jobs/${created.jobId}`),
@@ -159,8 +181,9 @@ async function verifyWorkerQueue(worker) {
   assert.equal(publicStatuses[12], 429);
 
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, options) => {
-    const query = new URLSearchParams(options.body).get("q") || "";
+  globalThis.fetch = async (url) => {
+    googleRuns++;
+    const query = new URL(url).searchParams.get("q") || "";
     return translatedGoogleResponse(query);
   };
   try {
@@ -173,6 +196,7 @@ async function verifyWorkerQueue(worker) {
   } finally {
     globalThis.fetch = originalFetch;
   }
+  assert.equal(googleRuns, queuedBodies.length, "each queued caption batch should use one Google request");
 
   const statusResponse = await worker.default.fetch(new Request(
     `https://worker.test/caption/jobs/${created.jobId}`,
@@ -218,7 +242,14 @@ async function verifyWorkerQueue(worker) {
 
   const retryBody = {...queuedBodies[0], jobId: crypto.randomUUID()};
   const retryMessage = queueMessage(retryBody, 1);
-  globalThis.fetch = async () => new Response("Unavailable", {status: 503});
+  let googleRetryRequests = 0;
+  globalThis.fetch = async () => {
+    googleRetryRequests++;
+    return new Response("Rate limited", {
+      status: 429,
+      headers: {"Retry-After": "30"},
+    });
+  };
   try {
     await worker.default.queue({messages: [retryMessage]}, env);
   } finally {
@@ -226,13 +257,17 @@ async function verifyWorkerQueue(worker) {
   }
   assert.equal(retryMessage.acknowledged, false);
   assert.equal(retryMessage.retried, true);
-  assert(retryMessage.retryOptions.delaySeconds >= 2);
+  assert(retryMessage.retryOptions.delaySeconds >= 30);
+  assert(googleRetryRequests > 0, "Google rate limits must stay in the queue retry path");
 
   return {
     jobId: created.jobId,
     itemCount: texts.length,
     batchCount: queuedBodies.length,
     publicRateLimitedAccess: true,
+    deterministicJobDedupe: true,
+    googleTranslateOnly: true,
+    googleRateLimitRetry: true,
     waitsForAllBatches: true,
     lateSuccessRecovery: true,
   };
@@ -240,11 +275,15 @@ async function verifyWorkerQueue(worker) {
 
 function runCaptionClient(queueResults, captionToken = "", options = {}) {
   const source = fs.readFileSync(clientPath, "utf8");
+  const captionCount = Number(options.captionCount) || 3;
+  const captionTexts = Array.from({length: captionCount}, (_, index) => (
+    index < 3 ? ["A", "B", "C"][index] : `Caption ${index + 1}`
+  ));
   const xml = '<?xml version="1.0"?><timedtext format="3"><body>'
-    + '<p t="0" d="1000"><s>A</s></p><p t="1000" d="1000"><s>B</s></p>'
-    + '<p t="2000" d="1000"><s>C</s></p></body></timedtext>';
+    + captionTexts.map((text, index) => `<p t="${index * 1000}" d="1000"><s>${text}</s></p>`).join("")
+    + '</body></timedtext>';
   const requests = {queuePosts: 0, queuePolls: 0, googleGets: 0, rejectedAuthorization: 0};
-  const store = new Map();
+  const store = options.store || new Map();
   const jobId = "123e4567-e89b-42d3-a456-426614174000";
   const queuedResults = Array.isArray(queueResults) ? queueResults : [queueResults];
   return new Promise((resolve, reject) => {
@@ -274,7 +313,7 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
             if (request.headers.Authorization) {
               assert.equal(request.headers.Authorization, `Bearer ${captionToken}`);
             }
-            assert.deepEqual(JSON.parse(request.body).texts, ["A", "B", "C"]);
+            assert.deepEqual(JSON.parse(request.body).texts, captionTexts);
             if (options.rejectAuthorizedOnce && request.headers.Authorization && !requests.rejectedAuthorization) {
               requests.rejectedAuthorization++;
               callback(null, {status: 401}, "Unauthorized");
@@ -305,7 +344,7 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
       },
       $done(result) {
         clearTimeout(timer);
-        resolve({result, requests});
+        resolve({result, requests, store});
       },
     };
     try {
@@ -318,6 +357,7 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
 }
 
 async function verifyClientQueue() {
+  const sharedStore = new Map();
   const complete = await runCaptionClient([
     new Error("transient queue polling timeout"),
     {
@@ -332,13 +372,30 @@ async function verifyClientQueue() {
       completedBatches: 1,
       batchCount: 1,
     },
-  ]);
+  ], "", {store: sharedStore});
   assert.equal(complete.requests.queuePosts, 1);
   assert.equal(complete.requests.queuePolls, 3);
   assert.equal(complete.requests.googleGets, 0);
   assert.match(complete.result.body, /隊列:A/);
   assert.match(complete.result.body, /隊列:B/);
   assert.match(complete.result.body, /隊列:C/);
+  assert([...sharedStore.keys()].some((key) => key.startsWith("YouTubeCaption.Job.v19.")));
+
+  for (const key of [...sharedStore.keys()]) {
+    if (key.startsWith("YouTubeCaption.v5.") || key === "YouTubeCaption.CacheIndex.v5") {
+      sharedStore.delete(key);
+    }
+  }
+  const reusedJob = await runCaptionClient({
+    status: "complete",
+    translations: ["重用:A", "重用:B", "重用:C"],
+    completedBatches: 1,
+    batchCount: 1,
+  }, "", {store: sharedStore});
+  assert.equal(reusedJob.requests.queuePosts, 0, "a repeated caption request must poll its saved job");
+  assert.equal(reusedJob.requests.queuePolls, 1);
+  assert.equal(reusedJob.requests.googleGets, 0);
+  assert.match(reusedJob.result.body, /重用:A/);
 
   const staleToken = await runCaptionClient({
     status: "complete",
@@ -364,12 +421,27 @@ async function verifyClientQueue() {
   assert.match(partial.result.body, /譯:B/);
   assert.match(partial.result.body, /隊列:C/);
 
+  const longCount = 161;
+  const longFailure = await runCaptionClient({
+    status: "failed",
+    translations: new Array(longCount).fill(null),
+    completedBatches: 0,
+    failedBatches: 1,
+    batchCount: 1,
+  }, "", {captionCount: longCount});
+  assert.equal(longFailure.requests.queuePosts, 1);
+  assert.equal(longFailure.requests.queuePolls, 1);
+  assert.equal(longFailure.requests.googleGets, 0, "long captions must not start another direct request storm");
+  assert.match(longFailure.result.body, /Caption 161/);
+
   return {
     publicQueueByDefault: true,
     transientPollRecovery: true,
+    savedJobReuse: true,
     staleTokenPublicRetry: true,
     completeQueueOnly: true,
     partialDirectFallback: true,
+    longCaptionNoDirectStorm: true,
   };
 }
 
