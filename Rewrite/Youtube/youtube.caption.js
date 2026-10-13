@@ -1,20 +1,20 @@
-// Translate YouTube srv3 captions through an optional work queue with direct Google fallback.
-// Direct fallback requires no account or API key. Public endpoint limits still apply.
+// Translate YouTube srv3 captions through the long-caption work queue with direct Google fallback.
+// The queue is rate limited for public use; an optional access token bypasses that public limit.
 
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 const CAPTION_WORKER_ENDPOINT = "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/jobs";
 const MAX_ENCODED_QUERY_CHARS = 6000;
 const CONCURRENCY = 3;
-const TRANSLATE_TIMEOUT_SECONDS = 4;
-const MAX_RETRIES = 1;
+const TRANSLATE_TIMEOUT_SECONDS = 2;
+const MAX_RETRIES = 0;
 const MIN_RETRY_WINDOW_MS = 1200;
 const RETRY_DELAY_MS = 200;
-const MIN_RESPONSE_BUDGET_MS = 12000;
-const MAX_RESPONSE_BUDGET_MS = 100000;
-const QUEUE_RESPONSE_BUDGET_MS = 100000;
-const QUEUE_SUBMIT_TIMEOUT_SECONDS = 10;
-const QUEUE_POLL_TIMEOUT_SECONDS = 5;
-const QUEUE_DEFAULT_POLL_MS = 500;
+const SCRIPT_RESPONSE_BUDGET_MS = 7200;
+const MIN_RESPONSE_BUDGET_MS = 1000;
+const MAX_RESPONSE_BUDGET_MS = SCRIPT_RESPONSE_BUDGET_MS;
+const QUEUE_SUBMIT_TIMEOUT_SECONDS = 3;
+const QUEUE_POLL_TIMEOUT_SECONDS = 1;
+const QUEUE_DEFAULT_POLL_MS = 250;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_LIMIT = 96;
 const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v5";
@@ -165,11 +165,9 @@ function captionWorkerRequest(method, url, token, body, timeoutSeconds) {
     const request = {
       url,
       timeout: typeof $loon !== "undefined" ? timeoutSeconds * 1000 : timeoutSeconds,
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
+      headers: {Accept: "application/json"},
     };
+    if (validCaptionToken(token)) request.headers.Authorization = `Bearer ${token.trim()}`;
     if (body !== undefined) {
       request.headers["Content-Type"] = "application/json";
       request.body = JSON.stringify(body);
@@ -190,7 +188,7 @@ function captionWorkerRequest(method, url, token, body, timeoutSeconds) {
   });
 }
 
-async function translateWithQueue(entries, source, target, token, options) {
+async function translateWithQueue(entries, source, target, token, options, deadline) {
   const created = await captionWorkerRequest("POST", CAPTION_WORKER_ENDPOINT, token, {
     purpose: "captions",
     source,
@@ -198,14 +196,20 @@ async function translateWithQueue(entries, source, target, token, options) {
     texts: entries.map((entry) => entry.text),
   }, QUEUE_SUBMIT_TIMEOUT_SECONDS);
   if (!/^[0-9a-f-]{36}$/i.test(String(created?.jobId || ""))) throw new Error("Invalid Caption Worker job response");
+  if ((created.status === "complete" || created.status === "failed")
+    && Array.isArray(created.translations)) return created;
 
   const statusUrl = `${CAPTION_WORKER_ENDPOINT}/${created.jobId}`;
-  const deadline = Date.now() + QUEUE_RESPONSE_BUDGET_MS;
   const pollMs = Math.max(250, Math.min(2000, Number(created.pollAfterMs) || QUEUE_DEFAULT_POLL_MS));
   let latest = null;
   while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
-    latest = await captionWorkerRequest("GET", statusUrl, token, undefined, QUEUE_POLL_TIMEOUT_SECONDS);
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, Math.max(0, deadline - Date.now()))));
+    if (Date.now() >= deadline) break;
+    const remainingSeconds = Math.max(1, Math.min(
+      QUEUE_POLL_TIMEOUT_SECONDS,
+      Math.ceil((deadline - Date.now()) / 1000),
+    ));
+    latest = await captionWorkerRequest("GET", statusUrl, token, undefined, remainingSeconds);
     if (!Array.isArray(latest?.translations) || latest.translations.length !== entries.length) {
       throw new Error("Invalid Caption Worker status response");
     }
@@ -275,16 +279,19 @@ function rebuildBatch(items, captions) {
   };
 }
 
-async function translateBatches(batches, captions, source, target) {
+async function translateBatches(batches, captions, source, target, hardDeadline) {
+  if (!batches.length || Date.now() >= hardDeadline) return;
   const queue = [...batches];
   const waves = Math.max(1, Math.ceil(batches.length / CONCURRENCY));
   const retryWindow = (MAX_RETRIES + 1) * TRANSLATE_TIMEOUT_SECONDS * 1000
     + RETRY_DELAY_MS + MIN_RETRY_WINDOW_MS;
-  const responseBudget = Math.min(
+  const calculatedBudget = Math.min(
     MAX_RESPONSE_BUDGET_MS,
     Math.max(MIN_RESPONSE_BUDGET_MS, waves * retryWindow),
   );
-  const deadline = Date.now() + responseBudget;
+  const deadline = Math.min(hardDeadline, Date.now() + calculatedBudget);
+  const responseBudget = Math.max(0, deadline - Date.now());
+  if (!responseBudget) return;
   let cursor = 0;
   async function worker() {
     while (cursor < queue.length && Date.now() < deadline) {
@@ -319,6 +326,7 @@ async function translateBatches(batches, captions, source, target) {
 
 async function translateCaptionResponse() {
   const options = scriptOptions();
+  const responseDeadline = Date.now() + SCRIPT_RESPONSE_BUDGET_MS;
   const target = mapTargetLanguage(getQueryValue($request.url, "enhance_tlang") || getQueryValue($request.url, "tlang"));
   const source = getQueryValue($request.url, "lang") || "auto";
   if (!target || !$response.body) return $done({});
@@ -342,22 +350,27 @@ async function translateCaptionResponse() {
   if (!captions.length) return $done({});
 
   applyCachedTranslations(captions, source, target);
-  if (validCaptionToken(options.captionToken)) {
-    const entries = captions
-      .map((caption, captionIndex) => ({captionIndex, text: caption.text, translated: caption.translated}))
-      .filter((entry) => !entry.translated);
-    if (entries.length) {
-      try {
-        const queued = await translateWithQueue(entries, source, target, options.captionToken.trim(), options);
-        const applied = applyQueuedTranslations(entries, queued, captions);
-        debugLog(options, `queue returned ${applied}/${entries.length} captions`);
-        writeResolvedCaches(captions, source, target);
-      } catch (error) {
-        console.log(`Caption Worker queue failed: ${error}`);
-      }
+  const entries = captions
+    .map((caption, captionIndex) => ({captionIndex, text: caption.text, translated: caption.translated}))
+    .filter((entry) => !entry.translated);
+  if (entries.length) {
+    try {
+      const queued = await translateWithQueue(
+        entries,
+        source,
+        target,
+        options.captionToken,
+        options,
+        responseDeadline,
+      );
+      const applied = applyQueuedTranslations(entries, queued, captions);
+      debugLog(options, `queue returned ${applied}/${entries.length} captions`);
+      writeResolvedCaches(captions, source, target);
+    } catch (error) {
+      console.log(`Caption Worker queue failed: ${error}`);
     }
   }
-  await translateBatches(buildBatches(captions, true), captions, source, target);
+  await translateBatches(buildBatches(captions, true), captions, source, target, responseDeadline);
   writeResolvedCaches(captions, source, target);
   let output = "";
   let position = 0;

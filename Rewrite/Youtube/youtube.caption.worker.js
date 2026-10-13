@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const JOBS_PATH = "/caption/jobs";
-const WORKER_BUILD = "caption-queue-v1";
+const WORKER_BUILD = "caption-queue-v2";
 const GOOGLE_TRANSLATE_ATTEMPTS = [
   ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
   ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
@@ -18,11 +18,23 @@ const MAX_SEND_BATCH_BYTES = 220 * 1024;
 const GOOGLE_TRANSLATE_TIMEOUT_MS = 8000;
 const MAX_QUEUE_ATTEMPTS = 4;
 const JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const PUBLIC_RATE_WINDOW_MS = 60 * 1000;
+const PUBLIC_RATE_LIMIT = 12;
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function captionJobId(payload) {
+  const canonical = JSON.stringify([payload.source, payload.target, payload.texts]);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", TEXT_ENCODER.encode(canonical)));
+  const bytes = digest.slice(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 function constantTimeEqual(left, right) {
   const leftBytes = TEXT_ENCODER.encode(left);
@@ -193,6 +205,26 @@ async function initializeJob(env, jobId, itemCount, batchCount) {
     body: JSON.stringify({ jobId, itemCount, batchCount, createdAt: Date.now() }),
   });
   if (!response.ok) throw new Error(`Job initialization failed with ${response.status}`);
+  return response.json();
+}
+
+async function readJobStatus(env, jobId) {
+  const response = await jobStub(env, jobId).fetch("https://caption-job/internal/status");
+  if (!response.ok) return null;
+  return response.json();
+}
+
+async function resetFailedJob(env, jobId) {
+  const response = await jobStub(env, jobId).fetch("https://caption-job/internal/retry", {method: "POST"});
+  if (!response.ok) throw new Error(`Job retry reset failed with ${response.status}`);
+}
+
+async function allowPublicJob(request, env) {
+  const client = request.headers.get("CF-Connecting-IP") || "unknown-client";
+  const response = await jobStub(env, `rate:${client}`).fetch("https://caption-job/internal/rate-limit", {
+    method: "POST",
+  });
+  return response.ok;
 }
 
 async function failJob(env, jobId, reason) {
@@ -252,10 +284,20 @@ async function createJob(request, env) {
     return textResponse(error?.message || "Invalid Caption Job", Number(error?.status) || 400);
   }
 
-  const jobId = crypto.randomUUID();
   const batches = buildTranslationBatches(payload.texts);
+  const jobId = await captionJobId(payload);
   try {
-    await initializeJob(env, jobId, payload.texts.length, batches.length);
+    const initialized = await initializeJob(env, jobId, payload.texts.length, batches.length);
+    if (!initialized.created) {
+      const existing = await readJobStatus(env, jobId);
+      if (existing?.status === "complete") {
+        return jsonResponse({...existing, statusUrl: `${JOBS_PATH}/${jobId}`, reused: true});
+      }
+      if (existing?.status === "queued" || existing?.status === "processing") {
+        return jsonResponse({...existing, statusUrl: `${JOBS_PATH}/${jobId}`, pollAfterMs: 250, reused: true}, 202);
+      }
+      await resetFailedJob(env, jobId);
+    }
     const messages = batches.map((batch, batchIndex) => ({
       jobId,
       batchIndex,
@@ -279,7 +321,7 @@ async function createJob(request, env) {
     jobId,
     status: "queued",
     statusUrl: `${JOBS_PATH}/${jobId}`,
-    pollAfterMs: 500,
+    pollAfterMs: 250,
     itemCount: payload.texts.length,
     batchCount: batches.length,
   }, 202, { Location: `${JOBS_PATH}/${jobId}` });
@@ -297,11 +339,17 @@ async function handleRequest(request, env) {
       return jsonResponse({ status: "ok", build: WORKER_BUILD });
     }
     if (!url.pathname.startsWith(JOBS_PATH)) return textResponse("Not Found", 404);
-    if (!env?.CAPTION_ACCESS_TOKEN) return textResponse("Service Unavailable", 503);
-    if (!hasValidAccessToken(request, env)) {
+    const authorization = request.headers.get("authorization") || "";
+    const authenticated = hasValidAccessToken(request, env);
+    if (authorization && !authenticated) {
       return textResponse("Unauthorized", 401, { "WWW-Authenticate": "Bearer" });
     }
-    if (request.method === "POST" && url.pathname === JOBS_PATH) return createJob(request, env);
+    if (request.method === "POST" && url.pathname === JOBS_PATH) {
+      if (!authenticated && !(await allowPublicJob(request, env))) {
+        return textResponse("Too Many Requests", 429, {"Retry-After": "60"});
+      }
+      return createJob(request, env);
+    }
     if (request.method === "GET" && url.pathname.startsWith(`${JOBS_PATH}/`)) {
       return getJobStatus(url.pathname.slice(JOBS_PATH.length + 1), env);
     }
@@ -378,7 +426,30 @@ export class CaptionJob extends DurableObject {
         const meta = await request.json();
         await this.ctx.storage.put("meta", meta);
         await this.ctx.storage.setAlarm(Number(meta.createdAt) + JOB_RETENTION_MS);
+        return jsonResponse({created: true});
       }
+      const requested = await request.json();
+      if (existing.itemCount !== requested.itemCount || existing.batchCount !== requested.batchCount) {
+        return textResponse("Job Conflict", 409);
+      }
+      return jsonResponse({created: false});
+    }
+    if (request.method === "POST" && url.pathname === "/internal/rate-limit") {
+      const now = Date.now();
+      const saved = await this.ctx.storage.get("rate");
+      const state = saved && now - Number(saved.startedAt || 0) < PUBLIC_RATE_WINDOW_MS
+        ? saved
+        : {startedAt: now, count: 0};
+      if (state.count >= PUBLIC_RATE_LIMIT) return textResponse("Too Many Requests", 429);
+      state.count += 1;
+      await this.ctx.storage.put("rate", state);
+      await this.ctx.storage.setAlarm(state.startedAt + PUBLIC_RATE_WINDOW_MS);
+      return textResponse("OK", 200);
+    }
+    if (request.method === "POST" && url.pathname === "/internal/retry") {
+      const failures = await this.ctx.storage.list({prefix: "failure:"});
+      for (const key of failures.keys()) await this.ctx.storage.delete(key);
+      await this.ctx.storage.delete("fatal");
       return textResponse("OK", 200);
     }
     if (request.method === "POST" && url.pathname === "/internal/result") {
@@ -458,6 +529,7 @@ export class CaptionJob extends DurableObject {
 }
 
 export const __test = {
+  captionJobId,
   buildTranslationBatches,
   splitQueueMessages,
   translateGoogleBatch,
@@ -465,6 +537,7 @@ export const __test = {
   validateJobPayload,
   constantTimeEqual,
   hasValidAccessToken,
+  allowPublicJob,
   handleRequest,
   handleQueue,
 };

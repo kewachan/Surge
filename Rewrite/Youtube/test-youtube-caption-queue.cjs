@@ -126,11 +126,28 @@ async function verifyWorkerQueue(worker) {
   assert.equal(created.itemCount, texts.length);
   assert(queuedBodies.length > 1, "long caption jobs must be split into multiple queue messages");
 
-  const unauthorized = await worker.default.fetch(
+  const queuedCount = queuedBodies.length;
+  const reusedResponse = await worker.default.fetch(new Request("https://worker.test/caption/jobs", {
+    method: "POST",
+    headers: {...authorization, "Content-Type": "application/json"},
+    body: JSON.stringify({purpose: "captions", source: "en", target: "zh-Hant", texts}),
+  }), env);
+  assert.equal(reusedResponse.status, 202);
+  const reused = await reusedResponse.json();
+  assert.equal(reused.jobId, created.jobId, "identical subtitle payloads must reuse the same job");
+  assert.equal(reused.reused, true);
+  assert.equal(queuedBodies.length, queuedCount, "an in-progress reused job must not be enqueued twice");
+
+  const publicStatus = await worker.default.fetch(
     new Request(`https://worker.test/caption/jobs/${created.jobId}`),
     env,
   );
-  assert.equal(unauthorized.status, 401);
+  assert.equal(publicStatus.status, 200);
+  const invalidAuthorization = await worker.default.fetch(new Request(
+    `https://worker.test/caption/jobs/${created.jobId}`,
+    {headers: {Authorization: "Bearer invalid-token"}},
+  ), env);
+  assert.equal(invalidAuthorization.status, 401);
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, options) => {
@@ -160,6 +177,34 @@ async function verifyWorkerQueue(worker) {
   assert.equal(status.translations.length, texts.length);
   assert.equal(status.translations[0], `譯:${texts[0]}`);
   assert.equal(status.translations.at(-1), `譯:${texts.at(-1)}`);
+
+  const publicReuseResponse = await worker.default.fetch(new Request("https://worker.test/caption/jobs", {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "CF-Connecting-IP": "203.0.113.8"},
+    body: JSON.stringify({purpose: "captions", source: "en", target: "zh-Hant", texts}),
+  }), env);
+  assert.equal(publicReuseResponse.status, 200);
+  const publicReuse = await publicReuseResponse.json();
+  assert.equal(publicReuse.jobId, created.jobId);
+  assert.equal(publicReuse.status, "complete");
+  assert.equal(publicReuse.reused, true);
+
+  const rateEnv = {
+    CAPTION_ACCESS_TOKEN: accessToken,
+    CAPTION_JOBS: new MockDurableObjectNamespace(worker.CaptionJob),
+    CAPTION_QUEUE: {async sendBatch() {}},
+  };
+  const rateStatuses = [];
+  for (let index = 0; index < 13; index++) {
+    const response = await worker.default.fetch(new Request("https://worker.test/caption/jobs", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "CF-Connecting-IP": "198.51.100.9"},
+      body: JSON.stringify({purpose: "captions", source: "en", target: "zh-Hant", texts: [`Rate ${index}`]}),
+    }), rateEnv);
+    rateStatuses.push(response.status);
+  }
+  assert.deepEqual(rateStatuses.slice(0, 12), new Array(12).fill(202));
+  assert.equal(rateStatuses[12], 429);
 
   const lifecycleId = crypto.randomUUID();
   const lifecycle = namespace.get(lifecycleId);
@@ -206,12 +251,14 @@ async function verifyWorkerQueue(worker) {
     jobId: created.jobId,
     itemCount: texts.length,
     batchCount: queuedBodies.length,
+    deterministicJobReuse: true,
+    publicRateLimitedAccess: true,
     waitsForAllBatches: true,
     lateSuccessRecovery: true,
   };
 }
 
-function runCaptionClient(queueResult) {
+function runCaptionClient(queueResult, captionToken = "") {
   const source = fs.readFileSync(clientPath, "utf8");
   const xml = '<?xml version="1.0"?><timedtext format="3"><body>'
     + '<p t="0" d="1000"><s>A</s></p><p t="1000" d="1000"><s>B</s></p>'
@@ -227,7 +274,7 @@ function runCaptionClient(queueResult) {
       decodeURIComponent,
       setTimeout,
       clearTimeout,
-      $argument: JSON.stringify({captionToken: accessToken, debug: false}),
+      $argument: JSON.stringify({captionToken, debug: false}),
       $request: {url: "https://www.youtube.com/api/timedtext?v=test&lang=en&enhance_tlang=zh-TW&format=srv3"},
       $response: {body: xml, headers: {"Content-Type": "text/xml"}},
       $persistentStore: {
@@ -243,7 +290,8 @@ function runCaptionClient(queueResult) {
           try {
             requests.queuePosts++;
             assert.equal(request.url, "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/jobs");
-            assert.equal(request.headers.Authorization, `Bearer ${accessToken}`);
+            if (captionToken) assert.equal(request.headers.Authorization, `Bearer ${captionToken}`);
+            else assert.equal(request.headers.Authorization, undefined);
             assert.deepEqual(JSON.parse(request.body).texts, ["A", "B", "C"]);
             callback(null, {status: 202}, JSON.stringify({jobId, pollAfterMs: 250}));
           } catch (error) {
@@ -300,7 +348,7 @@ async function verifyClientQueue() {
     completedBatches: 1,
     failedBatches: 1,
     batchCount: 2,
-  });
+  }, accessToken);
   assert.equal(partial.requests.queuePosts, 1);
   assert.equal(partial.requests.queuePolls, 1);
   assert.equal(partial.requests.googleGets, 1);
@@ -308,7 +356,7 @@ async function verifyClientQueue() {
   assert.match(partial.result.body, /譯:B/);
   assert.match(partial.result.body, /隊列:C/);
 
-  return {completeQueueOnly: true, partialDirectFallback: true};
+  return {publicQueueByDefault: true, completeQueueOnly: true, partialDirectFallback: true};
 }
 
 (async () => {
