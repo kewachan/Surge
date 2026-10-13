@@ -1,15 +1,16 @@
-// Translate YouTube srv3 captions through the long-caption work queue with direct Google fallback.
-// The queue is rate limited for public use; an optional access token bypasses that public limit.
+// Route YouTube srv3 captions through a streaming translation Worker.
+// The legacy response path remains as a bounded fallback for existing rewritten requests.
 
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 const CAPTION_WORKER_ENDPOINT = "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/jobs";
+const CAPTION_STREAM_ENDPOINT = "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/translate";
 const MAX_ENCODED_QUERY_CHARS = 6000;
 const CONCURRENCY = 3;
 const TRANSLATE_TIMEOUT_SECONDS = 2;
 const MAX_RETRIES = 0;
 const MIN_RETRY_WINDOW_MS = 1200;
 const RETRY_DELAY_MS = 200;
-const QUEUE_RESPONSE_BUDGET_MS = 100000;
+const SCRIPT_RESPONSE_BUDGET_MS = 6800;
 const MIN_RESPONSE_BUDGET_MS = 1000;
 const MAX_RESPONSE_BUDGET_MS = 7200;
 const QUEUE_SUBMIT_TIMEOUT_SECONDS = 3;
@@ -89,12 +90,30 @@ function writeCachedParts(key, parts) {
   } catch (_) {}
 }
 
-function rewriteCaptionRequest(url) {
+function rewriteCaptionRequest(url, options, requestHeaders) {
   const target = getQueryValue(url, "tlang");
-  if (!target) return url;
-  return url.replace(/([?&])tlang=([^&#]*)/, (_, separator, value) =>
-    `${separator}enhance_tlang=${encodeURIComponent(mapTargetLanguage(decodeURIComponent(value)))}`,
-  );
+  if (!target) return {};
+  try {
+    const sourceUrl = new URL(url);
+    sourceUrl.searchParams.delete("tlang");
+    sourceUrl.searchParams.delete("enhance_tlang");
+    sourceUrl.searchParams.set("format", "srv3");
+    const proxyUrl = new URL(CAPTION_STREAM_ENDPOINT);
+    proxyUrl.searchParams.set("target", mapTargetLanguage(target));
+    proxyUrl.searchParams.set("url", sourceUrl.toString());
+    const headers = {...(requestHeaders || {})};
+    for (const name of Object.keys(headers)) {
+      if (["authorization", "cookie", "host", "content-length"].includes(name.toLowerCase())) delete headers[name];
+    }
+    headers.Accept = "text/xml, application/xml;q=0.9, */*;q=0.1";
+    if (validCaptionToken(options.captionToken)) headers.Authorization = `Bearer ${options.captionToken.trim()}`;
+    return {url: proxyUrl.toString(), headers};
+  } catch (error) {
+    debugLog(options, `stream route unavailable: ${error}`);
+    return {url: url.replace(/([?&])tlang=([^&#]*)/, (_, separator, value) =>
+      `${separator}enhance_tlang=${encodeURIComponent(mapTargetLanguage(decodeURIComponent(value)))}`,
+    )};
+  }
 }
 
 function decodeXml(text) {
@@ -188,8 +207,7 @@ function captionWorkerRequest(method, url, token, body, timeoutSeconds) {
   });
 }
 
-async function translateWithQueue(entries, source, target, token, options) {
-  const deadline = Date.now() + QUEUE_RESPONSE_BUDGET_MS;
+async function translateWithQueue(entries, source, target, token, options, deadline) {
   const created = await captionWorkerRequest("POST", CAPTION_WORKER_ENDPOINT, token, {
     purpose: "captions",
     source,
@@ -331,6 +349,7 @@ async function translateBatches(batches, captions, source, target) {
 
 async function translateCaptionResponse() {
   const options = scriptOptions();
+  const responseDeadline = Date.now() + SCRIPT_RESPONSE_BUDGET_MS;
   const target = mapTargetLanguage(getQueryValue($request.url, "enhance_tlang") || getQueryValue($request.url, "tlang"));
   const source = getQueryValue($request.url, "lang") || "auto";
   if (!target || !$response.body) return $done({});
@@ -366,6 +385,7 @@ async function translateCaptionResponse() {
         target,
         options.captionToken,
         options,
+        responseDeadline,
       );
       const applied = applyQueuedTranslations(entries, queued, captions);
       debugLog(options, `queue returned ${applied}/${entries.length} captions`);
@@ -392,7 +412,8 @@ async function translateCaptionResponse() {
 }
 
 if (typeof $response === "undefined") {
-  $done({url: rewriteCaptionRequest($request.url)});
+  const options = scriptOptions();
+  $done(rewriteCaptionRequest($request.url, options, $request.headers));
 } else {
   translateCaptionResponse().catch((error) => {
     console.log(`Google caption translation failed: ${error}`);

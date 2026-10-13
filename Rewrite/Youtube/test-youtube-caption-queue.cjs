@@ -44,10 +44,12 @@ class MockStorage {
 }
 
 async function loadWorker() {
-  const source = fs.readFileSync(workerPath, "utf8").replace(
-    'import { DurableObject } from "cloudflare:workers";',
-    "class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
-  );
+  const source = fs.readFileSync(workerPath, "utf8")
+    .replace(
+      'import { DurableObject } from "cloudflare:workers";',
+      "class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
+    )
+    .replace("const CAPTION_STREAM_POLL_MS = 2500;", "const CAPTION_STREAM_POLL_MS = 10;");
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
@@ -189,6 +191,55 @@ async function verifyWorkerQueue(worker) {
   assert.equal(publicReuse.status, "complete");
   assert.equal(publicReuse.reused, true);
 
+  const pending = [];
+  const context = {waitUntil(promise) { pending.push(Promise.resolve(promise)); }};
+  const proxyXml = '<?xml version="1.0"?><timedtext format="3"><head></head><body>'
+    + '<p t="0" d="1000"><s>Proxy A</s></p><p t="1000" d="1000"><s>Proxy B</s></p>'
+    + '</body></timedtext>';
+  const originalFetchForProxy = globalThis.fetch;
+  globalThis.fetch = async (input, options) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.hostname === "www.youtube.com") {
+      assert.equal(url.pathname, "/api/timedtext");
+      assert.equal(url.searchParams.has("tlang"), false);
+      assert.equal(url.searchParams.get("format"), "srv3");
+      return new Response(proxyXml, {status: 200, headers: {"Content-Type": "text/xml"}});
+    }
+    const query = new URLSearchParams(options.body).get("q") || "";
+    return translatedGoogleResponse(query);
+  };
+  try {
+    const sourceUrl = "https://www.youtube.com/api/timedtext?v=proxy&lang=en&tlang=zh-TW";
+    const proxyResponse = await worker.default.fetch(new Request(
+      `https://worker.test/caption/translate?target=zh-TW&url=${encodeURIComponent(sourceUrl)}`,
+      {headers: authorization},
+    ), env, context);
+    assert.equal(proxyResponse.status, 200);
+    assert.equal(proxyResponse.headers.get("x-youtube-caption-status"), "streaming");
+    const reader = proxyResponse.body.getReader();
+    const first = await reader.read();
+    assert.equal(first.done, false);
+    let proxyBody = new TextDecoder().decode(first.value);
+    assert.match(proxyBody, /<body>/, "stream must send a valid XML prefix immediately");
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      proxyBody += new TextDecoder().decode(chunk.value);
+    }
+    await Promise.allSettled(pending);
+    assert.match(proxyBody, /譯:Proxy A/);
+    assert.match(proxyBody, /譯:Proxy B/);
+    assert.doesNotMatch(proxyBody, /<body>[\s\S]*<body>/);
+
+    const rejected = await worker.default.fetch(new Request(
+      `https://worker.test/caption/translate?target=zh-TW&url=${encodeURIComponent("https://example.com/api/timedtext?lang=en")}`,
+      {headers: authorization},
+    ), env, context);
+    assert.equal(rejected.status, 403);
+  } finally {
+    globalThis.fetch = originalFetchForProxy;
+  }
+
   const rateEnv = {
     CAPTION_ACCESS_TOKEN: accessToken,
     CAPTION_JOBS: new MockDurableObjectNamespace(worker.CaptionJob),
@@ -252,6 +303,9 @@ async function verifyWorkerQueue(worker) {
     itemCount: texts.length,
     batchCount: queuedBodies.length,
     deterministicJobReuse: true,
+    streamingCaptionProxy: true,
+    immediateXmlPrefix: true,
+    captionSourceRestricted: true,
     publicRateLimitedAccess: true,
     waitsForAllBatches: true,
     lateSuccessRecovery: true,
@@ -260,8 +314,8 @@ async function verifyWorkerQueue(worker) {
 
 function runCaptionClient(queueResult, captionToken = "") {
   const source = fs.readFileSync(clientPath, "utf8");
-  assert.match(source, /const QUEUE_RESPONSE_BUDGET_MS = 100000;/);
-  assert.doesNotMatch(source, /SCRIPT_RESPONSE_BUDGET_MS/);
+  assert.match(source, /const SCRIPT_RESPONSE_BUDGET_MS = 6800;/);
+  assert.doesNotMatch(source, /QUEUE_RESPONSE_BUDGET_MS/);
   const queueResults = Array.isArray(queueResult) ? queueResult : [queueResult];
   const xml = '<?xml version="1.0"?><timedtext format="3"><body>'
     + '<p t="0" d="1000"><s>A</s></p><p t="1000" d="1000"><s>B</s></p>'
@@ -334,7 +388,41 @@ function runCaptionClient(queueResult, captionToken = "") {
   });
 }
 
+function runCaptionRequest(captionToken = "") {
+  const source = fs.readFileSync(clientPath, "utf8");
+  return new Promise((resolve, reject) => {
+    const context = {
+      console,
+      URL,
+      encodeURIComponent,
+      decodeURIComponent,
+      $argument: JSON.stringify({captionToken, debug: false}),
+      $request: {
+        url: "https://www.youtube.com/api/timedtext?v=test&lang=th&tlang=zh-Hant&format=srv3",
+        headers: {Cookie: "private", "User-Agent": "YouTube"},
+      },
+      $done(result) { resolve(result); },
+    };
+    try {
+      vm.runInNewContext(source, context, {filename: clientPath});
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 async function verifyClientQueue() {
+  const routed = await runCaptionRequest(accessToken);
+  const routedUrl = new URL(routed.url);
+  assert.equal(routedUrl.origin, "https://youtube-caption-translate.hmtw47cv7m.workers.dev");
+  assert.equal(routedUrl.pathname, "/caption/translate");
+  assert.equal(routedUrl.searchParams.get("target"), "zh-TW");
+  const routedSource = new URL(routedUrl.searchParams.get("url"));
+  assert.equal(routedSource.searchParams.has("tlang"), false);
+  assert.equal(routedSource.searchParams.get("format"), "srv3");
+  assert.equal(routed.headers.Cookie, undefined);
+  assert.equal(routed.headers.Authorization, `Bearer ${accessToken}`);
+
   const complete = await runCaptionClient([
     new Error("transient queue poll timeout"),
     {
@@ -378,8 +466,10 @@ async function verifyClientQueue() {
   assert.match(partial.result.body, /隊列:C/);
 
   return {
+    streamingWorkerRoute: true,
+    privateHeadersRemoved: true,
     publicQueueByDefault: true,
-    backgroundPollingBeyondInitialRequestWindow: true,
+    boundedLegacyResponse: true,
     transientPollRecovery: true,
     completeQueueOnly: true,
     partialDirectFallback: true,
