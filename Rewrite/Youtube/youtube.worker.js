@@ -589,11 +589,13 @@ function buildEnhanceCaptionTrack(baseUrl, language) {
 function addCaptionTrackIndex(audioTrackBytes, captionTrackIndex) {
   const output = [];
   for (const field of parseProto(audioTrackBytes)) {
-    // Clear the previous defaults so YouTube keeps caption selection manual.
+    // Replace stale caption defaults from the previous app session.
     if ([3, 4, 6, 7, 11].includes(field.no)) continue;
     output.push(field.raw);
   }
   output.push(encodeLengthDelimitedField(2, encodeProtoVarint(captionTrackIndex)));
+  output.push(encodeVarintField(3, captionTrackIndex));
+  output.push(encodeVarintField(6, 1));
   output.push(encodeVarintField(11, 2));
   return concatBytes(...output);
 }
