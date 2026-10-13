@@ -1,5 +1,5 @@
-// Translate YouTube srv3 captions through a persistent background queue.
-// Small caption responses retain a bounded direct fallback; long videos reuse one background job.
+// Preserve YouTube's native translated caption request for both short and long videos.
+// Legacy enhance_tlang responses try native translation before the Google background queue.
 
 const TRANSLATE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 const CAPTION_WORKER_ENDPOINT = "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/jobs";
@@ -10,6 +10,7 @@ const TRANSLATE_TIMEOUT_SECONDS = 4;
 const MAX_RETRIES = 1;
 const MIN_RETRY_WINDOW_MS = 1200;
 const SCRIPT_RESPONSE_BUDGET_MS = 6500;
+const NATIVE_CAPTION_TIMEOUT_SECONDS = 3;
 const QUEUE_SUBMIT_TIMEOUT_SECONDS = 5;
 const QUEUE_POLL_TIMEOUT_SECONDS = 2;
 const QUEUE_DEFAULT_POLL_MS = 500;
@@ -129,11 +130,43 @@ function writeCachedParts(key, parts) {
 }
 
 function rewriteCaptionRequest(url) {
-  const target = getQueryValue(url, "tlang");
+  const target = getQueryValue(url, "tlang") || getQueryValue(url, "enhance_tlang");
   if (!target) return url;
-  return url.replace(/([?&])tlang=([^&#]*)/, (_, separator, value) =>
-    `${separator}enhance_tlang=${encodeURIComponent(mapTargetLanguage(decodeURIComponent(value)))}`,
-  );
+  const googleTarget = mapTargetLanguage(target);
+  const nativeTarget = {"zh-TW": "zh-Hant", "zh-CN": "zh-Hans"}[googleTarget] || target;
+  const queryStart = url.indexOf("?");
+  const fragmentStart = url.indexOf("#", queryStart);
+  const queryEnd = fragmentStart < 0 ? url.length : fragmentStart;
+  let targetWritten = false;
+  const query = url.slice(queryStart + 1, queryEnd).split("&").filter((part) => {
+    if (!/^(?:enhance_)?tlang=/.test(part)) return true;
+    if (targetWritten) return false;
+    targetWritten = true;
+    return true;
+  }).map((part) => /^(?:enhance_)?tlang=/.test(part)
+    ? `tlang=${encodeURIComponent(nativeTarget)}`
+    : part);
+  return `${url.slice(0, queryStart + 1)}${query.join("&")}${url.slice(queryEnd)}`;
+}
+
+function fetchNativeCaptions(url, responseDeadline) {
+  return new Promise((resolve, reject) => {
+    const remaining = responseDeadline - Date.now();
+    if (remaining < 500) return reject(new Error("Native caption retry budget exhausted"));
+    const seconds = Math.max(1, Math.min(NATIVE_CAPTION_TIMEOUT_SECONDS, Math.floor(remaining / 1000)));
+    $httpClient.get({
+      url: rewriteCaptionRequest(url),
+      timeout: typeof $loon !== "undefined" ? seconds * 1000 : seconds,
+      headers: {...($request.headers || {}), Accept: "text/xml, */*"},
+    }, (error, response, body) => {
+      if (error) return reject(error);
+      const status = response?.status || response?.statusCode;
+      if (status !== 200 || !/<timedtext\b/.test(body || "") || !/<p(?:\s|>)/.test(body || "")) {
+        return reject(new Error(`Native caption response unavailable (${status || "unknown"})`));
+      }
+      resolve({body, headers: response.headers});
+    });
+  });
 }
 
 function decodeXml(text) {
@@ -418,9 +451,20 @@ async function translateBatches(batches, captions, source, target, responseDeadl
 async function translateCaptionResponse() {
   const options = scriptOptions();
   const responseDeadline = Date.now() + SCRIPT_RESPONSE_BUDGET_MS;
-  const target = mapTargetLanguage(getQueryValue($request.url, "enhance_tlang") || getQueryValue($request.url, "tlang"));
+  const legacyTarget = getQueryValue($request.url, "enhance_tlang");
+  // tlang responses have already been translated by YouTube. Returning them unchanged
+  // also preserves non-srv3 formats and avoids waiting behind unrelated queue jobs.
+  if (!legacyTarget) return $done({});
+  const target = mapTargetLanguage(legacyTarget);
   const source = getQueryValue($request.url, "lang") || "auto";
   if (!target || !$response.body) return $done({});
+
+  try {
+    const native = await fetchNativeCaptions($request.url, responseDeadline);
+    return $done({body: native.body, headers: rewrittenResponseHeaders(native.headers || $response.headers)});
+  } catch (error) {
+    debugLog(options, `native caption retry failed: ${error}`);
+  }
 
   const body = $response.body;
   const captions = [];

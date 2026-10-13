@@ -279,10 +279,10 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
   const captionTexts = Array.from({length: captionCount}, (_, index) => (
     index < 3 ? ["A", "B", "C"][index] : `Caption ${index + 1}`
   ));
-  const xml = '<?xml version="1.0"?><timedtext format="3"><body>'
+  const xml = options.body || '<?xml version="1.0"?><timedtext format="3"><body>'
     + captionTexts.map((text, index) => `<p t="${index * 1000}" d="1000"><s>${text}</s></p>`).join("")
     + '</body></timedtext>';
-  const requests = {queuePosts: 0, queuePolls: 0, googleGets: 0, rejectedAuthorization: 0};
+  const requests = {nativeGets: 0, queuePosts: 0, queuePolls: 0, googleGets: 0, rejectedAuthorization: 0};
   const store = options.store || new Map();
   const jobId = "123e4567-e89b-42d3-a456-426614174000";
   const queuedResults = Array.isArray(queueResults) ? queueResults : [queueResults];
@@ -295,7 +295,7 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
       setTimeout,
       clearTimeout,
       $argument: JSON.stringify({captionToken, debug: false}),
-      $request: {url: "https://www.youtube.com/api/timedtext?v=test&lang=en&enhance_tlang=zh-TW&format=srv3"},
+      $request: {url: options.url || "https://www.youtube.com/api/timedtext?v=test&lang=en&enhance_tlang=zh-TW&format=srv3"},
       $response: {body: xml, headers: {"Content-Type": "text/xml"}},
       $persistentStore: {
         read(key) { return store.get(key) || null; },
@@ -326,6 +326,16 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
         },
         get(request, callback) {
           try {
+            if (request.url.startsWith("https://www.youtube.com/api/timedtext?")) {
+              requests.nativeGets++;
+              assert.equal(request.timeout, options.loon ? 3000 : 3);
+              const url = new URL(request.url);
+              assert.equal(url.searchParams.get("tlang"), "zh-Hant");
+              assert.equal(url.searchParams.has("enhance_tlang"), false);
+              if (options.nativeBody) callback(null, {status: 200, headers: {"Content-Type": "text/xml", "Content-Length": "1"}}, options.nativeBody);
+              else callback(null, {status: 429}, "Native captions unavailable in this fallback test");
+              return;
+            }
             if (request.url.startsWith("https://youtube-caption-translate.hmtw47cv7m.workers.dev/")) {
               requests.queuePolls++;
               const queueResult = queuedResults[Math.min(requests.queuePolls - 1, queuedResults.length - 1)];
@@ -344,9 +354,10 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
       },
       $done(result) {
         clearTimeout(timer);
-        resolve({result, requests, store});
+        resolve({result, requests, store, upstreamBody: xml});
       },
     };
+    if (options.loon) context.$loon = "caption-regression";
     try {
       vm.runInNewContext(source, context, {filename: clientPath});
     } catch (error) {
@@ -354,6 +365,72 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
       reject(error);
     }
   });
+}
+
+function rewrittenCaptionUrl(url) {
+  let result;
+  vm.runInNewContext(fs.readFileSync(clientPath, "utf8"), {
+    console, encodeURIComponent, decodeURIComponent,
+    $request: {url},
+    $done(value) { result = value; },
+  });
+  return result.url;
+}
+
+async function verifyNativeCaptions() {
+  const base = "https://www.youtube.com/api/timedtext?v=test&lang=th&signature=a%2Bb%2Fc&fmt=srv3";
+  assert.equal(rewrittenCaptionUrl(`${base}&tlang=zh-Hant`), `${base}&tlang=zh-Hant`);
+  assert.equal(rewrittenCaptionUrl(`${base}&tlang=zh-TW`), `${base}&tlang=zh-Hant`);
+  assert.equal(rewrittenCaptionUrl(`${base}&enhance_tlang=zh-TW`), `${base}&tlang=zh-Hant`);
+  assert.equal(rewrittenCaptionUrl(`${base}&tlang=zh-CN#caption`), `${base}&tlang=zh-Hans#caption`);
+  assert.equal(rewrittenCaptionUrl(`${base}&enhance_tlang=zh-TW&tlang=ja`), `${base}&tlang=ja`);
+  assert.equal(rewrittenCaptionUrl(base), base);
+
+  const native = await runCaptionClient(null, "", {
+    url: `${base}&tlang=zh-Hant`, captionCount: 3617,
+  });
+  assert.equal(Object.keys(native.result).length, 0, "native caption XML must be returned untouched");
+  assert.equal(Object.values(native.requests).reduce((a, b) => a + b, 0), 0,
+    "a long native response must not wait for or submit a background job");
+
+  const json3 = await runCaptionClient(null, "", {
+    url: `${base.replace("fmt=srv3", "fmt=json3")}&tlang=zh-Hant`,
+    body: '{"events":[{"segs":[{"utf8":"已翻譯"}]}]}',
+  });
+  assert.equal(Object.keys(json3.result).length, 0, "native non-srv3 caption formats must be preserved");
+
+  const translated = '<?xml version="1.0"?><timedtext format="3"><body><p t="0" d="1000"><s>完整的繁體中文字幕。</s></p></body></timedtext>';
+  const recovered = await runCaptionClient(null, "", {nativeBody: translated});
+  assert.equal(recovered.result.body, translated);
+  assert.equal(recovered.requests.nativeGets, 1);
+  assert.equal(recovered.requests.queuePosts, 0);
+  assert.equal(recovered.requests.googleGets, 0);
+  assert.equal(recovered.result.headers["Content-Length"], undefined);
+
+  const loonRecovered = await runCaptionClient(null, "", {nativeBody: translated, loon: true});
+  assert.equal(loonRecovered.result.body, translated);
+  assert.equal(loonRecovered.requests.nativeGets, 1);
+  assert.equal(loonRecovered.requests.queuePosts, 0);
+
+  let harRequests = 0;
+  if (process.env.CAPTION_HAR_PATH) {
+    const har = JSON.parse(fs.readFileSync(process.env.CAPTION_HAR_PATH, "utf8"));
+    for (const entry of har.log.entries) {
+      if (!entry.request.url.includes("/api/timedtext?") || entry.response.status !== 200) continue;
+      const content = entry.response.content;
+      const body = content.encoding === "base64" ? Buffer.from(content.text, "base64").toString("utf8") : content.text;
+      const url = rewrittenCaptionUrl(entry.request.url);
+      assert.equal(new URL(url).searchParams.has("enhance_tlang"), false);
+      assert.equal(new URL(url).searchParams.get("tlang"), "zh-Hant");
+      const replay = await runCaptionClient(null, "", {url, body});
+      assert.equal(Object.keys(replay.result).length, 0);
+      assert.equal(Object.values(replay.requests).reduce((a, b) => a + b, 0), 0);
+      harRequests++;
+    }
+    assert(harRequests > 0, "HAR regression input must include caption requests");
+  }
+  return {nativeTargetPreserved: true,legacyUrlMigration: true,longCaptionQueueBypass: true,
+    nativeFormatsPreserved: true,legacyNativeRecovery: true,loonNativeRecovery: true,harRequestRegressions: harRequests};
 }
 
 async function verifyClientQueue() {
@@ -435,7 +512,7 @@ async function verifyClientQueue() {
   assert.match(longFailure.result.body, /Caption 161/);
 
   return {
-    publicQueueByDefault: true,
+    legacyQueueFallback: true,
     transientPollRecovery: true,
     savedJobReuse: true,
     staleTokenPublicRetry: true,
@@ -447,9 +524,10 @@ async function verifyClientQueue() {
 
 (async () => {
   const worker = await loadWorker();
+  const nativeResult = await verifyNativeCaptions();
   const workerResult = await verifyWorkerQueue(worker);
   const clientResult = await verifyClientQueue();
-  console.log(JSON.stringify({worker: workerResult, client: clientResult}, null, 2));
+  console.log(JSON.stringify({native: nativeResult, worker: workerResult, client: clientResult}, null, 2));
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -14,6 +14,6 @@
 - [`Rewrite/Advertising.sgmodule`](Rewrite/Advertising.sgmodule) — 合併外部來源的廣告 URL Rewrite 規則。
 - [`Rewrite/Bilibili/Bilibili.Enhance.sgmodule`](Rewrite/Bilibili/Bilibili.Enhance.sgmodule) — Bilibili 介面增強、功能調整及廣告移除。
 - [`Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule`](Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule) — 透過各服務的 response script 移除廣告及推廣內容。
-- [`Rewrite/Youtube/YouTube.Enhance.sgmodule`](Rewrite/Youtube/YouTube.Enhance.sgmodule) — YouTube 與 YouTube Music 功能增強、介面調整，以及使用限流 Caption Worker queue 的長字幕／歌詞翻譯。
+- [`Rewrite/Youtube/YouTube.Enhance.sgmodule`](Rewrite/Youtube/YouTube.Enhance.sgmodule) — YouTube 與 YouTube Music 功能增強、介面調整、Google 原生字幕翻譯，以及 AI 優先、Google 後備的歌詞翻譯。
 - [`Tools/NetworkInfo/NetworkInfo.sgmodule`](Tools/NetworkInfo/NetworkInfo.sgmodule) — 顯示目前代理的國家、網絡供應商及公網 IPv4。
 - [`Tools/NodeOfflineMonitor/NodeOfflineMonitor.sgmodule`](Tools/NodeOfflineMonitor/NodeOfflineMonitor.sgmodule) — 定時監察代理節點離線及恢復狀態並發出通知。
