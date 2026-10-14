@@ -1,4 +1,4 @@
-// Add bilingual YouTube Music lyrics using the dedicated lyrics Worker.
+// Bilingual lyrics: AI cache -> dedicated AI Worker -> local Google fallback.
 // Only lyric text and the requested language are sent to the Worker.
 
 (() => {
@@ -9,7 +9,6 @@
   const TRANSLATE_CONTROL_FIELD = 24;
   const TRANSLATION_ATTRIBUTION_FIELD = 26;
   const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-  const PROVISIONAL_CACHE_TTL_MS = 2 * 60 * 1000;
   const CACHE_LIMIT = 64;
   const CACHE_INDEX_KEY = "YouTubeLyrics.CacheIndex.v7";
   const LEGACY_CACHE_INDEX_KEYS = ["YouTubeLyrics.CacheIndex.v3", "YouTubeLyrics.CacheIndex.v4", "YouTubeLyrics.CacheIndex.v5", "YouTubeLyrics.CacheIndex.v6"];
@@ -17,8 +16,8 @@
   const MAX_BATCH_TOTAL_CHARS = 600;
   const CONCURRENCY = 3;
   const RESPONSE_BUDGET_MS = 9000;
-  const WORKER_RESPONSE_BUDGET_MS = 3000;
-  const GOOGLE_FALLBACK_RESERVE_MS = 5500;
+  const WORKER_RESPONSE_BUDGET_MS = 6500;
+  const GOOGLE_FALLBACK_RESERVE_MS = 2500;
   const TRANSLATE_TIMEOUT_SECONDS = 110;
   const MAX_BUSY_RETRIES = 0;
   const MAX_GOOGLE_ENCODED_QUERY_CHARS = 6000;
@@ -344,17 +343,15 @@
     return batches;
   }
 
-  function isProvisionalResult(result) {
-    return String(result?.provider || "").toLowerCase().includes("provisional")
-      || String(result?.cacheStatus || "").toUpperCase() === "WARMING";
+  function isAIResult(result) {
+    return ["cloudflare-ai", "workers-ai-cache"].includes(String(result?.provider || "").toLowerCase());
   }
 
   function cacheRecord(result) {
     const savedAt = Number(result?.savedAt || Date.now());
-    const provisional = isProvisionalResult(result);
     return {
       savedAt,
-      expiresAt: Number(result?.expiresAt || (savedAt + (provisional ? PROVISIONAL_CACHE_TTL_MS : CACHE_TTL_MS))),
+      expiresAt: Number(result?.expiresAt || (savedAt + CACHE_TTL_MS)),
       translations: result.translations,
       provider: result.provider,
       cacheStatus: String(result?.cacheStatus || ""),
@@ -385,7 +382,7 @@
         record && Array.isArray(record.translations)
         && record.translations.length === expectedLength
         && Date.now() < record.expiresAt
-        && typeof record.provider === "string" && record.provider
+        && isAIResult(record)
       ) return record;
       if (cached) $persistentStore.write("", key);
     } catch (_) {}
@@ -393,7 +390,7 @@
   }
 
   function writeCache(key, result) {
-    if (typeof $persistentStore === "undefined") return;
+    if (typeof $persistentStore === "undefined" || !isAIResult(result)) return;
     try {
       const record = cacheRecord(result);
       const savedAt = record.savedAt;
@@ -438,6 +435,7 @@
               throw statusError;
             }
             const result = JSON.parse(body);
+            if (!isAIResult(result)) throw new Error("Worker returned a non-AI lyric result");
             if (!Array.isArray(result?.translations) || result.translations.length !== lines.length) {
               throw new Error("Invalid Worker translation response");
             }
@@ -466,6 +464,7 @@
           throw statusError;
         }
         const result = JSON.parse(response.body);
+        if (!isAIResult(result)) throw new Error("Worker returned a non-AI lyric result");
         if (!Array.isArray(result?.translations) || result.translations.length !== lines.length) {
           throw new Error("Invalid Worker translation response");
         }
@@ -595,7 +594,7 @@
     for (let attempt = 0; attempt <= MAX_BUSY_RETRIES; attempt++) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw lastError || new Error("Lyrics translation time budget exhausted");
-      const timeout = Math.max(1, Math.min(TRANSLATE_TIMEOUT_SECONDS, Math.ceil(remaining / 1000)));
+      const timeout = Math.max(0.1, Math.min(TRANSLATE_TIMEOUT_SECONDS, remaining / 1000));
       try {
         return await requestTranslations(lines, target, timeout, accessToken);
       } catch (error) {

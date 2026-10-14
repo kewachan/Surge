@@ -1,22 +1,14 @@
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v13-google-first-ai-warm";
-const GOOGLE_TRANSLATE_ATTEMPTS = [
-  ["https://translate.google.com/translate_a/single", "dict-chrome-ex"],
-  ["https://translate.googleapis.com/translate_a/single", "dict-chrome-ex"],
-  ["https://translate.googleapis.com/translate_a/single", "gtx"],
-];
+const WORKER_BUILD = "lyrics-translate-v14-ai-first";
 const MAX_REQUEST_BYTES = 48 * 1024;
 const MAX_ITEMS = 12;
 const MAX_LINE_CHARS = 500;
 const MAX_TOTAL_CHARS = 600;
 const MAX_AI_CONCURRENCY = 3;
-const MAX_GOOGLE_ENCODED_QUERY_CHARS = 6000;
-const GOOGLE_TRANSLATE_TIMEOUT_MS = 6500;
 const CACHE_VERSION = "v7";
 const CACHE_TTL_SECONDS = 14 * 24 * 60 * 60;
-const AI_WARMING_TTL_SECONDS = 90;
-const AI_FAILURE_COOLDOWN_SECONDS = 30 * 60;
+const IN_FLIGHT_TRANSLATIONS = new Map();
 const ACCESS_TOKEN_PREFIX = "Bearer ";
 const MAX_ACCESS_TOKEN_CHARS = 128;
 const TEXT_ENCODER = new TextEncoder();
@@ -222,85 +214,6 @@ async function translateLyricsAdaptive(
   }
 }
 
-function translationSeparator(index) {
-  return `\n[[YTL:${index}]]\n`;
-}
-
-function translationQuery(texts) {
-  return texts.map((text, index) => `${index ? translationSeparator(index) : ""}${text}`).join("");
-}
-
-function buildGoogleBatches(texts) {
-  const batches = [];
-  let batch = [];
-  for (const text of texts) {
-    const candidate = [...batch, text];
-    if (batch.length && encodeURIComponent(translationQuery(candidate)).length > MAX_GOOGLE_ENCODED_QUERY_CHARS) {
-      batches.push(batch);
-      batch = [];
-    }
-    batch.push(text);
-  }
-  if (batch.length) batches.push(batch);
-  return batches;
-}
-
-async function fetchGoogleTranslation(query, source, target) {
-  let lastError;
-  for (const [endpoint, client] of GOOGLE_TRANSLATE_ATTEMPTS) {
-    const body = new URLSearchParams({ client, sl: source, tl: target, dt: "t", q: query });
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), GOOGLE_TRANSLATE_TIMEOUT_MS);
-    try {
-      const googleResponse = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          Accept: "application/json, text/plain, */*",
-          "Accept-Language": "en-US,en;q=0.9",
-          Referer: "https://translate.google.com/",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        },
-        body: body.toString(),
-        signal: controller.signal,
-      });
-      if (!googleResponse.ok) throw new Error(`Google Translate status ${googleResponse.status}`);
-      const result = await googleResponse.json();
-      if (!Array.isArray(result?.[0])) throw new Error("Invalid Google Translate response");
-      return result[0].map((part) => part?.[0] || "").join("");
-    } catch (error) {
-      lastError = new Error(`${new URL(endpoint).hostname}: ${error?.message || String(error)}`);
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-  throw lastError || new Error("Google Translate unavailable");
-}
-
-async function translateGoogleBatch(texts, source, target) {
-  const translated = await fetchGoogleTranslation(translationQuery(texts), source, target);
-  if (texts.length === 1) return [translated.trim()];
-
-  const parts = translated.split(/\s*\[\[\s*YTL\s*:\s*\d+\s*\]\]\s*/gi);
-  if (parts.length === texts.length) return parts.map((part) => part.trim());
-
-  const middle = Math.ceil(texts.length / 2);
-  const [left, right] = await Promise.all([
-    translateGoogleBatch(texts.slice(0, middle), source, target),
-    translateGoogleBatch(texts.slice(middle), source, target),
-  ]);
-  return [...left, ...right];
-}
-
-async function translateWithGoogle(texts, source, target) {
-  const batches = buildGoogleBatches(texts);
-  const translated = await Promise.all(batches.map((batch) => translateGoogleBatch(batch, source, target)));
-  const translations = translated.flat();
-  const validated = validatedTranslations(translations, texts.length);
-  if (!validated) throw new Error("Google Translate returned an invalid lyric translation response");
-  return { translations: validated, provider: "google-translate" };
-}
-
 function response(body, status = 200, extraHeaders = {}) {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), {
     status,
@@ -339,7 +252,6 @@ async function cacheRequest(texts, source, target) {
   return {
     identifier,
     request: new Request(`https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/__cache/${CACHE_VERSION}/${identifier}`),
-    stateRequest: new Request(`https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/__state/${CACHE_VERSION}/${identifier}`),
   };
 }
 
@@ -351,8 +263,8 @@ async function readCache(request, expectedCount, target) {
     if (!cachedResponse) return null;
     const body = await cachedResponse.json();
     const translations = validatedTranslations(body?.translations, expectedCount);
-    if (!translations || hasTargetScriptMismatch(translations, target)) return null;
-    return { translations, provider: String(body?.provider || "workers-ai-cache") };
+    if (body?.provider !== "cloudflare-ai" || !translations || hasTargetScriptMismatch(translations, target)) return null;
+    return { translations, provider: "cloudflare-ai" };
   } catch (error) {
     console.error("YouTube lyric cache read failed:", error?.message || String(error));
     return null;
@@ -378,90 +290,28 @@ async function writeCache(request, result) {
   }
 }
 
-async function readWarmState(request) {
-  const cache = globalThis.caches?.default;
-  if (!cache) return "";
-  try {
-    const cachedResponse = await cache.match(request);
-    if (!cachedResponse) return "";
-    const body = await cachedResponse.json();
-    return body?.state === "warming" || body?.state === "cooldown" ? body.state : "";
-  } catch (error) {
-    console.error("YouTube lyric warm-state read failed:", error?.message || String(error));
-    return "";
-  }
-}
-
-async function writeWarmState(request, state, ttlSeconds) {
-  const cache = globalThis.caches?.default;
-  if (!cache) return false;
-  try {
-    await cache.put(request, new Response(JSON.stringify({ state }), {
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": `public, max-age=${ttlSeconds}`,
-        "X-Content-Type-Options": "nosniff",
-      },
-    }));
-    return true;
-  } catch (error) {
-    console.error("YouTube lyric warm-state write failed:", error?.message || String(error));
-    return false;
-  }
-}
-
-async function clearWarmState(request) {
-  const cache = globalThis.caches?.default;
-  if (!cache || typeof cache.delete !== "function") return;
-  try {
-    await cache.delete(request);
-  } catch (error) {
-    console.error("YouTube lyric warm-state delete failed:", error?.message || String(error));
-  }
-}
-
-async function warmAICache(key, texts, source, target, env) {
-  const runAI = createRequestLimiter(MAX_AI_CONCURRENCY);
-  try {
-    const result = await translateLyricsAdaptive(texts, source, target, env, texts, true, runAI);
-    const stored = await writeCache(key.request, result);
-    if (stored) await clearWarmState(key.stateRequest);
-    return stored ? result : null;
-  } catch (error) {
-    await writeWarmState(key.stateRequest, "cooldown", AI_FAILURE_COOLDOWN_SECONDS);
-    console.error("YouTube lyric background AI warm failed:", error?.message || String(error));
-    return null;
-  }
-}
-
 async function translateCached(texts, source, target, env, context) {
   const key = await cacheRequest(texts, source, target);
   const cached = await readCache(key.request, texts.length, target);
   if (cached) return { ...cached, cacheStatus: "HIT" };
 
-  const warmState = await readWarmState(key.stateRequest);
-  let warmPromise = null;
-  if (!warmState && typeof context?.waitUntil === "function") {
-    await writeWarmState(key.stateRequest, "warming", AI_WARMING_TTL_SECONDS);
-    warmPromise = warmAICache(key, texts, source, target, env);
-    context.waitUntil(warmPromise.then(() => undefined, () => undefined));
+  let work = IN_FLIGHT_TRANSLATIONS.get(key.identifier);
+  if (!work) {
+    work = (async () => {
+      const runAI = createRequestLimiter(MAX_AI_CONCURRENCY);
+      const result = await translateLyricsAdaptive(texts, source, target, env, texts, true, runAI);
+      await writeCache(key.request, result);
+      return result;
+    })();
+    IN_FLIGHT_TRANSLATIONS.set(key.identifier, work);
+    const remove = () => IN_FLIGHT_TRANSLATIONS.delete(key.identifier);
+    work.then(remove, remove);
   }
-
-  try {
-    const google = await translateWithGoogle(texts, source, target);
-    const warming = warmState === "warming" || Boolean(warmPromise);
-    return {
-      ...google,
-      provider: warming ? "google-translate-provisional" : google.provider,
-      cacheStatus: warming ? "WARMING" : (warmState === "cooldown" ? "COOLDOWN" : "MISS"),
-    };
-  } catch (googleError) {
-    if (warmPromise) {
-      const aiResult = await warmPromise;
-      if (aiResult) return { ...aiResult, cacheStatus: "MISS" };
-    }
-    throw googleError;
+  // Finish/cache the AI attempt even if the app times out and uses its Google fallback.
+  if (typeof context?.waitUntil === "function") {
+    context.waitUntil(work.then(() => undefined, () => undefined));
   }
+  return { ...await work, cacheStatus: "MISS" };
 }
 
 async function handleLyricsRequest(request, env, context) {
@@ -546,11 +396,7 @@ export const __test = {
   hasTargetScriptMismatch,
   translateLyrics,
   translateLyricsAdaptive,
-  translateWithGoogle,
   translateCached,
-  readWarmState,
-  writeWarmState,
-  warmAICache,
   createRequestLimiter,
   cacheRequest,
   constantTimeEqual,
