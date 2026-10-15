@@ -69,3 +69,8 @@ DOMAIN-SUFFIX, gov.mo
 
 #AXA
 DOMAIN-SUFFIX, axa.com.hk
+
+############ Macau ############
+
+#SSH
+DOMAIN, kenichi-mac.asuscomm.com
