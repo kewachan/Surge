@@ -71,7 +71,7 @@ function run(body, options = {}) {
   let result, calls = 0;
   const context = {
     Uint8Array, DataView, console: {log() {}},
-    $request: {url: options.url || endpoint},
+    $request: {url: options.url || endpoint, headers: options.requestHeaders || {}},
     $response: {status: options.status ?? 200, body, headers: options.headers || {'grpc-encoding': 'gzip'}},
     $argument: options.argument ?? 'View.AD="true"&LogLevel="WARN"',
     $done(value) { result = value; calls++; },
@@ -121,6 +121,35 @@ unchanged(Buffer.alloc(0));
 unchanged('not binary');
 unchanged(frame(Buffer.concat([normalRecommendations, otherData]), true));
 
+const universalHeaders = {'User-Agent': 'bili-universal/test', 'x-bili-moss-engine-type': '1'};
+const cleanBody = frame(expected, true);
+const responseHeaders = Object.freeze({'grpc-encoding': 'gzip', 'x-test-metadata': 'preserved'});
+const headerOnly = run(cleanBody, {requestHeaders: universalHeaders, headers: responseHeaders});
+assert.equal(headerOnly.headers?.['grpc-status'], '0', 'Moss engine 1 needs a visible successful gRPC status');
+assert.equal(headerOnly.headers['x-test-metadata'], 'preserved');
+assert(!('body' in headerOnly), 'header repair must not rewrite an already-filtered body');
+assert(!('grpc-status' in responseHeaders), 'input headers must not be mutated');
+unchanged(cleanBody, {requestHeaders: universalHeaders, headers: headerOnly.headers});
+const bodyAndHeaders = run(frame(original, true), {requestHeaders: universalHeaders});
+assert(bodyAndHeaders.body);
+assert.equal(bodyAndHeaders.headers['grpc-status'], '0');
+assert.equal(run(cleanBody, {requestHeaders: {'user-agent': 'bili-universal/test', 'X-Bili-Moss-Engine-Type': '1'}}).headers['grpc-status'], '0');
+assert.equal(run(cleanBody, {requestHeaders: {'User-Agent': 'bili-blue/test'}}).headers['grpc-status'], '0');
+for (const requestHeaders of [{}, {'User-Agent': 'bili-inter/test'}, {'User-Agent': 'bili-universal/test'},
+  {'User-Agent': 'bili-universal/test', 'x-bili-moss-engine-type': '0'}, {'User-Agent': 'unrelated-client'}]) {
+  unchanged(cleanBody, {requestHeaders});
+}
+unchanged(cleanBody, {requestHeaders: universalHeaders, headers: {'grpc-encoding': 'gzip', 'Grpc-Status': '0'}});
+for (const status of ['1', '7', '13', '16', '']) {
+  unchanged(frame(original, true), {requestHeaders: universalHeaders,
+    headers: {'grpc-encoding': 'gzip', 'Grpc-Status': status, 'grpc-message': 'original error'}});
+}
+unchanged(cleanBody, {requestHeaders: universalHeaders, status: 503});
+unchanged(cleanBody, {requestHeaders: universalHeaders, argument: 'View.AD=false'});
+unchanged(frame(Buffer.from([10, 255])), {requestHeaders: universalHeaders});
+unchanged(Buffer.concat([frame(original, true), Buffer.from([0])]), {requestHeaders: universalHeaders});
+unchanged(cleanBody, {requestHeaders: universalHeaders, noGzip: true});
+
 const rule = moduleText.split('\n').find(line => line.startsWith('BiliBili.ADBlock.view.air-relate.response.local ='));
 assert(rule);
 const regex = new RegExp(rule.match(/pattern=([^,]+),/)[1]);
@@ -137,7 +166,8 @@ if (process.env.BILIBILI_HAR_PATH) {
     if (!entry.request.url.includes('/bilibili.app.viewunite.v1.View/AIRelateAsync') || entry.response?.status !== 200) continue;
     const input = Buffer.from(entry.response.content.text, entry.response.content.encoding === 'base64' ? 'base64' : 'utf8');
     const headers = Object.fromEntries(entry.response.headers.map(header => [header.name, header.value]));
-    const result = run(input, {headers, url: entry.request.url});
+    const requestHeaders = Object.fromEntries(entry.request.headers.map(header => [header.name, header.value]));
+    const result = run(input, {headers, requestHeaders, url: entry.request.url});
     assert(result.body, 'HAR ad response must be rewritten');
     const before = splitFields(decodeFrames(input)[0].value);
     const after = splitFields(decodeFrames(result.body)[0].value);
@@ -149,10 +179,31 @@ if (process.env.BILIBILI_HAR_PATH) {
     assert.equal(sourceModules.length, 3);
     assert.deepEqual(afterAds.map(f => f.raw), beforeAds.filter(f => !sourceModules.includes(f)).map(f => f.raw));
     for (const module of sourceModules) assert(!Buffer.from(result.body).includes(module.value), 'ad module must be absent');
-    unchanged(Buffer.from(result.body), {headers});
+    assert.equal(result.headers?.['grpc-status'], '0');
+    unchanged(Buffer.from(result.body), {headers: result.headers || headers, requestHeaders});
     harResults.push({index, removedAds: sourceModules.length, normalDataPreserved: true, idempotent: true});
   }
   assert.equal(harResults.length, 2, 'both screenshot responses must be covered');
 }
+const slowHarResults = [];
+if (process.env.BILIBILI_SLOW_HAR_PATH) {
+  const entries = JSON.parse(fs.readFileSync(process.env.BILIBILI_SLOW_HAR_PATH, 'utf8')).log.entries;
+  for (const [index, entry] of entries.entries()) {
+    if (!entry.request.url.includes('/bilibili.app.viewunite.v1.View/AIRelateAsync') || entry.response?.status !== 200) continue;
+    const input = Buffer.from(entry.response.content.text, entry.response.content.encoding === 'base64' ? 'base64' : 'utf8');
+    const headers = Object.fromEntries(entry.response.headers.map(header => [header.name, header.value]));
+    const requestHeaders = Object.fromEntries(entry.request.headers.map(header => [header.name, header.value]));
+    const missingStatus = !entry.response.headers.some(header => header.name.toLowerCase() === 'grpc-status');
+    const result = run(input, {headers, requestHeaders, url: entry.request.url});
+    assert(!('body' in result), 'B2 recommendation data is already filtered and must stay byte-identical');
+    if (missingStatus) assert.equal(result.headers?.['grpc-status'], '0');
+    else assert.equal(Object.keys(result).length, 0, 'successful fallback must remain untouched');
+    unchanged(input, {headers: result.headers || headers, requestHeaders, url: entry.request.url});
+    slowHarResults.push({index, statusRepaired: missingStatus, bodyUnchanged: true, idempotent: true});
+  }
+  assert.equal(slowHarResults.length, 2);
+  assert.equal(slowHarResults.filter(result => result.statusRepaired).length, 1);
+}
 console.log(JSON.stringify({gzipAndIdentity: true, unknownFieldsPreserved: true, mixedFramesPreserved: true,
-  viewAdSwitch: true, malformedFailOpen: true, moduleRule: true, harResults}, null, 2));
+  viewAdSwitch: true, malformedFailOpen: true, moduleRule: true, grpcHeaderCompatibility: true,
+  explicitErrorsPreserved: true, harResults, slowHarResults}, null, 2));

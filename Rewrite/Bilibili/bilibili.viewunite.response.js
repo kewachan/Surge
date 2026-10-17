@@ -1,5 +1,5 @@
 /*
- * Bilibili AIRelateAsync ad filtering — v1.0.0
+ * Bilibili AIRelateAsync ad filtering — v1.0.1
  * The captured replies put ad modules at 1 -> 5 -> 1 (protobuf Any), with
  * type.googleapis.com/bilibili.ad.v1.SourceContentDto as their type URL.
  * Remove only those modules; preserve other fields and unmodified frames.
@@ -10,6 +10,20 @@
   const AD_TYPE = 'type.googleapis.com/bilibili.ad.v1.SourceContentDto';
   const ENDPOINT = /^https?:\/\/(?:grpc|app)\.bili(?:bili\.com|api\.net)\/bilibili\.app\.viewunite\.v1\.View\/AIRelateAsync(?:\?.*)?$/;
   const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
+
+  function headerValue(headers, name) {
+    const key = Object.keys(headers).find(key => key.toLowerCase() === name);
+    return key === undefined ? undefined : headers[key];
+  }
+
+  function needsGrpcStatus(requestHeaders) {
+    // Match ADBlock v0.6.24's client compatibility guard (fixHeaders.mjs).
+    // Only supply a missing status after a complete, valid reply is parsed;
+    // never replace an explicit upstream error or add it to the white client.
+    const ua = String(headerValue(requestHeaders, 'user-agent') || '');
+    return ua.includes('bili-blue/') ||
+      (ua.includes('bili-universal/') && String(headerValue(requestHeaders, 'x-bili-moss-engine-type')) === '1');
+  }
 
   function argumentsMap(value) {
     const result = Object.create(null);
@@ -148,7 +162,7 @@
       removed += filtered.removed;
       if (!filtered.removed) { output.push(bytes.subarray(start, offset)); continue; }
       // The gRPC compression flag is per message: flag 0 is valid even when
-      // grpc-encoding is gzip. No recompression or transport-header changes.
+      // grpc-encoding is gzip. No recompression or grpc-encoding change.
       const header = new Uint8Array(5);
       new DataView(header.buffer).setUint32(1, filtered.bytes.length, false);
       output.push(header, filtered.bytes);
@@ -163,12 +177,17 @@
     const body = $response.body;
     if (!(body instanceof Uint8Array) || body.length === 0) return $done({});
     const headers = $response.headers || {};
-    const key = Object.keys(headers).find(name => name.toLowerCase() === 'grpc-encoding');
-    const result = filterFrames(body, String(key ? headers[key] : 'identity').trim().toLowerCase());
+    const grpcStatus = headerValue(headers, 'grpc-status');
+    if (grpcStatus !== undefined && String(grpcStatus).trim() !== '0') return $done({});
+    const result = filterFrames(body, String(headerValue(headers, 'grpc-encoding') || 'identity').trim().toLowerCase());
     if (result.removed && /^(INFO|DEBUG|ALL)$/i.test(String(options.LogLevel || ''))) {
       console.log(`Bilibili AIRelateAsync: removed ${result.removed} ad modules`);
     }
-    return $done(result.removed ? {body: result.bytes} : {});
+    const response = result.removed ? {body: result.bytes} : {};
+    if (grpcStatus === undefined && needsGrpcStatus($request.headers || {})) {
+      response.headers = {...headers, 'grpc-status': '0'};
+    }
+    return $done(response);
   } catch (error) {
     console.log(`Bilibili AIRelateAsync: kept original response (${error.message})`);
     return $done({});
