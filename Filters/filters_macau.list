@@ -69,11 +69,3 @@ DOMAIN-SUFFIX, gov.mo
 
 #AXA
 DOMAIN-SUFFIX, axa.com.hk
-
-############ Macau ############
-
-#SSH
-AND,((DOMAIN,kenichi-mac.asuscomm.com),(DEST-PORT,59000-59002))
-AND,((DOMAIN,kenichi-mac.asuscomm.com),(DEST-PORT,422))
-AND,((DOMAIN,kenichi-mac.asuscomm.com),(DEST-PORT,522))
-AND,((DOMAIN,kenichi-mac.asuscomm.com),(DEST-PORT,622))
