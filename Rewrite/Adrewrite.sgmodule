@@ -1,6 +1,7 @@
 #!name=Adblock Rewrite & Redirect
 #!author=kewachan
 #!desc=For daily App advertisement blocking and redirect
+#!date=2026-10-23
 
 [URL Rewrite]
 ##### Macau #####
@@ -130,7 +131,9 @@
 (https?:\/\/zh.wikipedia.org\/)(zh)(\/.+) $1zh-hk$3 302
 
 #Google
-(https?:\/\/www\.google\.com/search\?q=.+)(&client=.+) $1&gl=hk&safe=off 302
+#一般搜尋預設使用 Web，保留原有香港地區／SafeSearch 偏好及其他參數；明確選擇的搜尋模式不改動
+^(https?:\/\/www\.google\.com\/search\?)(?!(?:[^&#]*&)*(?:udm|tbm)=)(q=[^&#]+(?:&[^&#]*)*?)&client=[^&#]*(&[^#]*)?(#.*)?$ $1$2$3&gl=hk&safe=off&udm=14$4 302
+^(https?:\/\/www\.google\.com\/search\?)(?=(?:[^&#]*&)*q=[^&#]+)(?!(?:[^&#]*&)*(?:udm|tbm)=)([^#]+)(#.*)?$ $1udm=14&$2$3 302
 ^https?:\/\/www\.google\.com\/ads\/on-device\/conversions - reject
 ^https?:\/\/play\.google\.com\/newsstand\/api\/v3\/people\/me\/analytics - reject
 ^https?:\/\/cse\.google\.com\/adsense\/search\/async-ads\.js - reject
