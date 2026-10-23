@@ -11,6 +11,28 @@ const sample = {totalBalance: '2048', availableBalance: '512', usedBalance: '153
   isUnlimited: false, dataUnit: 'MB', categoryType: 'SPEED_DATA'};
 const payload = usage => JSON.stringify({code: '10000000', data: {usageVO: usage}});
 
+// A syntax guard and substitution harness, not the native Surge parser.
+function moduleDefaults(declaration) {
+  const values = {};
+  for (const field of declaration.split(',')) {
+    const match = /^([A-Za-z0-9_]+)(?::(.+))?$/.exec(field);
+    assert(match, 'module arguments must not declare an empty colon default');
+    assert(!Object.hasOwn(values, match[1]), 'duplicate module argument');
+    values[match[1]] = match[2] ?? '';
+  }
+  return values;
+}
+
+function configuredArgument(overrides = {}) {
+  const defaults = moduleDefaults(moduleText.match(/^#!arguments=(.*)$/m)[1]);
+  const values = {...defaults, ...overrides};
+  const template = moduleText.match(/,argument="([^"]*)"/)[1];
+  return template.replace(/\{\{\{([A-Za-z0-9_]+)\}\}\}/g, (_, name) => {
+    assert(Object.hasOwn(values, name), 'undeclared module argument');
+    return values[name];
+  });
+}
+
 async function run(options = {}) {
   const requests = [], logs = [];
   let doneCount = 0;
@@ -78,7 +100,7 @@ test('tokens accept Bearer prefixes and encoding; missing, invalid or injected v
     const {requests} = await run({argument});
     assert.equal(requests[0].headers.Authorization, 'Bearer test-token');
   }
-  for (const argument of ['', 'token=', 'token=Bearer%20', 'token=bad%0D%0AInjected%3Avalue', 'token=%ZZ', 'token=bad token']) {
+  for (const argument of ['', 'token=', 'token=paste-token-here', 'token=Bearer%20', 'token=bad%0D%0AInjected%3Avalue', 'token=%ZZ', 'token=bad token']) {
     const {output, requests} = await run({argument});
     assert.equal(requests.length, 0);
     assert(['info', 'error'].includes(output.style));
@@ -114,16 +136,35 @@ test('timeout is bounded and module automatically refreshes on opening without M
   for (const [value, expected] of [['1000', 15], ['-1', 8], ['invalid', 8], ['3', 3]]) {
     assert.equal((await run({argument: 'token=test-token&timeout=' + value})).requests[0].timeout, expected);
   }
-  assert(moduleText.includes('#!arguments=token:,update_interval:1'));
+  assert(moduleText.includes('#!arguments=token:paste-token-here,update_interval:1'));
   assert(moduleText.includes('update_interval:1'));
   assert(moduleText.includes('update-interval={{{update_interval}}}'));
   assert(moduleText.includes('type=generic,timeout=20'));
   assert(moduleText.includes('#!name=CTM Usage Info\n'));
   assert(moduleText.includes('script-name=CTM Usage Info,'));
-  assert(moduleText.includes('ctm-usage.js?v=1.0.1'));
+  assert(moduleText.includes('ctm-usage.js?v=1.0.2'));
   assert(!moduleText.includes('[MITM]'));
   assert(!moduleText.includes('type=cron'));
   assert(!moduleText.includes('type=http-response'));
+});
+
+test('module defaults are valid, descriptions are English, and a placeholder never reaches CTM', async () => {
+  assert.throws(() => moduleDefaults('token:,update_interval:1'), /empty colon default/);
+  assert.deepEqual(moduleDefaults('token:paste-token-here,update_interval:1,timeout:8'),
+    {token: 'paste-token-here', update_interval: '1', timeout: '8'});
+  assert(!/\p{Script=Han}/u.test(moduleText), 'all module descriptions and setup instructions are English');
+  for (const overrides of [{}, {token: ''}, {token: 'Bearer paste-token-here'}]) {
+    const {output, requests} = await run({argument: configuredArgument(overrides)});
+    assert.equal(requests.length, 0, 'an unconfigured module must never query CTM');
+    assert.equal(output.style, 'info');
+    assert(!output.content.includes('paste-token-here'));
+  }
+  for (const token of ['test-token', 'Bearer test-token']) {
+    const {requests} = await run({argument: configuredArgument({token})});
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].headers.Authorization, 'Bearer test-token');
+    assert.equal(requests[0].timeout, 8);
+  }
 });
 
 test('private HAR replay matches the screenshot without putting account data into fixtures', {skip: !process.env.CTM_HAR_PATH}, async () => {
