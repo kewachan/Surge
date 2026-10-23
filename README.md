@@ -16,4 +16,5 @@
 - [`Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule`](Rewrite/GeneralAdBlock/GeneralAdBlock.sgmodule) — 透過各服務的 response script 移除廣告及推廣內容。
 - [`Rewrite/Youtube/YouTube.Enhance.sgmodule`](Rewrite/Youtube/YouTube.Enhance.sgmodule) — YouTube 與 YouTube Music 功能增強、介面調整、Google 字幕翻譯（長片支援背景工作隊列），以及按 AI 快取 → AI Worker → Google 後備順序的歌詞翻譯。
 - [`Tools/NetworkInfo/NetworkInfo.sgmodule`](Tools/NetworkInfo/NetworkInfo.sgmodule) — 顯示目前代理的國家、網絡供應商及公網 IPv4。
+- [`Tools/CTMUsage/CTMUsage.sgmodule`](Tools/CTMUsage/CTMUsage.sgmodule) — CTM 數據用量及全速剩餘額度的用量條，開啟面板時自動刷新。
 - [`Tools/NodeOfflineMonitor/NodeOfflineMonitor.sgmodule`](Tools/NodeOfflineMonitor/NodeOfflineMonitor.sgmodule) — 定時監察代理節點離線及恢復狀態並發出通知。
