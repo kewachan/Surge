@@ -1,4 +1,4 @@
-/* CTM Usage Info v1.0.3 — account data stays between Surge and CTM. */
+/* CTM Usage Info v1.0.4 — account data stays between Surge and CTM. */
 (function () {
   'use strict';
 
@@ -17,7 +17,7 @@
       redirect: 'CTM redirected the request. Stopped without forwarding your token.',
       response: 'CTM returned invalid usage data. Please try again or update your token.'
     };
-    $done({title: 'CTM Usage Info', content: messages[error.kind] || messages.response,
+    $done({title: 'Remaining: -- MB', content: messages[error.kind] || messages.response,
       style: error.kind === 'missing' ? 'info' : 'error', icon: ICON, 'icon-color': ICON_COLOR});
   });
 
@@ -96,14 +96,13 @@
     if (!multiplier) fail('response');
     const used = amount(usage.usedBalance, multiplier);
     const available = amount(usage.availableBalance, multiplier);
-    const fullSpeed = usage.categoryType === 'SPEED_DATA';
     // Remaining balance comes directly from CTM: unlimited traffic can exceed
     // the full-speed cap, so do not derive it from total minus used traffic.
+    const remainingMB = (available / UNITS.MB).toFixed(1).replace(/\.0$/, '');
     const lines = [
       `Used: ${format(used)}`,
-      `${fullSpeed ? 'Full-speed remaining' : 'Remaining'}: ${format(available)}`,
       `Updated: ${updatedAt()}`
     ];
-    return {title: 'CTM Usage Info', content: lines.join('\n'), icon: ICON, 'icon-color': ICON_COLOR};
+    return {title: `Remaining: ${remainingMB} MB`, content: lines.join('\n'), icon: ICON, 'icon-color': ICON_COLOR};
   }
 })();
