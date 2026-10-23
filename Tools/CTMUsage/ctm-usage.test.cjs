@@ -62,7 +62,7 @@ async function run(options = {}) {
   return {output, requests};
 }
 
-test('automatic and manual refresh fetch once, with remaining in the title and used plus updated below', async () => {
+test('invoked automatic and manual refresh fetch once, with remaining in the title and used plus updated below', async () => {
   for (const trigger of ['auto-interval', 'button']) {
     const {output, requests} = await run({trigger});
     assert.equal(requests.length, 1);
@@ -167,13 +167,13 @@ test('missing, negative or nonnumeric usage and unsupported units fail closed; v
   assert.equal(output.title, 'Remaining: 2.0 GB');
 });
 
-test('timeout is bounded and module automatically refreshes on opening without MITM or a background timer', async () => {
+test('timeout is bounded and native panel interval is five minutes without MITM or a background timer', async () => {
   for (const [value, expected] of [['1000', 15], ['-1', 8], ['invalid', 8], ['3', 3]]) {
     assert.equal((await run({argument: 'token=test-token&timeout=' + value})).requests[0].timeout, expected);
   }
-  assert(moduleText.includes('#!arguments=token:paste-token-here,update_interval:1'));
-  assert(moduleText.includes('update_interval:1'));
-  assert(moduleText.includes('update-interval={{{update_interval}}}'));
+  assert(moduleText.includes('#!arguments=token:paste-token-here,timeout:8'));
+  assert.match(moduleText, /^CTM Usage Info = .*script-name=CTM Usage Info,update-interval=300$/m);
+  assert(!moduleText.includes('update_interval'), 'a saved legacy one-second option cannot override the fixed interval');
   assert(moduleText.includes('type=generic,timeout=20'));
   assert(moduleText.includes('#!name=CTM Usage Info\n'));
   assert(moduleText.includes('script-name=CTM Usage Info,'));
@@ -184,10 +184,21 @@ test('timeout is bounded and module automatically refreshes on opening without M
   assert(!moduleText.includes('type=http-response'));
 });
 
+test('manual refresh always queries CTM, including repeated taps inside the automatic interval', async () => {
+  // Surge owns the cached panel and automatic interval. The script must not
+  // throttle a button invocation or add another persistent-store cache.
+  const first = await run({trigger: 'button'});
+  const second = await run({trigger: 'button', body: payload({...sample, availableBalance: '256'})});
+  assert.equal(first.requests.length, 1);
+  assert.equal(second.requests.length, 1);
+  assert.equal(first.output.title, 'Remaining: 512 MB');
+  assert.equal(second.output.title, 'Remaining: 256 MB');
+});
+
 test('module defaults are valid, descriptions are English, and a placeholder never reaches CTM', async () => {
   assert.throws(() => moduleDefaults('token:,update_interval:1'), /empty colon default/);
-  assert.deepEqual(moduleDefaults('token:paste-token-here,update_interval:1,timeout:8'),
-    {token: 'paste-token-here', update_interval: '1', timeout: '8'});
+  assert.deepEqual(moduleDefaults(moduleText.match(/^#!arguments=(.*)$/m)[1]),
+    {token: 'paste-token-here', timeout: '8'});
   assert(!/\p{Script=Han}/u.test(moduleText), 'all module descriptions and setup instructions are English');
   for (const overrides of [{}, {token: ''}, {token: 'Bearer paste-token-here'}]) {
     const {output, requests} = await run({argument: configuredArgument(overrides)});
