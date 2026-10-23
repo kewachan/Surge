@@ -55,7 +55,7 @@ async function run(options = {}) {
   await Promise.resolve();
   assert.equal(doneCount, 1);
   assert.equal(logs.length, 0, 'never log a token, raw account response or network error');
-  assert.match(output.title, /^Remaining: (?:--|\d+(?:\.\d+)?) MB$/);
+  assert.match(output.title, /^Remaining: (?:-- MB|\d+ MB|\d+\.\d (?:GB|TB))$/);
   assert.match(output.content, /^[\x20-\x7E\n]+$/, 'all visible content must be English text without emoji');
   assert.equal(output.icon, 'simcard');
   assert.equal(output['icon-color'], '#6699FF', 'all panel states use Network Info blue');
@@ -83,14 +83,14 @@ test('automatic and manual refresh fetch once, with remaining in the title and u
 
 test('unlimited data above the full-speed cap keeps the actual used and remaining balances', async () => {
   const {output} = await run({body: payload({...sample, usedBalance: '3072', availableBalance: '0', isUnlimited: true})});
-  assert.equal(output.content.split('\n')[0], 'Used: 3 GB');
+  assert.equal(output.content.split('\n')[0], 'Used: 3.0 GB');
   assert.equal(output.title, 'Remaining: 0 MB');
   assert(!/quota|unlimited|%/i.test(output.content));
 });
 
 test('remaining balance comes from CTM and quota is not needed or displayed', async () => {
   const {output} = await run({body: payload({...sample, usedBalance: '3072', availableBalance: '1024'})});
-  assert.equal(output.title, 'Remaining: 1024 MB');
+  assert.equal(output.title, 'Remaining: 1.0 GB');
   for (const totalBalance of [undefined, null, '0', -1]) {
     const {output} = await run({body: payload({...sample, totalBalance, isUnlimited: true})});
     assert.equal(output.content.split('\n').length, 2);
@@ -102,13 +102,16 @@ test('remaining balance comes from CTM and quota is not needed or displayed', as
   assert.equal(generic.output.title, 'Remaining: 512 MB');
 });
 
-test('remaining title stays in MB across upstream data units and fractional values', async () => {
-  for (const [dataUnit, availableBalance, expected] of [
-    ['MB', '0', '0'], ['MB', '512.25', '512.3'], ['GB', '1.5', '1536'],
-    ['KB', '512', '0.5'], ['B', '1048576', '1']
+test('remaining and used share integer MB below 1 GB and one decimal place for GB or TB', async () => {
+  for (const [dataUnit, balance, expected] of [
+    ['MB', '0', '0 MB'], ['MB', '512.25', '512 MB'], ['MB', '512.5', '513 MB'],
+    ['MB', '1023', '1023 MB'], ['MB', '1024', '1.0 GB'], ['GB', '1', '1.0 GB'],
+    ['GB', '1.5', '1.5 GB'], ['GB', '1.25', '1.3 GB'], ['TB', '1', '1.0 TB'],
+    ['KB', '256', '0 MB'], ['KB', '512', '1 MB'], ['B', '1048576', '1 MB']
   ]) {
-    const {output} = await run({body: payload({...sample, dataUnit, availableBalance})});
-    assert.equal(output.title, `Remaining: ${expected} MB`);
+    const {output} = await run({body: payload({...sample, dataUnit, availableBalance: balance, usedBalance: balance})});
+    assert.equal(output.title, `Remaining: ${expected}`);
+    assert.equal(output.content.split('\n')[0], `Used: ${expected}`);
   }
 });
 
@@ -161,7 +164,7 @@ test('missing, negative or nonnumeric usage and unsupported units fail closed; v
   }
   const {output} = await run({body: payload({...sample, usedBalance: 0, availableBalance: '2048'})});
   assert(output.content.includes('Used: 0 MB'));
-  assert.equal(output.title, 'Remaining: 2048 MB');
+  assert.equal(output.title, 'Remaining: 2.0 GB');
 });
 
 test('timeout is bounded and module automatically refreshes on opening without MITM or a background timer', async () => {
@@ -174,7 +177,7 @@ test('timeout is bounded and module automatically refreshes on opening without M
   assert(moduleText.includes('type=generic,timeout=20'));
   assert(moduleText.includes('#!name=CTM Usage Info\n'));
   assert(moduleText.includes('script-name=CTM Usage Info,'));
-  assert(moduleText.includes('ctm-usage.js?v=1.0.4'));
+  assert(moduleText.includes('ctm-usage.js?v=1.0.5'));
   assert(moduleText.includes('title="Remaining: -- MB"'));
   assert(!moduleText.includes('[MITM]'));
   assert(!moduleText.includes('type=cron'));

@@ -1,4 +1,4 @@
-/* CTM Usage Info v1.0.4 — account data stays between Surge and CTM. */
+/* CTM Usage Info v1.0.5 — account data stays between Surge and CTM. */
 (function () {
   'use strict';
 
@@ -76,11 +76,9 @@
   }
 
   function format(bytes) {
-    if (bytes === 0) return '0 MB';
-    const names = Object.keys(UNITS);
-    let unit = names[0];
-    for (const name of names) { if (bytes >= UNITS[name]) unit = name; }
-    return `${(bytes / UNITS[unit]).toFixed(1).replace(/\.0$/, '')} ${unit}`;
+    if (bytes < UNITS.GB) return `${Math.round(bytes / UNITS.MB)} MB`;
+    const unit = bytes >= UNITS.TB ? 'TB' : 'GB';
+    return `${(bytes / UNITS[unit]).toFixed(1)} ${unit}`;
   }
 
   function updatedAt() {
@@ -98,11 +96,10 @@
     const available = amount(usage.availableBalance, multiplier);
     // Remaining balance comes directly from CTM: unlimited traffic can exceed
     // the full-speed cap, so do not derive it from total minus used traffic.
-    const remainingMB = (available / UNITS.MB).toFixed(1).replace(/\.0$/, '');
     const lines = [
       `Used: ${format(used)}`,
       `Updated: ${updatedAt()}`
     ];
-    return {title: `Remaining: ${remainingMB} MB`, content: lines.join('\n'), icon: ICON, 'icon-color': ICON_COLOR};
+    return {title: `Remaining: ${format(available)}`, content: lines.join('\n'), icon: ICON, 'icon-color': ICON_COLOR};
   }
 })();
