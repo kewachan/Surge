@@ -45,7 +45,7 @@ test('automatic and manual refresh fetch once, with only the token, and render a
     assert.equal(Object.keys(requests[0].headers).length, 2);
     assert.equal(requests[0]['auto-redirect'], false);
     assert.equal(requests[0]['auto-cookie'], false);
-    assert.equal(output.title, 'CTM Usage');
+    assert.equal(output.title, 'CTM Usage Info');
     assert(output.content.includes('🟩'.repeat(8) + '⬜'.repeat(2) + ' 75%'));
     assert(output.content.includes('已用 1.5 GB · 全速剩餘 512 MB'));
     assert(output.content.includes('全速配額 2 GB'));
@@ -118,6 +118,9 @@ test('timeout is bounded and module automatically refreshes on opening without M
   assert(moduleText.includes('update_interval:1'));
   assert(moduleText.includes('update-interval={{{update_interval}}}'));
   assert(moduleText.includes('type=generic,timeout=20'));
+  assert(moduleText.includes('#!name=CTM Usage Info\n'));
+  assert(moduleText.includes('script-name=CTM Usage Info,'));
+  assert(moduleText.includes('ctm-usage.js?v=1.0.1'));
   assert(!moduleText.includes('[MITM]'));
   assert(!moduleText.includes('type=cron'));
   assert(!moduleText.includes('type=http-response'));

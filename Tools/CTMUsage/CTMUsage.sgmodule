@@ -1,15 +1,15 @@
-#!name=CTM Usage
+#!name=CTM Usage Info
 #!desc=CTM mobile data usage bar; refreshes whenever the panel opens
 #!author=kewachan
 #!homepage=https://github.com/kewachan/Surge
 #!category=Tools
 #!date=2026-10-23
-#!version=1.0.0
+#!version=1.0.1
 #!arguments=token:,update_interval:1,timeout:8
 #!arguments-desc=Token：貼上自己的 CTM Authorization token，可包含 Bearer 前綴。請勿分享已填 token 的設定檔；token 失效後需重新取得。\n\nUpdate Interval：預設 1 秒，每次打開 Surge 面板時重新查詢；並非背景每秒查詢。-1 為只手動刷新。\n\nTimeout：單次查詢逾時秒數（1–15）。不需要填電話號碼、cookie 或裝置 ID，亦不需要啟用 MITM。
 
 [Script]
-CTM Usage = type=generic,timeout=20,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/CTMUsage/ctm-usage.js?v=1.0.0,argument="token={{{token}}}&timeout={{{timeout}}}"
+CTM Usage Info = type=generic,timeout=20,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/CTMUsage/ctm-usage.js?v=1.0.1,argument="token={{{token}}}&timeout={{{timeout}}}"
 
 [Panel]
-CTM Usage = title="CTM Usage",content="請填入自己的 token 後重新整理",script-name=CTM Usage,update-interval={{{update_interval}}}
+CTM Usage Info = title="CTM Usage Info",content="請填入自己的 token 後重新整理",script-name=CTM Usage Info,update-interval={{{update_interval}}}

@@ -1,4 +1,4 @@
-/* CTM Usage v1.0.0 — account data stays between Surge and CTM. */
+/* CTM Usage Info v1.0.1 — account data stays between Surge and CTM. */
 (function () {
   'use strict';
 
@@ -15,7 +15,7 @@
       redirect: 'CTM 接口重新導向，已停止查詢，token 未轉發到其他網址。',
       response: 'CTM 回應未包含有效用量，請稍後再試或更新 token。'
     };
-    $done({title: 'CTM Usage', content: messages[error.kind] || messages.response,
+    $done({title: 'CTM Usage Info', content: messages[error.kind] || messages.response,
       style: error.kind === 'missing' ? 'info' : 'error'});
   });
 
@@ -115,6 +115,6 @@
     if (total > 0) lines.push(`${fullSpeed ? '全速' : ''}配額 ${format(total)}${usage.isUnlimited === true ? ' · 無限數據' : ''}`);
     else if (usage.isUnlimited === true) lines.push('無限數據方案');
     lines.push(`更新 ${updatedAt()}（澳門時間）`);
-    return {title: 'CTM Usage', content: lines.join('\n'), icon: 'chart.bar.fill', 'icon-color': color};
+    return {title: 'CTM Usage Info', content: lines.join('\n'), icon: 'chart.bar.fill', 'icon-color': color};
   }
 })();
