@@ -1,12 +1,12 @@
 #!name=CTM Usage Info
-#!desc=CTM data usage and balance
+#!desc=Displays CTM mobile data usage and remaining full-speed balance.
 #!author=kewachan
 #!homepage=https://github.com/kewachan/Surge
 #!category=Tools
-#!date=2026-10-23
-#!version=1.0.7
+#!date=2026-10-24
+#!version=1.0.8
 #!arguments=token:paste-token-here,timeout:8
-#!arguments-desc=Token: Your CTM token. Keep it private.\n\nTimeout: 1-15 seconds.
+#!arguments-desc=Token: Paste your CTM Authorization token, with or without the Bearer prefix. Keep it private.\n\nTimeout: Request timeout in seconds (1-15; default: 8).\n\nAutomatic refresh has a minimum interval of 5 minutes. Tap refresh to update immediately.
 
 [Script]
 CTM Usage Info = type=generic,timeout=20,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/CTMUsage/ctm-usage.js?v=1.0.5,argument="token={{{token}}}&timeout={{{timeout}}}"
