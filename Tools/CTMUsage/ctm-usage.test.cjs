@@ -23,14 +23,21 @@ function moduleDefaults(declaration) {
   return values;
 }
 
-function configuredArgument(overrides = {}) {
+function substitute(template, overrides = {}) {
   const defaults = moduleDefaults(moduleText.match(/^#!arguments=(.*)$/m)[1]);
   const values = {...defaults, ...overrides};
-  const template = moduleText.match(/,argument="([^"]*)"/)[1];
   return template.replace(/\{\{\{([A-Za-z0-9_]+)\}\}\}/g, (_, name) => {
     assert(Object.hasOwn(values, name), 'undeclared module argument');
     return values[name];
   });
+}
+
+function configuredArgument(overrides = {}) {
+  return substitute(moduleText.match(/,argument="([^"]*)"/)[1], overrides);
+}
+
+function configuredPanel(overrides = {}) {
+  return substitute(moduleText.match(/^CTM Usage Info = .*script-name=CTM Usage Info,.*$/m)[0], overrides);
 }
 
 async function run(options = {}) {
@@ -167,13 +174,13 @@ test('missing, negative or nonnumeric usage and unsupported units fail closed; v
   assert.equal(output.title, 'Remaining: 2.0 GB');
 });
 
-test('timeout is bounded and native panel interval is five minutes without MITM or a background timer', async () => {
+test('timeout is bounded and native panel interval defaults to fifteen minutes without MITM or a background timer', async () => {
   for (const [value, expected] of [['1000', 15], ['-1', 8], ['invalid', 8], ['3', 3]]) {
     assert.equal((await run({argument: 'token=test-token&timeout=' + value})).requests[0].timeout, expected);
   }
-  assert(moduleText.includes('#!arguments=token:paste-token-here,timeout:8'));
-  assert.match(moduleText, /^CTM Usage Info = .*script-name=CTM Usage Info,update-interval=300$/m);
-  assert(!moduleText.includes('update_interval'), 'a saved legacy one-second option cannot override the fixed interval');
+  assert(moduleText.includes('#!arguments=token:paste-token-here,refresh_interval:900,timeout:8'));
+  assert.match(configuredPanel(), /script-name=CTM Usage Info,update-interval=900$/);
+  assert(!moduleText.includes('update_interval'), 'a saved legacy one-second option cannot override the new default');
   assert(moduleText.includes('type=generic,timeout=20'));
   assert(moduleText.includes('#!name=CTM Usage Info\n'));
   assert(moduleText.includes('script-name=CTM Usage Info,'));
@@ -182,6 +189,16 @@ test('timeout is bounded and native panel interval is five minutes without MITM 
   assert(!moduleText.includes('[MITM]'));
   assert(!moduleText.includes('type=cron'));
   assert(!moduleText.includes('type=http-response'));
+});
+
+test('refresh interval is configurable in seconds without reusing the old one-second setting', () => {
+  for (const seconds of ['300', '900', '1800', '3600']) {
+    assert(configuredPanel({refresh_interval: seconds}).endsWith('update-interval=' + seconds));
+    assert.equal(configuredArgument({token: 'test-token', refresh_interval: seconds}), 'token=test-token&timeout=8');
+  }
+  assert(configuredPanel({update_interval: '1'}).endsWith('update-interval=900'));
+  assert(configuredPanel({update_interval: '1', refresh_interval: '1800'}).endsWith('update-interval=1800'));
+  assert(!configuredPanel().includes('{{{'));
 });
 
 test('manual refresh always queries CTM, including repeated taps inside the automatic interval', async () => {
@@ -198,7 +215,7 @@ test('manual refresh always queries CTM, including repeated taps inside the auto
 test('module defaults are valid, descriptions are English, and a placeholder never reaches CTM', async () => {
   assert.throws(() => moduleDefaults('token:,update_interval:1'), /empty colon default/);
   assert.deepEqual(moduleDefaults(moduleText.match(/^#!arguments=(.*)$/m)[1]),
-    {token: 'paste-token-here', timeout: '8'});
+    {token: 'paste-token-here', refresh_interval: '900', timeout: '8'});
   assert(!/\p{Script=Han}/u.test(moduleText), 'all module descriptions and setup instructions are English');
   for (const overrides of [{}, {token: ''}, {token: 'Bearer paste-token-here'}]) {
     const {output, requests} = await run({argument: configuredArgument(overrides)});
