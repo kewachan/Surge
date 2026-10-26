@@ -28,7 +28,7 @@ DOMAIN-SUFFIX, singlewindow.gd.cn
 ############ Macau ############
 
 #BNU
-DOMAIN-SUFFIX,bnu.com.mo
+DOMAIN-SUFFIX, bnu.com.mo
 
 #SSH
 DOMAIN, freco.synology.me
