@@ -123,8 +123,8 @@ test('remaining and used share integer MB below 1 GB and one decimal place for G
 });
 
 test('panel matches Network Info blue with a data-related icon and no bar, quota or timezone label', async () => {
-  const networkModule = fs.readFileSync(path.join(__dirname, '../NetworkInfo/NetworkInfo.sgmodule'), 'utf8');
-  const networkColor = networkModule.match(/(?:^|,)Icon Color:([^,\n]+)/m)[1];
+  const networkSource = fs.readFileSync(path.join(__dirname, '../NetworkInfo/network-info.js'), 'utf8');
+  const networkColor = networkSource.match(/iconColor:\s*"([^"]+)"/)[1];
   for (const availableBalance of ['2048', '512', '1', '0']) {
     const {output} = await run({body: payload({...sample, availableBalance})});
     assert.equal(output['icon-color'], networkColor);
