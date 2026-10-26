@@ -3,12 +3,12 @@
 #!homepage=https://github.com/kewachan/Surge
 #!category=Tools
 #!date=2026-10-26
-#!version=1.1.2
-#!arguments=LookupURL:https://api-ipv4.ip.sb/ip,timeout:5,retries:1,RetrySeconds:1,RefreshSeconds:1,icon:network,IconColor:#6699FF
-#!arguments-desc=LookupURL: Service used to look up the public IPv4 address.\n\nTimeout: Request timeout in seconds.\n\nRetries: Attempts after a failed request.\n\nRetrySeconds: Delay between retries, in seconds.\n\nRefreshSeconds: Panel refresh interval in seconds. Use -1 for manual refresh or 1 to update when the panel opens.\n\nIcon: SF Symbol name.\n\nIconColor: Icon color in HEX format.
+#!version=1.1.3
+#!arguments=Lookup URL:https://api-ipv4.ip.sb/ip,Timeout:5,Retries:1,Retry Delay:1,Refresh Interval:1,Icon:network,Icon Color:#6699FF
+#!arguments-desc=Lookup URL: Service used to look up the public IPv4 address.\n\nTimeout: Request timeout in seconds.\n\nRetries: Attempts after a failed request.\n\nRetry Delay: Delay between retries, in seconds.\n\nRefresh Interval: Panel refresh interval in seconds. Use -1 for manual refresh or 1 to update when the panel opens.\n\nIcon: SF Symbol name.\n\nIcon Color: Icon color in HEX format.
 
 [Script]
-Network Info = type=generic,timeout=120,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NetworkInfo/network-info.js?v=1.1.0,argument="proxy_endpoint={{{LookupURL}}}&timeout={{{timeout}}}&retries={{{retries}}}&retry_delay={{{RetrySeconds}}}&icon={{{icon}}}&icon_color={{{IconColor}}}"
+Network Info = type=generic,timeout=120,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NetworkInfo/network-info.js?v=1.1.0,argument="proxy_endpoint={{{Lookup URL}}}&timeout={{{Timeout}}}&retries={{{Retries}}}&retry_delay={{{Retry Delay}}}&icon={{{Icon}}}&icon_color={{{Icon Color}}}"
 
 [Panel]
-Network Info = script-name=Network Info,update-interval={{{RefreshSeconds}}}
+Network Info = script-name=Network Info,update-interval={{{Refresh Interval}}}

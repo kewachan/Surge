@@ -4,12 +4,12 @@
 #!homepage=https://github.com/kewachan/Surge
 #!category=Tools
 #!date=2026-10-26
-#!version=1.0.10
-#!arguments=token:paste-token-here,RefreshSeconds:900,timeout:8
-#!arguments-desc=Token: Paste your CTM Authorization token; the Bearer prefix is optional.\n\nRefreshSeconds: Automatic update interval in seconds (900 = 15 minutes).\n\nTimeout: Request timeout in seconds (1-15; default: 8).\n\nTap refresh for an immediate update.
+#!version=1.0.11
+#!arguments=Token:paste-token-here,Refresh Interval:900,Timeout:8
+#!arguments-desc=Token: Paste your CTM Authorization token; the Bearer prefix is optional.\n\nRefresh Interval: Automatic update interval in seconds (900 = 15 minutes).\n\nTimeout: Request timeout in seconds (1-15; default: 8).\n\nTap refresh for an immediate update.
 
 [Script]
-CTM Usage Info = type=generic,timeout=20,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/CTMUsage/ctm-usage.js?v=1.0.5,argument="token={{{token}}}&timeout={{{timeout}}}"
+CTM Usage Info = type=generic,timeout=20,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/CTMUsage/ctm-usage.js?v=1.0.5,argument="token={{{Token}}}&timeout={{{Timeout}}}"
 
 [Panel]
-CTM Usage Info = title="Remaining: -- MB",content="Set your CTM token in the module parameters, then refresh.",script-name=CTM Usage Info,update-interval={{{RefreshSeconds}}}
+CTM Usage Info = title="Remaining: -- MB",content="Set your CTM token in the module parameters, then refresh.",script-name=CTM Usage Info,update-interval={{{Refresh Interval}}}

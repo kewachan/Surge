@@ -15,7 +15,7 @@ const payload = usage => JSON.stringify({code: '10000000', data: {usageVO: usage
 function moduleDefaults(declaration) {
   const values = {};
   for (const field of declaration.split(',')) {
-    const match = /^([A-Za-z0-9_]+)(?::(.+))?$/.exec(field);
+    const match = /^([^:,\r\n]+)(?::(.+))?$/.exec(field);
     assert(match, 'module arguments must not declare an empty colon default');
     assert(!Object.hasOwn(values, match[1]), 'duplicate module argument');
     values[match[1]] = match[2] ?? '';
@@ -26,7 +26,7 @@ function moduleDefaults(declaration) {
 function substitute(template, overrides = {}) {
   const defaults = moduleDefaults(moduleText.match(/^#!arguments=(.*)$/m)[1]);
   const values = {...defaults, ...overrides};
-  return template.replace(/\{\{\{([A-Za-z0-9_]+)\}\}\}/g, (_, name) => {
+  return template.replace(/\{\{\{([^}]+)\}\}\}/g, (_, name) => {
     assert(Object.hasOwn(values, name), 'undeclared module argument');
     return values[name];
   });
@@ -124,7 +124,7 @@ test('remaining and used share integer MB below 1 GB and one decimal place for G
 
 test('panel matches Network Info blue with a data-related icon and no bar, quota or timezone label', async () => {
   const networkModule = fs.readFileSync(path.join(__dirname, '../NetworkInfo/NetworkInfo.sgmodule'), 'utf8');
-  const networkColor = networkModule.match(/(?:^|,)IconColor:([^,\n]+)/m)[1];
+  const networkColor = networkModule.match(/(?:^|,)Icon Color:([^,\n]+)/m)[1];
   for (const availableBalance of ['2048', '512', '1', '0']) {
     const {output} = await run({body: payload({...sample, availableBalance})});
     assert.equal(output['icon-color'], networkColor);
@@ -178,7 +178,7 @@ test('timeout is bounded and native panel interval defaults to fifteen minutes w
   for (const [value, expected] of [['1000', 15], ['-1', 8], ['invalid', 8], ['3', 3]]) {
     assert.equal((await run({argument: 'token=test-token&timeout=' + value})).requests[0].timeout, expected);
   }
-  assert(moduleText.includes('#!arguments=token:paste-token-here,RefreshSeconds:900,timeout:8'));
+  assert(moduleText.includes('#!arguments=Token:paste-token-here,Refresh Interval:900,Timeout:8'));
   assert.match(configuredPanel(), /script-name=CTM Usage Info,update-interval=900$/);
   assert(!moduleText.includes('update_interval'), 'a saved legacy one-second option cannot override the new default');
   assert(moduleText.includes('type=generic,timeout=20'));
@@ -193,11 +193,11 @@ test('timeout is bounded and native panel interval defaults to fifteen minutes w
 
 test('refresh interval is configurable in seconds without reusing the old one-second setting', () => {
   for (const seconds of ['300', '900', '1800', '3600']) {
-    assert(configuredPanel({RefreshSeconds: seconds}).endsWith('update-interval=' + seconds));
-    assert.equal(configuredArgument({token: 'test-token', RefreshSeconds: seconds}), 'token=test-token&timeout=8');
+    assert(configuredPanel({'Refresh Interval': seconds}).endsWith('update-interval=' + seconds));
+    assert.equal(configuredArgument({Token: 'test-token', 'Refresh Interval': seconds}), 'token=test-token&timeout=8');
   }
   assert(configuredPanel({update_interval: '1'}).endsWith('update-interval=900'));
-  assert(configuredPanel({update_interval: '1', RefreshSeconds: '1800'}).endsWith('update-interval=1800'));
+  assert(configuredPanel({update_interval: '1', 'Refresh Interval': '1800'}).endsWith('update-interval=1800'));
   assert(!configuredPanel().includes('{{{'));
 });
 
@@ -215,16 +215,16 @@ test('manual refresh always queries CTM, including repeated taps inside the auto
 test('module defaults are valid, descriptions are English, and a placeholder never reaches CTM', async () => {
   assert.throws(() => moduleDefaults('token:,update_interval:1'), /empty colon default/);
   assert.deepEqual(moduleDefaults(moduleText.match(/^#!arguments=(.*)$/m)[1]),
-    {token: 'paste-token-here', RefreshSeconds: '900', timeout: '8'});
+    {Token: 'paste-token-here', 'Refresh Interval': '900', Timeout: '8'});
   assert(!/\p{Script=Han}/u.test(moduleText), 'all module descriptions and setup instructions are English');
-  for (const overrides of [{}, {token: ''}, {token: 'Bearer paste-token-here'}]) {
+  for (const overrides of [{}, {Token: ''}, {Token: 'Bearer paste-token-here'}]) {
     const {output, requests} = await run({argument: configuredArgument(overrides)});
     assert.equal(requests.length, 0, 'an unconfigured module must never query CTM');
     assert.equal(output.style, 'info');
     assert(!output.content.includes('paste-token-here'));
   }
   for (const token of ['test-token', 'Bearer test-token']) {
-    const {requests} = await run({argument: configuredArgument({token})});
+    const {requests} = await run({argument: configuredArgument({Token: token})});
     assert.equal(requests.length, 1);
     assert.equal(requests[0].headers.Authorization, 'Bearer test-token');
     assert.equal(requests[0].timeout, 8);
