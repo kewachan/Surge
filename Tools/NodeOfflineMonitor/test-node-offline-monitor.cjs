@@ -71,8 +71,9 @@ async function execute(input = {}) {
 test('module declares two optional maintenance times without malformed empty defaults', () => {
   const declaration = /^#!arguments=(.+)$/m.exec(moduleText)[1];
   const names = declaration.split(',').map(part => part.split(':', 1)[0]);
-  assert.deepEqual(names, ['cronexp', 'test_url', 'wake_system', 'maintenance_start', 'maintenance_end_time']);
-  assert(declaration.endsWith(',maintenance_start,maintenance_end_time'));
+  assert.deepEqual(names, ['Schedule', 'TestURL', 'WakeSystem', 'PauseFrom', 'PauseUntil']);
+  assert(names.every(name => /^[A-Za-z0-9]+$/.test(name)));
+  assert(declaration.endsWith(',PauseFrom,PauseUntil'));
   for (const match of moduleText.matchAll(/\{\{\{([^}]+)\}\}\}/g)) assert(names.includes(match[1]));
   assert(!moduleText.includes('maintenance_enabled'));
   assert(!moduleText.includes('maintenance_utc_offset'));
