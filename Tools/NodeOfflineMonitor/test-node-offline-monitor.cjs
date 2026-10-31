@@ -71,11 +71,11 @@ async function execute(input = {}) {
 test('module declares two optional maintenance times without malformed empty defaults', () => {
   const declaration = /^#!arguments=(.+)$/m.exec(moduleText)[1];
   const names = declaration.split(',').map(part => part.split(':', 1)[0]);
-  assert.deepEqual(names, ['Check every Min', 'Test URL', 'Wake System', 'Pause From', 'Pause Until']);
+  assert.deepEqual(names, ['Check Every Min', 'Test URL', 'Wake System', 'Pause From', 'Pause Until']);
   assert(names.every(name => /^[A-Z][A-Za-z0-9]*(?: [A-Za-z][A-Za-z0-9]*)*$/.test(name)));
-  assert(declaration.startsWith('Check every Min:15,'));
+  assert(declaration.startsWith('Check Every Min:15,'));
   for (const minutes of ['1', '10', '15', '30', '59']) {
-    const rendered = moduleText.replaceAll('{{{Check every Min}}}', minutes);
+    const rendered = moduleText.replaceAll('{{{Check Every Min}}}', minutes);
     const cron = /cronexp="([^"]+)"/.exec(rendered)[1];
     assert.equal(cron, '*/' + minutes + ' * * * *');
     assert.equal(cron.split(/\s+/).length, 5);
