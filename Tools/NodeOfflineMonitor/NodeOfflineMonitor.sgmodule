@@ -1,8 +1,8 @@
 #!name=Node Offline Monitor
 #!desc=Alerts after confirmed proxy outages and resumptions
 #!system=ios
-#!arguments=Schedule:*/15 * * * *,Test URL:auto,Wake System:true,Pause From,Pause Until
-#!arguments-desc=Schedule: Cron expression (default: every 15 minutes). Test URL: auto uses the profile test URL. Wake System: wake the system for scheduled checks.\n\nPause From / Pause Until: Optional maintenance times in HH:mm, using device time. Leave both empty to disable; overnight windows are supported.
+#!arguments=Check every Min:15,Test URL:auto,Wake System:true,Pause From,Pause Until
+#!arguments-desc=Check every Min: Check frequency in minutes (1–59; default: 15). Test URL: auto uses the profile test URL. Wake System: wake the system for scheduled checks.\n\nPause From / Pause Until: Optional maintenance times in HH:mm, using device time. Leave both empty to disable; overnight windows are supported.
 
 [Script]
-Node Offline Monitor = type=cron, cronexp="{{{Schedule}}}", wake-system={{{Wake System}}}, timeout=180, ability=http-client-policy, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.7.0, argument="test_url={{{Test URL}}}&maintenance_start={{{Pause From}}}&maintenance_end_time={{{Pause Until}}}"
+Node Offline Monitor = type=cron, cronexp="*/{{{Check every Min}}} * * * *", wake-system={{{Wake System}}}, timeout=180, ability=http-client-policy, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.7.0, argument="test_url={{{Test URL}}}&maintenance_start={{{Pause From}}}&maintenance_end_time={{{Pause Until}}}"
