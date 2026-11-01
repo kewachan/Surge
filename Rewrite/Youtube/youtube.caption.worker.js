@@ -3,7 +3,7 @@ import {PrewarmJob, identifier, fingerprint, captionSource, parseCaptions, rende
 export {PrewarmJob as CaptionPrewarm};
 
 const JOBS_PATH = "/caption/jobs";
-const WORKER_BUILD = "caption-queue-v24-prewarm-cache";
+const WORKER_BUILD = "caption-queue-v25-result-cache";
 const GOOGLE_TRANSLATE_ENDPOINTS = [
   "https://translate.googleapis.com/translate_a/t",
   "https://translate.google.com/translate_a/t",
@@ -395,7 +395,7 @@ async function getJobStatus(jobId, env) {
   return jobStub(env, jobId).fetch("https://caption-job/internal/status");
 }
 
-async function captionPrewarm(request, env, authenticated) {
+async function captionPrewarm(request, env, authenticated, context) {
   if (!env.CAPTION_PREWARM) return textResponse("Prewarm unavailable", 503);
   const url = new URL(request.url);
   if (request.method === "POST" && url.pathname === "/caption/prewarm") {
@@ -418,6 +418,17 @@ async function captionPrewarm(request, env, authenticated) {
   }
   const id = url.pathname.slice("/caption/prewarm/".length);
   if (request.method !== "GET" || !/^[a-f0-9]{64}$/.test(id)) return textResponse("Not Found", 404);
+  const hash = url.searchParams.get("sourceHash");
+  const cacheKey = new Request(`${url.origin}/__cache/prewarm-v1/${id}?sourceHash=${encodeURIComponent(hash || "")}`);
+  const cache = globalThis.caches?.default;
+  if (cache && hash) {
+    try {
+      const cached = await cache.match(cacheKey);
+      const result = cached && await cached.json();
+      if (result?.status === "complete" && result.sourceHash === hash && result.provider === "google-translate"
+        && typeof result.body === "string" && result.body.length <= 1500000 && /<timedtext\b/.test(result.body)) return json(result);
+    } catch (_) {} // Completed-result caching is optional.
+  }
   const state = await jobCall(env.CAPTION_PREWARM, id, "state");
   if (state.status !== "complete") return json({status: state.status, code: state.code});
   const result = state.result;
@@ -427,8 +438,16 @@ async function captionPrewarm(request, env, authenticated) {
   if (!statusResponse.ok) return json({status: "missing"});
   const status = await statusResponse.json();
   if (status.status !== "complete") return json({status: status.status, sourceFetched});
-  return json({status: "complete", sourceHash: result.sourceHash, target: result.target,
-    provider: "google-translate", sourceFetched, body: renderCaptions(result.body, parseCaptions(result.body), status.translations)});
+  const completed = {status: "complete", sourceHash: result.sourceHash, target: result.target,
+    provider: "google-translate", sourceFetched, body: renderCaptions(result.body, parseCaptions(result.body), status.translations)};
+  if (cache) {
+    const persist = Promise.resolve().then(() => cache.put(cacheKey, new Response(JSON.stringify(completed), {
+      headers: {"Content-Type": "application/json", "Cache-Control": "public, max-age=3600"},
+    }))).catch(() => {});
+    if (typeof context?.waitUntil === "function") context.waitUntil(persist);
+    else await persist;
+  }
+  return json(completed);
 }
 
 async function processCaptionPrewarm(message, env) {
@@ -461,7 +480,7 @@ async function handleRequest(request, env, context) {
       return textResponse("Unauthorized", 401, { "WWW-Authenticate": "Bearer" });
     }
     if (url.pathname.startsWith("/caption/prewarm")) {
-      const work = captionPrewarm(request, env, authenticated);
+      const work = captionPrewarm(request, env, authenticated, context);
       if (request.method === "POST") context?.waitUntil?.(work.then(() => undefined, () => undefined));
       return await work;
     }

@@ -106,7 +106,14 @@ export class PrewarmJob {
     if (request.method === "GET") return json(state ? {...state, work: await this.loadBody(state.work), result: await this.loadBody(state.result)} : {status: "missing"});
     const payload = await request.json();
     if (action === "prepare") {
-      if (state && !["failed", "missing"].includes(state.status)) return json({enqueue: false, status: state.status});
+      if (state && !["failed", "missing"].includes(state.status)) {
+        if (state.status === "queued" && state.work?.kind === "source" && !state.work.sourceLines
+          && payload.work?.kind === "source" && Array.isArray(payload.work.sourceLines) && payload.work.sourceLines.length) {
+          state.work = await this.storeBody(payload.work);
+          await this.ctx.storage.put("state", state);
+        }
+        return json({enqueue: false, status: state.status});
+      }
       state = {status: "queued", work: await this.storeBody(payload.work), createdAt: Date.now()};
       await this.ctx.storage.put("state", state);
       await this.ctx.storage.setAlarm(Date.now() + JOB_TTL_MS);

@@ -239,7 +239,10 @@ function bootstrap(options = {}) {
     lyricsLang: "zh-Hant", lyricsToken: token, ...options.settings}),
     $persistentStore: {read: (key) => store.get(key), write: (value, key) => value ? store.set(key, value) : store.delete(key)},
     $request: {headers: {}},
-    $httpClient: {post: (request, callback) => { calls.push(request); if (options.fail) callback("timeout"); else if (!options.hang) callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)})); }},
+    $httpClient: {post: (request, callback) => {
+      if (request.url.startsWith("https://music.youtube.com/")) { callback(null, {status: 200}, "{}"); return; }
+      calls.push(request); if (options.fail) callback("timeout"); else if (!options.hang) callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)}));
+    }},
     $done: (output) => outputs.push(output)};
   vm.runInNewContext(fs.readFileSync(path.join(directory, "youtube.prewarm.client.js"), "utf8"), context);
   return {store, calls, outputs, logs, context};
@@ -463,7 +466,7 @@ test("a stalled mature lookup is bounded and keeps immediate fallback available"
     else callback(null, {status: 200}, JSON.stringify({status: "complete", translations: ["後備譯文"]}));
   });
   assert((await run.output).body.includes("後備譯文"));
-  assert(Date.now() - start >= 1400); assert(Date.now() - start < 2400);
+  assert(Date.now() - start >= 2400); assert(Date.now() - start < 3400);
 });
 
 test("a local source-routing preference write failure cannot discard completed captions", async () => {
@@ -592,4 +595,139 @@ test("a large merged song bundle uses chunked durable storage below the per-valu
     const again = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId: "abcdefghijk", target: "zh-Hant", texts: song.texts}), env, {})).json();
     assert.equal(again.translations[33].length, 2000);
   } finally { global.caches = oldCaches; }
+});
+
+test("phone lyric-source prefetch supplies public lines without account headers and survives a missing Worker acknowledgement", async () => {
+  const run = bootstrap({settings: {captionLang: "off", debug: true}}), calls = [];
+  run.context.$request.headers = {Authorization: "private-account-secret", Cookie: "private-cookie"};
+  run.context.$httpClient.post = (request, callback) => {
+    calls.push(request);
+    if (request.url.startsWith("https://music.youtube.com/")) {
+      assert.equal(request.headers.Authorization, undefined); assert.equal(request.headers.Cookie, undefined);
+      assert(request.timeout > 0 && request.timeout <= 0.7);
+      const document = request.url.includes("/next?") ? {tabs: [{browseEndpoint: {browseId: "MPLYvalid"}}]}
+        : {musicDescriptionShelfRenderer: {description: {runs: [{text: "First verse\nSecond verse\nFirst verse"}]}}};
+      callback(null, {status: 200}, JSON.stringify(document));
+    } else callback("HTTP request timeout");
+  };
+  run.context.YouTubePrewarm.capture({videoId: "abcdefghijk"}, true); run.context.$done({body: "play"});
+  assert.equal(calls.length, 3);
+  assert.deepEqual(JSON.parse(calls[2].body).sourceLines, ["First verse", "Second verse"]);
+  assert(run.logs.includes("YouTube lyrics prewarm: source: device"));
+  assert(run.logs.includes("YouTube lyrics prewarm: submitted-unconfirmed"));
+  assert.equal(run.outputs.length, 1);
+  assert(!JSON.stringify(calls).includes("private-account-secret"));
+});
+
+test("slow or malformed public lyric sources retain URL-only background work within the playback deadline", async () => {
+  for (const mode of ["hung", "invalid-endpoint", "oversized-line"]) {
+    const run = bootstrap({settings: {captionLang: "off"}}), submissions = [];
+    run.context.$httpClient.post = (request, callback) => {
+      if (request.url.startsWith("https://music.youtube.com/")) {
+        if (mode === "hung") return;
+        if (mode === "invalid-endpoint") callback(null, {status: 200}, JSON.stringify({browseEndpoint: {browseId: "https://foreign.test/private"}}));
+        else callback(null, {status: 200}, JSON.stringify(request.url.includes("/next?") ? {browseEndpoint: {browseId: "MPLYvalid"}}
+          : {musicDescriptionShelfRenderer: {description: {simpleText: "x".repeat(501)}}}));
+      } else { submissions.push(request); callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)})); }
+    };
+    const start = Date.now(); run.context.YouTubePrewarm.capture({videoId: "abcdefghijk"}, true); run.context.$done({});
+    if (mode === "hung") await new Promise((resolve) => setTimeout(resolve, 750));
+    assert.equal(submissions.length, 1, mode); assert.equal(JSON.parse(submissions[0].body).sourceLines, undefined);
+    assert.equal(run.outputs.length, 1); assert(Date.now() - start < 1000);
+  }
+});
+
+test("a supplied phone source prewarms AI even when the Worker cannot acquire public lyrics", async () => {
+  const {lyrics} = await ready, oldFetch = global.fetch, oldCaches = global.caches;
+  global.fetch = async () => { throw new Error("Worker source cannot be retrieved"); }; global.caches = undefined;
+  const messages = [], namespace = new Namespace(lyrics.LyricsPrewarm);
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: namespace, LYRICS_QUEUE: {send: async (body) => messages.push(body)},
+    AI: {run: async (_, params) => {
+      const lines = JSON.parse(params.messages[1].content.match(/Target lines JSON: (.*)/)[1]);
+      return {response: JSON.stringify({translations: lines.map(() => "已預熱譯文")})};
+    }}};
+  const sourceLines = Array.from({length: 23}, (_, index) => "Phone lyric " + index);
+  try {
+    const response = await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant", sourceLines}), env, {});
+    assert.equal(response.status, 202);
+    for (let index = 0; index < messages.length; index++) await lyrics.default.queue({messages: [message(messages[index])]}, env, {});
+    const result = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId: "abcdefghijk", target: "zh-Hant", texts: sourceLines}), env, {})).json();
+    assert.equal(result.status, "complete"); assert.equal(result.translations.length, 23);
+    assert(result.translations.every((line) => line === "已預熱譯文"));
+    for (const source of [[], [null], ["x".repeat(501)], Array(385).fill("verse")])
+      assert.equal((await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant", sourceLines: source}), env, {})).status, 400);
+    assert.equal((await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant", sourceLines: Array(50).fill("x".repeat(400))}), env, {})).status, 413);
+  } finally { global.fetch = oldFetch; global.caches = oldCaches; }
+});
+
+test("device source upgrades queued acquisition without losing the existing delivery or overwriting processing work", async () => {
+  await ready;
+  const namespace = new Namespace(shared.PrewarmJob), messages = [], id = "e".repeat(64);
+  const queue = {send: async (message) => messages.push(message)};
+  const work = {kind: "source", videoId: "abcdefghijk", target: "zh-TW"};
+  await shared.enqueue(namespace, queue, id, work);
+  await shared.enqueue(namespace, queue, id, {...work, sourceLines: ["Device verse"]});
+  assert.equal(messages.length, 1);
+  const claimed = await shared.jobCall(namespace, id, "run", {});
+  assert.deepEqual(claimed.work.sourceLines, ["Device verse"]);
+  await shared.enqueue(namespace, queue, id, {...work, sourceLines: ["Later verse"]});
+  assert.deepEqual((await shared.jobCall(namespace, id, "state")).work.sourceLines, ["Device verse"]);
+});
+
+test("non-thinking prompts retain exact target/script guards and include full context only when distinct", async () => {
+  const {lyrics} = await ready, requests = [];
+  const texts = ["เธอคือความหวัง", "原有繁體標點！"];
+  const env = {AI: {run: async (_, params) => { requests.push(params); return {response: '{"translations":["你是希望","原有繁體標點！"]}'}; }}};
+  await lyrics.__test.translateLyrics(texts, "auto", "zh-TW", env);
+  let prompt = requests[0].messages[1].content;
+  assert(prompt.endsWith("/no_think")); assert(prompt.includes("Traditional Chinese")); assert(prompt.includes("你或你的") || prompt.includes("你 or 你的"));
+  assert(prompt.includes("byte-for-byte")); assert(!prompt.includes("Full lyric context JSON:"));
+  assert.equal(prompt.split(JSON.stringify(texts)).length - 1, 1);
+  assert.equal(requests[0].response_format.type, "json_schema"); assert.equal(requests[0].max_tokens, 1024);
+  await lyrics.__test.translateLyrics(texts, "auto", "zh-TW", env, [...texts, "Other context"]);
+  prompt = requests[1].messages[1].content;
+  assert(prompt.includes("Full lyric context JSON:")); assert(prompt.endsWith("/no_think"));
+  const neutral = await lyrics.__test.translateLyrics(["เธอคือความหวัง"], "auto", "zh-TW", {
+    AI: {run: async () => ({response: '{"translations":["妳是希望"]}'})},
+  });
+  assert.equal(neutral.translations[0], "你是希望");
+});
+
+test("completed caption documents cache by job and original fingerprint; cache failures retain the validated result", async () => {
+  const {caption} = await ready, oldFetch = global.fetch, oldCaches = global.caches;
+  const cached = new Map(), messages = [];
+  const env = {CAPTION_ACCESS_TOKEN: token, CAPTION_PREWARM: new Namespace(caption.CaptionPrewarm), CAPTION_JOBS: new Namespace(caption.CaptionJob),
+    CAPTION_QUEUE: {send: async (body) => messages.push(body), sendBatch: async (batch) => messages.push(...batch.map((item) => item.body))}};
+  global.caches = {default: {match: async (key) => cached.get(key.url)?.clone(), put: async (key, value) => { cached.set(key.url, value.clone()); }}};
+  global.fetch = async (url) => new URL(url).hostname === "www.youtube.com" ? new Response(xml) : Response.json(["預先完成"]);
+  try {
+    const created = await (await caption.default.fetch(request("https://worker.test/caption/prewarm", {url: sourceUrl, target: "zh-TW"}), env, {})).json();
+    for (let index = 0; index < messages.length; index++) await caption.default.queue({messages: [message(messages[index])]}, env);
+    const url = `https://worker.test/caption/prewarm/${created.jobId}?sourceHash=${encodeURIComponent(shared.fingerprint(xml))}`;
+    const first = await (await caption.default.fetch(new Request(url), env, {})).json();
+    assert.equal(first.status, "complete"); assert.equal(cached.size, 1);
+    const original = env.CAPTION_PREWARM;
+    env.CAPTION_PREWARM = {idFromName() { throw new Error("A cache hit must not reload original XML"); }};
+    const hit = await (await caption.default.fetch(new Request(url), env, {})).json(); assert.equal(hit.body, first.body);
+    env.CAPTION_PREWARM = original;
+    const mismatch = await (await caption.default.fetch(new Request(url.replace(/sourceHash=.*/, "sourceHash=changed")), env, {})).json();
+    assert.equal(mismatch.status, "source-mismatch"); assert(!mismatch.body);
+    global.caches.default.match = async () => { throw new Error("Cache unavailable"); };
+    global.caches.default.put = async () => { throw new Error("Cache unavailable"); };
+    assert.equal((await (await caption.default.fetch(new Request(url), env, {})).json()).body, first.body);
+  } finally { global.fetch = oldFetch; global.caches = oldCaches; }
+});
+
+test("an already-warm caption taking 1.8 seconds returns directly inside the unchanged response budget", async () => {
+  const boot = bootstrap({fail: true, settings: {lyricsLang: "off"}});
+  boot.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false); boot.context.$done({});
+  for (const [key, value] of boot.store) if (key.startsWith("YouTubeCaption.Prewarm."))
+    boot.store.set(key, JSON.stringify({...JSON.parse(value), savedAt: Date.now() - 20000}));
+  const result = shared.renderCaptions(xml, shared.parseCaptions(xml), ["手機速度仍能命中"]), start = Date.now();
+  const run = captionClient(boot.store, (_, request, callback) => {
+    assert(request.url.includes("/prewarm/"));
+    setTimeout(() => callback(null, {status: 200}, JSON.stringify({status: "complete", provider: "google-translate", target: "zh-TW", sourceHash: shared.fingerprint(xml), body: result})), 1800);
+  });
+  assert.equal((await run.output).body, result); assert.equal(run.calls.length, 1);
+  assert(Date.now() - start >= 1750 && Date.now() - start < 2600);
 });

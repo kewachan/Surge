@@ -90,7 +90,7 @@ async function readPrewarmedCaption(body, target, options, deadline, saved = cap
     if (remaining < 1000) return null;
     const token = validCaptionToken(options.captionToken) ? options.captionToken.trim() : "";
     const hash = prewarmFingerprint(body);
-    const lookupMs = Date.now() - saved.savedAt >= 3000 ? Math.min(1500, Math.max(0, remaining - 1000)) : 700;
+    const lookupMs = Date.now() - saved.savedAt >= 3000 ? Math.min(2500, Math.max(0, remaining - 2500)) : 700;
     if (lookupMs < 100) return null;
     let timer, result;
     try {

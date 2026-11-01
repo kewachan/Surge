@@ -100,6 +100,52 @@
   function sourceRoute(url) {
     return `YouTubeCaption.SourceRoute.v1.${fingerprint(JSON.stringify([query(url, "c"), query(url, "key"), query(url, "kind")]))}`;
   }
+  function find(value, match, depth = 0) {
+    if (!value || typeof value !== "object" || depth > 24) return null;
+    const result = match(value); if (result) return result;
+    for (const child of Object.values(value)) { const result = find(child, match, depth + 1); if (result) return result; }
+    return null;
+  }
+  function prefetchLyrics(plan, budget, ready) {
+    const sourceMs = Math.min(700, Math.max(0, budget - 150));
+    if (sourceMs < 150) { ready(); return; }
+    let settled = false;
+    const deadline = Date.now() + sourceMs;
+    const finish = (lines) => {
+      if (settled || finished) return;
+      settled = true; clearTimeout(timer);
+      if (lines?.length && lines.length <= 384 && lines.every((line) => line.length <= 500) && lines.join("").length <= 19200) {
+        plan.payload.sourceLines = lines;
+        if (options.debug) console.log("YouTube lyrics prewarm: source: device");
+      }
+      ready();
+    };
+    const timer = setTimeout(() => finish(), sourceMs);
+    const context = {client: {clientName: "WEB_REMIX", clientVersion: "1.20261026.01.00", hl: "en", gl: "HK"}};
+    function api(path, payload, receive) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) { finish(); return; }
+      try {
+        $httpClient.post({url: `https://music.youtube.com/youtubei/v1/${path}?prettyPrint=false`, timeout: remaining / 1000,
+          headers: {"Content-Type": "application/json", Origin: "https://music.youtube.com"}, body: JSON.stringify({context, ...payload})},
+        (error, response, body) => {
+          if (settled || finished) return;
+          if (error || Number(response?.status ?? response?.statusCode) !== 200 || typeof body !== "string" || body.length > 1500000) { finish(); return; }
+          try { receive(JSON.parse(body)); } catch (_) { finish(); }
+        });
+      } catch (_) { finish(); }
+    }
+    // Public source requests carry no account headers, cookies or playback keys.
+    api("next", {videoId: plan.payload.videoId}, (document) => {
+      const browseId = find(document, (node) => /^MPLY[\w-]{1,300}$/.test(node.browseEndpoint?.browseId || "") ? node.browseEndpoint.browseId : null);
+      if (!browseId) { finish(); return; }
+      api("browse", {browseId}, (document) => {
+        const description = find(document, (node) => node.musicDescriptionShelfRenderer?.description || null);
+        const text = description?.runs?.map((run) => run.text || "").join("") || description?.simpleText || "";
+        finish([...new Set(text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]);
+      });
+    });
+  }
   function findTracks(value, depth = 0) {
     if (!value || typeof value !== "object" || depth > 8) return [];
     if (Array.isArray(value.captionTracks)) return value.captionTracks;
@@ -225,6 +271,7 @@
           });
         } catch (_) { plan.waiting = false; trace(plan, "submitted-unconfirmed"); if (!--left) finish(); }
       }
+      if (plan.kind === "lyrics") { prefetchLyrics(plan, budget, submit); continue; }
       if (plan.kind !== "caption" || typeof $httpClient.get !== "function") { submit(); continue; }
       try {
         const route = JSON.parse($persistentStore.read(sourceRoute(plan.payload.url)) || "null");
