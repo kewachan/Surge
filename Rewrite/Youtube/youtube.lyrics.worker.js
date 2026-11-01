@@ -2,7 +2,9 @@ import {PrewarmJob, identifier, enqueue, consume, jobCall, json, lyricBatches, f
 export {PrewarmJob as LyricsPrewarm};
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v15-prewarm";
+const WORKER_BUILD = "lyrics-translate-v17-prewarm-source";
+// Do not reuse source lookups that older builds cached after one empty response.
+const PREWARM_SOURCE_VERSION = 2;
 const MAX_REQUEST_BYTES = 48 * 1024;
 const MAX_ITEMS = 12;
 const MAX_LINE_CHARS = 500;
@@ -369,13 +371,22 @@ async function lyricsPrewarm(request, env) {
     try { payload = JSON.parse(raw); } catch (_) { return response("Invalid JSON", 400); }
     const target = normalizeLanguage(payload.target, false);
     if (!target || !/^[\w-]{11}$/.test(payload.videoId || "")) return response("Invalid prewarm request", 400);
-    const id = await identifier({version: 1, videoId: payload.videoId, target, model: AI_MODEL});
-    return json(await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id, {kind: "source", videoId: payload.videoId, target}), 202);
+    const id = await identifier({version: PREWARM_SOURCE_VERSION, videoId: payload.videoId, target, model: AI_MODEL});
+    const saved = await jobCall(env.LYRICS_PREWARM, id, "state");
+    if (["queued", "processing", "complete"].includes(saved.status)) return json({jobId: id, reused: true}, 202);
+    let sourceLines;
+    try {
+      // Source availability can differ between the HTTP edge and Queue consumers.
+      // The producer is held by waitUntil after the phone leaves; only acquisition happens here.
+      const lines = await fetchMusicLyrics(payload.videoId);
+      if (lines.length) sourceLines = checkedLyricBatches(lines).flat();
+    } catch (_) {} // The persistent consumer retains bounded source retries.
+    return json(await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id, {kind: "source", videoId: payload.videoId, target, sourceLines}), 202);
   }
   const id = url.pathname.slice("/lyrics/prewarm/".length);
   if (request.method !== "GET" || !/^[a-f0-9]{64}$/.test(id)) return response("Not Found", 404);
   const state = await jobCall(env.LYRICS_PREWARM, id, "state");
-  if (state.status !== "complete") return json({status: state.status, code: state.code});
+  if (state.status !== "complete") return json({status: state.status === "failed" && state.code === "lyrics-source-empty" ? "unavailable" : state.status, code: state.code});
   if (!state.result.available) return json({status: "unavailable", available: false});
   const batches = await Promise.all(state.result.batchJobIds.map((id) => jobCall(env.LYRICS_PREWARM, id, "state")));
   const completedBatches = batches.filter((batch) => batch.status === "complete").length;
@@ -387,7 +398,7 @@ async function lyricsPrewarm(request, env) {
 async function prewarmedSongBatch(videoId, texts, target, env) {
   if (!env.LYRICS_PREWARM || !/^[\w-]{11}$/.test(videoId || "")) return null;
   try {
-    const id = await identifier({version: 1, videoId, target, model: AI_MODEL});
+    const id = await identifier({version: PREWARM_SOURCE_VERSION, videoId, target, model: AI_MODEL});
     const song = await jobCall(env.LYRICS_PREWARM, id, "state");
     if (song.status !== "complete" || !song.result.available) return null;
     const ids = song.result.batchJobIds;
@@ -420,12 +431,11 @@ async function handleLyricsQueue(batch, env, context) {
       await writeCache(key.request, result);
       return {...result, sourceTexts: work.texts};
     }
-    const lines = await fetchMusicLyrics(work.videoId);
-    if (!lines.length) return {available: false};
-    const batches = lyricBatches(lines);
-    if (batches.length > 32 || batches.some((texts) => texts.some((line) => line.length > MAX_LINE_CHARS)
-      || texts.join("").length > MAX_TOTAL_CHARS))
-      throw Object.assign(new Error("Unsupported lyric source"), {code: "lyrics-source-unsupported", retryable: false});
+    const lines = work.sourceLines || await fetchMusicLyrics(work.videoId);
+    if (!lines.length) throw Object.assign(new Error("Lyric source currently unavailable"), {
+      code: "lyrics-source-empty", retryAfterSeconds: Math.min(12, 3 * message.attempts),
+    });
+    const batches = checkedLyricBatches(lines);
     const batchJobIds = [];
     for (const texts of batches) {
       const key = await cacheRequest(texts, "auto", work.target);
@@ -434,6 +444,14 @@ async function handleLyricsQueue(batch, env, context) {
     }
     return {available: true, batchJobIds};
   })));
+}
+
+function checkedLyricBatches(lines) {
+  const batches = lyricBatches(lines);
+  if (batches.length > 32 || batches.some((texts) => texts.some((line) => line.length > MAX_LINE_CHARS)
+    || texts.join("").length > MAX_TOTAL_CHARS))
+    throw Object.assign(new Error("Unsupported lyric source"), {code: "lyrics-source-unsupported", retryable: false});
+  return batches;
 }
 
 async function handleLyricsRequest(request, env, context) {

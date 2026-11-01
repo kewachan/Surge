@@ -62,7 +62,8 @@ export async function consume(message, namespace, perform) {
     console.log(`Translation prewarm: ${code}`);
     if (message.attempts < 5 && error?.retryable !== false) {
       await jobCall(namespace, id, "retry", {});
-      message.retry({delaySeconds: Math.min(120, 15 * message.attempts)});
+      message.retry({delaySeconds: Number.isFinite(error?.retryAfterSeconds)
+        ? Math.max(1, Math.min(120, error.retryAfterSeconds)) : Math.min(120, 15 * message.attempts)});
     } else {
       await jobCall(namespace, id, "failed", {code});
       message.ack();

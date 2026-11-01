@@ -51,7 +51,8 @@
   function recent(key) {
     try {
       const saved = JSON.parse($persistentStore.read(key) || "null");
-      return saved && Date.now() - saved.savedAt < (saved.jobId ? 600000 : 15000);
+      const interval = key.startsWith("YouTubeLyrics.") ? 60000 : 600000;
+      return saved && Date.now() - saved.savedAt < (saved.jobId ? interval : 15000);
     } catch (_) { return false; }
   }
   function detailsVideoId(fields) {
@@ -88,6 +89,7 @@
       videoId = match?.[1] || "";
     }
     if (!videoId) videoId = detailsVideoId(unknownFields);
+    if (!videoId && /^[\w-]{11}$/.test(player.videoId || "")) videoId = player.videoId;
     if (target && track && captionTarget(track.languageCode || "").toLowerCase() !== captionTarget(target).toLowerCase()) {
       const normalizedTarget = captionTarget(target);
       const identity = JSON.stringify([query(track.baseUrl, "v"), query(track.baseUrl, "lang"), query(track.baseUrl, "kind"), query(track.baseUrl, "name"), normalizedTarget]);
@@ -103,14 +105,16 @@
         token: lyricsToken, payload: {videoId, target: lyricsTarget}});
     }
   }
-  globalThis.YouTubePrewarm = {capture};
+  globalThis.YouTubePrewarm = {capture, enabled: options.prewarm !== false && options.prewarm !== "false"
+    && Boolean(language(options.captionLang) || (language(options.lyricsLang) && /^[a-f0-9]{64}$/i.test(String(options.lyricsToken || "").trim())))};
   $done = (result) => {
     if (finished) return;
     const pending = plans.filter((plan) => !recent(plan.key));
-    if (!pending.length) { finished = true; originalDone(result); return; }
+    const budget = Math.max(0, Math.min(950, (globalThis.YouTubePrewarm.deadline || Infinity) - Date.now()));
+    if (!pending.length || budget < 100) { finished = true; originalDone(result); return; }
     let left = pending.length;
     const finish = () => { if (!finished) { finished = true; clearTimeout(timer); originalDone(result); } };
-    const timer = setTimeout(finish, 950);
+    const timer = setTimeout(finish, budget);
     for (const plan of pending) {
       remember(plan.key, {savedAt: Date.now()});
       const headers = {"Content-Type": "application/json"};

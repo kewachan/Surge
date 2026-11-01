@@ -169,16 +169,67 @@ test("Music source prewarm populates the exact existing AI batch cache; foregrou
     assert.equal(runs, 1, "native/web batch boundaries must not force another AI translation");
   } finally { global.fetch = oldFetch; global.caches = oldCaches; }
 });
-test("invalid/missing lyric token cannot start prewarm; no lyrics is a successful no-op", async () => {
+test("invalid tokens cannot start prewarm; empty source lookups retry without running AI or caching a permanent absence", async () => {
   const {lyrics} = await ready; const messages = [];
   const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: new Namespace(lyrics.LyricsPrewarm), LYRICS_QUEUE: {send: async (body) => messages.push(body)}};
   assert.equal((await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant"}, {}), env, {})).status, 401);
   const oldFetch = global.fetch; global.fetch = async () => Response.json({tabs: []});
   try {
     const created = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant"}), env, {})).json();
-    await lyrics.default.queue({messages: [message(messages[0])]}, env, {});
-    assert.equal((await (await lyrics.default.fetch(new Request(`https://worker.test/lyrics/prewarm/${created.jobId}`, {headers: authorization}), env, {})).json()).available, false);
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const delivery = message(messages[0], attempt);
+      await lyrics.default.queue({messages: [delivery]}, env, {});
+      if (attempt < 5) assert.equal(delivery.retried.delaySeconds, Math.min(12, 3 * attempt));
+      else assert(delivery.acked);
+    }
+    assert.equal((await (await lyrics.default.fetch(new Request(`https://worker.test/lyrics/prewarm/${created.jobId}`, {headers: authorization}), env, {})).json()).status, "unavailable");
     assert.equal(messages.length, 1);
+    await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant"}), env, {});
+    assert.equal(messages.length, 2, "a later playback can retry without waiting for the 24-hour DO expiry");
+  } finally { global.fetch = oldFetch; }
+});
+
+test("a transient empty Music lookup recovers on redelivery and ignores legacy negative source caches", async () => {
+  const {lyrics} = await ready, messages = [];
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: new Namespace(lyrics.LyricsPrewarm),
+    LYRICS_QUEUE: {send: async (body) => messages.push(body)}};
+  const oldId = await shared.identifier({version: 1, videoId: "abcdefghijk", target: "zh-TW", model: "@cf/qwen/qwen3-30b-a3b-fp8"});
+  await shared.jobCall(env.LYRICS_PREWARM, oldId, "prepare", {work: {kind: "source"}});
+  await shared.jobCall(env.LYRICS_PREWARM, oldId, "complete", {result: {available: false}});
+  const oldFetch = global.fetch; let empty = true;
+  global.fetch = async (url) => Response.json(empty ? {tabs: []} : String(url).includes("/next?")
+    ? {browseEndpoint: {browseId: "MPLYrecovered"}}
+    : {musicDescriptionShelfRenderer: {description: {runs: [{text: "Hello world"}]}}});
+  try {
+    const created = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant"}), env, {})).json();
+    assert.notEqual(created.jobId, oldId);
+    const first = message(messages[0]); await lyrics.default.queue({messages: [first]}, env, {});
+    assert(first.retried); empty = false;
+    await lyrics.default.queue({messages: [message(messages[0], 2)]}, env, {});
+    const state = await shared.jobCall(env.LYRICS_PREWARM, created.jobId, "state");
+    assert.equal(state.result.available, true); assert.equal(state.result.batchJobIds.length, 1);
+  } finally { global.fetch = oldFetch; }
+});
+
+test("HTTP-edge lyric source acquisition survives a Queue origin that cannot retrieve lyrics", async () => {
+  const {lyrics} = await ready, messages = [];
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: new Namespace(lyrics.LyricsPrewarm),
+    LYRICS_QUEUE: {send: async (body) => messages.push(body)}};
+  const oldFetch = global.fetch;
+  global.fetch = async (url) => Response.json(String(url).includes("/next?")
+    ? {browseEndpoint: {browseId: "MPLYedge"}}
+    : {musicDescriptionShelfRenderer: {description: {runs: [{text: "Hello world\nGoodnight world"}]}}});
+  try {
+    const tasks = [];
+    const created = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant"}), env,
+      {waitUntil: (task) => tasks.push(task)})).json();
+    assert(tasks.length); await Promise.all(tasks);
+    global.fetch = async () => { throw new Error("Queue origin unavailable"); };
+    await lyrics.default.queue({messages: [message(messages[0])]}, env, {});
+    const state = await shared.jobCall(env.LYRICS_PREWARM, created.jobId, "state");
+    assert.equal(state.result.available, true); assert.equal(state.result.batchJobIds.length, 1);
+    const batch = await shared.jobCall(env.LYRICS_PREWARM, state.result.batchJobIds[0], "state");
+    assert.deepEqual(batch.work.texts, ["Hello world", "Goodnight world"]);
   } finally { global.fetch = oldFetch; }
 });
 

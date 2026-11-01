@@ -12,7 +12,7 @@ const MAX_CLIENT_KEY_CHARS = 64;
 const MAX_CAPTION_LANGUAGE_CHARS = 32;
 const UPSTREAM_TIMEOUT_MS = 25000;
 const TRANSFORM_PATH = "/transform";
-const WORKER_BUILD = "init-transform-v10-media-only";
+const WORKER_BUILD = "init-transform-v11-prewarm-hint";
 const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const PAGEAD_MARKER = TEXT_ENCODER.encode("pagead");
@@ -647,8 +647,38 @@ function addEnhanceCaptionTrack(captionsBytes, captionLanguage) {
   return { bytes, added };
 }
 
-function stripPlayerAds(playerBytes, captionLanguage = "off") {
+function playerPrewarmMetadata(fields, captionLanguage) {
+  const details = firstProtoField(fields, 11, 2)?.value;
+  let videoId = details ? TEXT_DECODER.decode(firstProtoField(parseProto(details), 1, 2)?.value || new Uint8Array()) : "";
+  const tracks = [];
+  const captions = firstProtoField(fields, 10, 2)?.value;
+  if (captions) for (const renderer of parseProto(captions).filter((field) => field.no === 51621377 && field.wire === 2)) {
+    for (const track of parseProto(renderer.value).filter((field) => field.no === 1 && field.wire === 2)) {
+      const baseUrl = captionTrackBaseUrl(track.value), languageCode = captionTrackLanguage(track.value);
+      if (!baseUrl || baseUrl.length > 12000 || !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(languageCode)) continue;
+      const url = new URL(baseUrl);
+      if (url.origin !== "https://www.youtube.com" || url.pathname !== "/api/timedtext" || url.username || url.password
+        || url.searchParams.has("tlang") || url.searchParams.has("enhance_tlang")) continue;
+      const id = url.searchParams.get("v");
+      if (!/^[\w-]{11}$/.test(id || "")) continue;
+      if (!videoId) videoId = id;
+      if (id === videoId) tracks.push({baseUrl: url.href, languageCode});
+    }
+  }
+  if (!/^[\w-]{11}$/.test(videoId)) return null;
+  const language = (value) => ({"zh-hant": "zh-tw", "zh-hans": "zh-cn"}[value.toLowerCase()] || value.toLowerCase());
+  const selected = tracks.find((track) => language(track.languageCode) === language(captionLanguage))
+    || tracks.find((track) => track.languageCode === "en") || tracks[0];
+  return {videoId, captions: {captionTracks: selected ? [selected] : []}};
+}
+
+function stripPlayerAds(playerBytes, captionLanguage = "off", prewarm) {
   const fields = parseProto(playerBytes);
+  if (prewarm && !prewarm.length) {
+    // This is the HMAC-verified PlayerResponse, including encrypted-only Music startup.
+    // Parsing an optional hint must never affect playback transformation.
+    try { const metadata = playerPrewarmMetadata(fields, captionLanguage); if (metadata) prewarm.push(metadata); } catch (_) {}
+  }
   const output = [];
   let removed = 0;
   let enhanced = false;
@@ -707,7 +737,7 @@ function stripPlayerAds(playerBytes, captionLanguage = "off") {
   };
 }
 
-function stripOnesieResponseAds(clearBytes, captionLanguage = "off") {
+function stripOnesieResponseAds(clearBytes, captionLanguage = "off", prewarm) {
   const fields = parseProto(clearBytes);
   const output = [];
   let removed = 0;
@@ -728,7 +758,7 @@ function stripOnesieResponseAds(clearBytes, captionLanguage = "off") {
           // Content.player is field 2. Field 3 is Content.next and must never be
           // parsed as PlayerResponse because it contains watch metadata and comments.
           if (bodyField.no === 2 && bodyField.wire === 2) {
-            const playerResult = stripPlayerAds(bodyField.value, captionLanguage);
+            const playerResult = stripPlayerAds(bodyField.value, captionLanguage, prewarm);
             bodyRemoved += playerResult.removed;
             bodyEnhanced += Number(playerResult.enhanced);
             bodyOutput.push(
@@ -859,7 +889,7 @@ async function importCryptoKeys(clientKey) {
   };
 }
 
-async function processEncryptedResponsePart(partBytes, keys, captionLanguage = "off") {
+async function processEncryptedResponsePart(partBytes, keys, captionLanguage = "off", prewarm) {
   const fields = parseProto(partBytes);
   const ciphertext = firstProtoField(fields, 1, 2)?.value;
   const signature = firstProtoField(fields, 2, 2)?.value;
@@ -878,7 +908,7 @@ async function processEncryptedResponsePart(partBytes, keys, captionLanguage = "
     ciphertext,
   ));
   const clearBytes = compression === 1 ? await transformCompression(decrypted, "gzip", "decompress") : decrypted;
-  const stripped = stripOnesieResponseAds(clearBytes, captionLanguage);
+  const stripped = stripOnesieResponseAds(clearBytes, captionLanguage, prewarm);
   if (stripped.removed === 0 && stripped.enhanced === 0) {
     return { bytes: partBytes, removed: 0, enhanced: 0, changed: false };
   }
@@ -908,7 +938,7 @@ async function processEncryptedResponsePart(partBytes, keys, captionLanguage = "
   };
 }
 
-async function processUmpResponse(bytes, clientKey, captionLanguage = "off") {
+async function processUmpResponse(bytes, clientKey, captionLanguage = "off", prewarm) {
   const parts = parseUmp(bytes);
   const keys = await importCryptoKeys(clientKey);
   let nextDataIsEncryptedResponse = false;
@@ -926,7 +956,7 @@ async function processUmpResponse(bytes, clientKey, captionLanguage = "off") {
     nextDataIsEncryptedResponse = false;
 
     try {
-      const result = await processEncryptedResponsePart(part.data, keys, captionLanguage);
+      const result = await processEncryptedResponsePart(part.data, keys, captionLanguage, prewarm);
       part.data = result.bytes;
       removed += result.removed;
       enhanced += result.enhanced;
@@ -1014,7 +1044,7 @@ function responseWithStream(upstream, result) {
   });
 }
 
-function transformResponse(body, status, result) {
+function transformResponse(body, status, result, prewarm) {
   return new Response(body, {
     status,
     headers: {
@@ -1023,6 +1053,7 @@ function transformResponse(body, status, result) {
       "X-Content-Type-Options": "nosniff",
       "X-YouTube-AdBlock": result,
       "X-YouTube-Worker-Build": WORKER_BUILD,
+      ...(prewarm?.length ? {"X-YouTube-Player-Prewarm": btoa(JSON.stringify(prewarm[0]))} : {}),
     },
   });
 }
@@ -1059,8 +1090,9 @@ async function handleTransformRequest(request, workerUrl) {
   }
 
   try {
-    const result = await processUmpResponse(responseBytes, clientKey, captionLanguage);
-    return transformResponse(result.bytes, 200, `removed-${result.removed}`);
+    const prewarm = workerUrl.searchParams.get("prewarm") === "1" ? [] : undefined;
+    const result = await processUmpResponse(responseBytes, clientKey, captionLanguage, prewarm);
+    return transformResponse(result.bytes, 200, `removed-${result.removed}`, prewarm);
   } catch (error) {
     console.error("YouTube UMP transform was left unchanged:", error);
     return transformResponse(responseBytes, 200, "bypass-error");
