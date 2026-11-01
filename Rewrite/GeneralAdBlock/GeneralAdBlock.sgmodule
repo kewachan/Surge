@@ -7,7 +7,7 @@ force-http-engine-hosts = %APPEND% gql.reddit.com, gql-fed.reddit.com
 
 [Script]
 Bahamut = type=http-response, pattern=^https:\/\/api\.gamer\.com\.tw\/(?:mobile_app\/anime\/v\d\/(?:token|m3u8)|anime\/v\d\/video_src)\.php(?:\?.*)?$, requires-body=true, max-size=0, timeout=40, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/bahamut-adblock.js?v=1.1.0
-Google = type=http-response, pattern=^https?:\/\/(www\.)?google\.[^\/]+\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/google-adblock.js?v=1.0.19
+Google = type=http-response, pattern=^https?:\/\/(www\.)?google\.[^\/]+\/search(?:\/.*)?(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/google-adblock.js?v=1.0.20
 Manhuashe = type=http-response, pattern=^https?:\/\/comicapi\.manhuashe\.com\/v\d\/.+?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/manhuashe-adblock.js?v=1.0.2
 LINE = type=http-response, pattern=^https:\/\/legy\.line-apps\.com(?::443)?\/S4(?:\?[^#]*)?$, requires-body=true, binary-body-mode=true, max-size=262144, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/line-adblock.js?v=1.0.0
 MPay = type=http-response, pattern=^https:\/\/pay\.macaupass\.com\/tdrmp\/appMenu\/getAppMenu\.do(?:\?.*)?$, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/GeneralAdBlock/mpay-adblock.js?v=1.0.6
