@@ -1,4 +1,4 @@
-// Playback-time prewarm bootstrap. Embedded into youtube.response.js by the build helper.
+// Playback-time prewarm bootstrap. Embedded into both response scripts by the build helper.
 (() => {
   const options = {captionLang: "off", captionToken: "", lyricsLang: "off", lyricsToken: "", prewarm: true, debug: false};
   try {
@@ -29,6 +29,77 @@
     }
     return `${text.length}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`;
   }
+  const SHA256_K = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ]);
+
+  function rotateRight(value, shift) {
+    return (value >>> shift) | (value << (32 - shift));
+  }
+
+  function sha256(message) {
+    const bitLength = message.length * 8;
+    const totalLength = Math.ceil((message.length + 9) / 64) * 64;
+    const padded = new Uint8Array(totalLength);
+    padded.set(message);
+    padded[message.length] = 0x80;
+    const view = new DataView(padded.buffer);
+    view.setUint32(totalLength - 8, Math.floor(bitLength / 0x100000000), false);
+    view.setUint32(totalLength - 4, bitLength >>> 0, false);
+    const hash = new Uint32Array([
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ]);
+    const words = new Uint32Array(64);
+    for (let offset = 0; offset < totalLength; offset += 64) {
+      for (let index = 0; index < 16; index++) words[index] = view.getUint32(offset + index * 4, false);
+      for (let index = 16; index < 64; index++) {
+        const s0 = rotateRight(words[index - 15], 7) ^ rotateRight(words[index - 15], 18) ^ (words[index - 15] >>> 3);
+        const s1 = rotateRight(words[index - 2], 17) ^ rotateRight(words[index - 2], 19) ^ (words[index - 2] >>> 10);
+        words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0;
+      }
+      let [a, b, c, d, e, f, g, h] = hash;
+      for (let index = 0; index < 64; index++) {
+        const sigma1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+        const choose = (e & f) ^ (~e & g);
+        const temporary1 = (h + sigma1 + choose + SHA256_K[index] + words[index]) >>> 0;
+        const sigma0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+        const majority = (a & b) ^ (a & c) ^ (b & c);
+        const temporary2 = (sigma0 + majority) >>> 0;
+        h = g; g = f; f = e; e = (d + temporary1) >>> 0;
+        d = c; c = b; b = a; a = (temporary1 + temporary2) >>> 0;
+      }
+      hash[0] = (hash[0] + a) >>> 0;
+      hash[1] = (hash[1] + b) >>> 0;
+      hash[2] = (hash[2] + c) >>> 0;
+      hash[3] = (hash[3] + d) >>> 0;
+      hash[4] = (hash[4] + e) >>> 0;
+      hash[5] = (hash[5] + f) >>> 0;
+      hash[6] = (hash[6] + g) >>> 0;
+      hash[7] = (hash[7] + h) >>> 0;
+    }
+    const output = new Uint8Array(32);
+    const outputView = new DataView(output.buffer);
+    for (let index = 0; index < hash.length; index++) outputView.setUint32(index * 4, hash[index], false);
+    return output;
+  }
+
+  function identifier(value) {
+    const text = JSON.stringify(value);
+    const bytes = typeof TextEncoder !== "undefined" ? new TextEncoder().encode(text)
+      : Uint8Array.from(unescape(encodeURIComponent(text)), (character) => character.charCodeAt(0));
+    return Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  function sourceRoute(url) {
+    return `YouTubeCaption.SourceRoute.v1.${fingerprint(JSON.stringify([query(url, "c"), query(url, "key"), query(url, "kind")]))}`;
+  }
   function findTracks(value, depth = 0) {
     if (!value || typeof value !== "object" || depth > 8) return [];
     if (Array.isArray(value.captionTracks)) return value.captionTracks;
@@ -51,7 +122,7 @@
     try {
       const saved = JSON.parse($persistentStore.read(key) || "null");
       const interval = key.startsWith("YouTubeLyrics.") ? 60000 : 600000;
-      return saved && Date.now() - saved.savedAt < (saved.jobId ? interval : 15000);
+      return saved && Date.now() - saved.savedAt < (saved.jobId && saved.confirmed !== false ? interval : 15000);
     } catch (_) { return false; }
   }
   function detailsVideoId(fields) {
@@ -112,7 +183,13 @@
     const budget = Math.max(0, Math.min(950, (globalThis.YouTubePrewarm.deadline || Infinity) - Date.now()));
     if (!pending.length || budget < 100) { finished = true; originalDone(result); return; }
     let left = pending.length;
-    const finish = () => { if (!finished) { finished = true; clearTimeout(timer); originalDone(result); } };
+    const trace = (plan, state) => { if (options.debug) console.log(`YouTube ${plan.kind} prewarm: ${state}`); };
+    const finish = () => {
+      if (finished) return;
+      finished = true; clearTimeout(timer);
+      for (const plan of pending) if (plan.waiting) trace(plan, "submitted-unconfirmed");
+      originalDone(result);
+    };
     const timer = setTimeout(finish, budget);
     for (const plan of pending) {
       remember(plan.key, {savedAt: Date.now()});
@@ -120,21 +197,39 @@
       if (/^[\w-]{32,128}$/.test(plan.token) && plan.token !== "paste-token-here") headers.Authorization = `Bearer ${plan.token}`;
       function submit() {
         if (finished) return;
+        const record = {savedAt: Date.now(), confirmed: false};
+        if (plan.kind === "caption") {
+          const source = plan.payload.url;
+          record.jobId = identifier({version: 1, track: [query(source, "v"), query(source, "lang"), query(source, "kind"), query(source, "name")],
+            target: plan.payload.target, body: plan.payload.body});
+          record.sourceProvided = typeof plan.payload.body === "string";
+        }
+        remember(plan.key, record);
+        plan.waiting = true;
         try {
           $httpClient.post({url: plan.url, headers, body: JSON.stringify(plan.payload), timeout: 0.9}, (error, response, body) => {
           if (finished) return;
+          plan.waiting = false;
+          let accepted = false;
           if (!error && Number(response?.status ?? response?.statusCode) === 202) {
             try {
               const data = JSON.parse(body);
-              if (/^[a-f0-9]{64}$/.test(data.jobId || "")) remember(plan.key, {jobId: data.jobId, savedAt: Date.now()});
+              if (/^[a-f0-9]{64}$/.test(data.jobId || "")) {
+                remember(plan.key, {...record, jobId: data.jobId, confirmed: true}); accepted = true;
+              }
             } catch (_) {}
           }
-          if (options.debug) console.log(`YouTube ${plan.kind} prewarm: ${error ? "unavailable" : response?.status ?? response?.statusCode}`);
+          trace(plan, error || (!accepted && Number(response?.status ?? response?.statusCode) === 202) ? "submitted-unconfirmed" : accepted ? "accepted"
+            : `rejected (HTTP ${response?.status ?? response?.statusCode})`);
           if (!--left) finish();
           });
-        } catch (_) { if (!--left) finish(); }
+        } catch (_) { plan.waiting = false; trace(plan, "submitted-unconfirmed"); if (!--left) finish(); }
       }
       if (plan.kind !== "caption" || typeof $httpClient.get !== "function") { submit(); continue; }
+      try {
+        const route = JSON.parse($persistentStore.read(sourceRoute(plan.payload.url)) || "null");
+        if (route?.workerUntil > Date.now()) { trace(plan, "source: worker"); submit(); continue; }
+      } catch (_) {}
       // A bounded local source fetch also handles URLs that cannot be fetched from Cloudflare's IP.
       // Only subtitle text is uploaded; no YouTube cookies or authorization headers leave the device.
       let sourceSettled = false;

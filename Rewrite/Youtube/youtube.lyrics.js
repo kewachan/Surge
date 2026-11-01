@@ -411,15 +411,34 @@
     } catch (_) {}
   }
 
-  function requestTranslations(lines, target, timeoutSeconds, accessToken) {
-    let prewarmVideoId;
+  function activePrewarm(target) {
     try {
       const active = JSON.parse($persistentStore.read("YouTubeLyrics.Prewarm.Active.v1") || "null");
       const options = settings();
       if (options.prewarm !== false && options.prewarm !== "false" && /^[\w-]{11}$/.test(active?.videoId || "")
-        && Date.now() - active.savedAt < 30 * 60 * 1000) prewarmVideoId = active.videoId;
+        && Date.now() - active.savedAt < 30 * 60 * 1000) {
+        const saved = JSON.parse($persistentStore.read(`YouTubeLyrics.Prewarm.v1.${active.videoId}.${target}`) || "null");
+        return {videoId: active.videoId, age: Date.now() - Number(saved?.savedAt || active.savedAt)};
+      }
     } catch (_) {}
-    const payload = JSON.stringify({ purpose: "lyrics", texts: lines, source: "auto", target, prewarmVideoId });
+    return null;
+  }
+
+  function requestTranslations(lines, target, timeoutSeconds, accessToken, cacheVideoId) {
+    const payload = JSON.stringify(cacheVideoId ? {videoId: cacheVideoId, texts: lines, target}
+      : { purpose: "lyrics", texts: lines, source: "auto", target, prewarmVideoId: activePrewarm(target)?.videoId });
+    const endpoint = cacheVideoId ? `${WORKER_ENDPOINT}/prewarm/result` : WORKER_ENDPOINT;
+    function decode(body) {
+      const result = JSON.parse(body);
+      if (cacheVideoId && !["complete", "partial"].includes(result.status)) return null;
+      if (!isAIResult(result)) throw new Error("Worker returned a non-AI lyric result");
+      if (!Array.isArray(result?.translations) || result.translations.length !== lines.length
+        || result.translations.some((line) => cacheVideoId && line === null ? false : typeof line !== "string" || !line.trim())
+        || (cacheVideoId && (googleTargetLanguage(result.target) !== googleTargetLanguage(target)
+          || (result.status === "complete" && result.translations.some((line) => line === null)))))
+        throw new Error("Invalid Worker translation response");
+      return {translations: result.translations, provider: String(result.provider), cacheStatus: String(result.cacheStatus || ""), status: result.status};
+    }
     const headers = {
       Accept: "application/json",
       Authorization: `Bearer ${accessToken}`,
@@ -428,7 +447,7 @@
     if (typeof $httpClient !== "undefined") {
       return new Promise((resolve, reject) => {
         $httpClient.post({
-          url: WORKER_ENDPOINT,
+          url: endpoint,
           timeout: typeof $loon !== "undefined" ? timeoutSeconds * 1000 : timeoutSeconds,
           headers,
           body: payload,
@@ -441,16 +460,7 @@
               statusError.status = status;
               throw statusError;
             }
-            const result = JSON.parse(body);
-            if (!isAIResult(result)) throw new Error("Worker returned a non-AI lyric result");
-            if (!Array.isArray(result?.translations) || result.translations.length !== lines.length) {
-              throw new Error("Invalid Worker translation response");
-            }
-            resolve({
-              translations: result.translations.map((line) => String(line || "")),
-              provider: String(result.provider || "cloudflare-ai"),
-              cacheStatus: String(result.cacheStatus || ""),
-            });
+            resolve(decode(body));
           } catch (parseError) {
             reject(parseError);
           }
@@ -459,7 +469,7 @@
     }
     if (typeof $task !== "undefined") {
       return $task.fetch({
-        url: WORKER_ENDPOINT,
+        url: endpoint,
         method: "POST",
         timeout: timeoutSeconds,
         headers,
@@ -470,16 +480,7 @@
           statusError.status = response.statusCode;
           throw statusError;
         }
-        const result = JSON.parse(response.body);
-        if (!isAIResult(result)) throw new Error("Worker returned a non-AI lyric result");
-        if (!Array.isArray(result?.translations) || result.translations.length !== lines.length) {
-          throw new Error("Invalid Worker translation response");
-        }
-        return {
-          translations: result.translations.map((line) => String(line || "")),
-          provider: String(result.provider || "cloudflare-ai"),
-          cacheStatus: String(result.cacheStatus || ""),
-        };
+        return decode(response.body);
       });
     }
     return Promise.reject(new Error("No HTTP client available"));
@@ -660,8 +661,39 @@
     try {
       const translatedByOriginal = new Map();
       const providers = new Set();
+      const aiLines = new Set();
+      const cachedKeys = new Set();
       const deadline = Date.now() + RESPONSE_BUDGET_MS;
-      const batches = buildTranslationBatches(uniqueLines);
+      const originalBatches = buildTranslationBatches(uniqueLines);
+      function apply(batch, result) {
+        let changed = false;
+        batch.forEach((line, index) => {
+          const translated = result.translations[index];
+          if (typeof translated !== "string" || !translated.trim()) return;
+          translatedByOriginal.set(line, translated);
+          if (isAIResult(result)) aiLines.add(line);
+          if (translated.trim() !== line.trim()) changed = true;
+        });
+        if (changed) providers.add(result.provider);
+      }
+      for (const batch of originalBatches) {
+        const key = cacheKey(batch, target), cached = readCache(key, batch.length);
+        if (cached) { apply(batch, cached); cachedKeys.add(key); }
+      }
+      const missing = uniqueLines.filter((line) => !translatedByOriginal.has(line));
+      const warmed = activePrewarm(target);
+      if (missing.length && missing.length <= 384 && missing.every((line) => line.length <= 500)
+        && missing.join("").length <= MAX_BATCH_TOTAL_CHARS * 32 && accessToken && warmed?.age >= 3000) {
+        let timer;
+        try {
+          const result = await Promise.race([requestTranslations(missing, target, 1, accessToken, warmed.videoId),
+            new Promise((resolve) => { timer = setTimeout(() => resolve(null), 1000); })]);
+          if (result) apply(missing, result);
+          if (options.debug) console.log(`YouTube lyrics whole-song cache: ${result?.status || "pending"}`);
+        } catch (_) { if (options.debug) console.log("YouTube lyrics whole-song cache: lookup-unconfirmed"); }
+        finally { if (timer) clearTimeout(timer); }
+      }
+      const batches = buildTranslationBatches(uniqueLines.filter((line) => !translatedByOriginal.has(line)));
       let cursor = 0;
       async function worker() {
         while (cursor < batches.length && Date.now() < deadline) {
@@ -674,29 +706,27 @@
             try {
               result = await fetchTranslations(batch, target, deadline, accessToken);
               writeCache(key, result);
+              if (isAIResult(result)) cachedKeys.add(key);
             } catch (error) {
               console.log(`YouTube lyrics translation batch failed: ${String(error)}`);
               continue;
             }
           }
-          let batchChanged = false;
-          batch.forEach((line, index) => {
-            const translatedLine = result.translations[index];
-            translatedByOriginal.set(line, translatedLine);
-            if (String(translatedLine || "").trim() !== line.trim()) batchChanged = true;
-          });
-          if (batchChanged) providers.add(result.provider);
+          apply(batch, result);
         }
       }
       const work = Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
       let timer;
       await Promise.race([
         work,
-        new Promise((resolve) => { timer = setTimeout(resolve, RESPONSE_BUDGET_MS); }),
+        new Promise((resolve) => { timer = setTimeout(resolve, Math.max(0, deadline - Date.now())); }),
       ]);
       if (timer) clearTimeout(timer);
       if (translatedByOriginal.size !== uniqueLines.length) {
         throw new Error(`Incomplete lyrics translation (${translatedByOriginal.size}/${uniqueLines.length})`);
+      }
+      for (const batch of originalBatches) if (!cachedKeys.has(cacheKey(batch, target)) && batch.every((line) => aiLines.has(line))) {
+        writeCache(cacheKey(batch, target), {translations: batch.map((line) => translatedByOriginal.get(line)), provider: "cloudflare-ai"});
       }
 
       const attribution = providerLabel(providers);

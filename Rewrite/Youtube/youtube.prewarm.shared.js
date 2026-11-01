@@ -120,7 +120,7 @@ export class PrewarmJob {
       await this.ctx.storage.put("state", state);
       return json({run: true, work: await this.loadBody(state.work)});
     }
-    if (action === "complete") state = {status: "complete", result: await this.storeBody(payload.result, state.work?.bodyRef), createdAt: state.createdAt};
+    if (action === "complete") state = {status: "complete", result: await this.storeBody(payload.result, state.work?.bodyRef || state.result?.bodyRef), createdAt: state.createdAt};
     else if (action === "retry") { state.status = "queued"; delete state.leaseUntil; }
     else if (action === "failed") state = {status: "failed", createdAt: state.createdAt, code: payload.code};
     else return json({error: "Unknown action"}, 400);

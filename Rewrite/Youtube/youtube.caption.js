@@ -69,7 +69,7 @@ function prewarmFingerprint(text) {
   return `${text.length}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`;
 }
 
-async function readPrewarmedCaption(body, target, options, deadline) {
+function captionPrewarmRecord(target) {
   try {
     const query = (name) => {
       const match = $request.url.match(new RegExp(`[?&]${name}=([^&#]*)`));
@@ -78,18 +78,48 @@ async function readPrewarmedCaption(body, target, options, deadline) {
     const identity = JSON.stringify([query("v"), query("lang"), query("kind"), query("name"), target]);
     const key = `YouTubeCaption.Prewarm.v1.${prewarmFingerprint(identity)}`;
     const saved = JSON.parse($persistentStore.read(key) || "null");
-    if (!/^[a-f0-9]{64}$/.test(saved?.jobId || "") || Date.now() - saved.savedAt > CACHE_TTL_MS) return null;
+    if (!/^[a-f0-9]{64}$/.test(saved?.jobId || "") || !Number.isFinite(saved.savedAt) || Date.now() - saved.savedAt > CACHE_TTL_MS) return null;
+    return saved;
+  } catch (_) { return null; }
+}
+
+async function readPrewarmedCaption(body, target, options, deadline, saved = captionPrewarmRecord(target)) {
+  try {
+    if (!saved) return null;
     const remaining = deadline - Date.now();
     if (remaining < 1000) return null;
     const token = validCaptionToken(options.captionToken) ? options.captionToken.trim() : "";
     const hash = prewarmFingerprint(body);
-    const result = await captionWorkerRequest("GET", `${CAPTION_WORKER_ENDPOINT.replace(/\/jobs$/, "/prewarm")}/${saved.jobId}?sourceHash=${encodeURIComponent(hash)}`,
-      token, undefined, 0.7);
+    const lookupMs = Date.now() - saved.savedAt >= 3000 ? Math.min(1500, Math.max(0, remaining - 1000)) : 700;
+    if (lookupMs < 100) return null;
+    let timer, result;
+    try {
+      result = await Promise.race([captionWorkerRequest("GET", `${CAPTION_WORKER_ENDPOINT.replace(/\/jobs$/, "/prewarm")}/${saved.jobId}?sourceHash=${encodeURIComponent(hash)}`,
+        token, undefined, lookupMs / 1000), new Promise((resolve) => { timer = setTimeout(() => resolve(null), lookupMs); })]);
+    } finally { if (timer) clearTimeout(timer); }
+    if (!result) { debugLog(options, "prewarm lookup-unconfirmed"); return null; }
+    debugLog(options, `prewarm ${result.status || "unknown"}`);
+    const query = (name) => {
+      const match = $request.url.match(new RegExp(`[?&]${name}=([^&#]*)`));
+      return match ? decodeURIComponent(match[1].replace(/\+/g, " ")) : "";
+    };
+    const routeKey = `YouTubeCaption.SourceRoute.v1.${prewarmFingerprint(JSON.stringify([query("c"), query("key"), query("kind")]))}`;
+    try {
+      if (result.sourceFetched === true || (result.sourceFetched === undefined && saved.sourceProvided === false
+        && ["complete", "source-mismatch"].includes(result.status))) {
+        $persistentStore.write(JSON.stringify({workerUntil: Date.now() + 30 * 60 * 1000}), routeKey);
+      } else if (result.status === "failed" && /^(?:source-|invalid-caption-source)/.test(result.code || "")) {
+        $persistentStore.write("", routeKey);
+      }
+    } catch (_) {} // Optional routing metadata must not discard a valid translated document.
     if (result.status !== "complete" || result.sourceHash !== hash || result.target !== target
       || result.provider !== "google-translate" || typeof result.body !== "string"
       || result.body.length > 1500000 || !/<timedtext\b/.test(result.body)) return null;
     return result.body;
-  } catch (_) { return null; }
+  } catch (error) {
+    debugLog(options, error?.status ? `prewarm rejected (HTTP ${error.status})` : "prewarm lookup-unconfirmed");
+    return null;
+  }
 }
 
 function captionJobCacheKey(entries, source, target) {
@@ -328,7 +358,7 @@ async function translateWithQueue(entries, source, target, token, options) {
     }
     jobId = created.jobId;
     submitted = true;
-    pollMs = Math.max(250, Math.min(2000, Number(created.pollAfterMs) || QUEUE_DEFAULT_POLL_MS));
+    pollMs = created.reused ? 0 : Math.max(250, Math.min(2000, Number(created.pollAfterMs) || QUEUE_DEFAULT_POLL_MS));
     writeCaptionJob(jobKey, jobId, entries.length);
   }
 
@@ -532,30 +562,35 @@ async function translateCaptionResponse() {
     let resolveComplete;
     const complete = new Promise((resolve) => { resolveComplete = resolve; });
     const onProgress = () => { if (allTranslated()) resolveComplete(); };
+    const savedPrewarm = captionPrewarmRecord(target);
     const warmWork = (async () => {
-      prewarmedBody = await readPrewarmedCaption(body, target, options, responseDeadline);
+      prewarmedBody = await readPrewarmedCaption(body, target, options, responseDeadline, savedPrewarm);
       if (prewarmedBody) resolveComplete();
     })();
-    const queueWork = (async () => {
-      try {
-        const queued = await translateWithQueue(entries, source, target, options.captionToken,
-          {...options, responseDeadline, stopWhenComplete: allTranslated});
-        applyQueuedTranslations(entries, queued, captions);
-        writeResolvedCaches(captions, source, target);
-        onProgress();
-      } catch (error) { console.log(`Caption Worker queue failed: ${error}`); }
-    })();
-    const directWork = (async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      if (allTranslated()) return;
-      const batches = buildBatches(captions, true);
-      if (batches.length > DIRECT_FALLBACK_MAX_BATCHES) return;
-      await translateBatches(batches, captions, source, target, responseDeadline, onProgress);
-    })();
-    let timer;
-    await Promise.race([complete, Promise.all([queueWork, directWork, warmWork]),
-      new Promise((resolve) => { timer = setTimeout(resolve, Math.max(0, responseDeadline - Date.now())); })]);
-    if (timer) clearTimeout(timer);
+    // A fresh/immediate CC request keeps the old race. Older prewarms get one bounded cache-first lookup.
+    if (savedPrewarm && Date.now() - savedPrewarm.savedAt >= 3000) await warmWork;
+    if (!prewarmedBody) {
+      const queueWork = (async () => {
+        try {
+          const queued = await translateWithQueue(entries, source, target, options.captionToken,
+            {...options, responseDeadline, stopWhenComplete: allTranslated});
+          applyQueuedTranslations(entries, queued, captions);
+          writeResolvedCaches(captions, source, target);
+          onProgress();
+        } catch (error) { console.log(`Caption Worker queue failed: ${error}`); }
+      })();
+      const directWork = (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        if (allTranslated()) return;
+        const batches = buildBatches(captions, true);
+        if (batches.length > DIRECT_FALLBACK_MAX_BATCHES) return;
+        await translateBatches(batches, captions, source, target, responseDeadline, onProgress);
+      })();
+      let timer;
+      await Promise.race([complete, Promise.all([queueWork, directWork, warmWork]),
+        new Promise((resolve) => { timer = setTimeout(resolve, Math.max(0, responseDeadline - Date.now())); })]);
+      if (timer) clearTimeout(timer);
+    }
   }
   if (prewarmedBody) return $done({status: 200, body: prewarmedBody,
     headers: {...rewrittenResponseHeaders(responseHeaders), "X-YouTube-Caption-State": "complete"}});

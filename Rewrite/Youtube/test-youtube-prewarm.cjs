@@ -234,14 +234,15 @@ test("HTTP-edge lyric source acquisition survives a Queue origin that cannot ret
 });
 
 function bootstrap(options = {}) {
-  const store = options.store || new Map(), calls = [], outputs = [];
-  const context = {console: {log() {}}, setTimeout, clearTimeout, $argument: JSON.stringify({captionLang: "zh-Hant", captionToken: token,
+  const store = options.store || new Map(), calls = [], outputs = [], logs = [];
+  const context = {console: {log(text) { logs.push(text); }}, setTimeout, clearTimeout, $argument: JSON.stringify({captionLang: "zh-Hant", captionToken: token,
     lyricsLang: "zh-Hant", lyricsToken: token, ...options.settings}),
     $persistentStore: {read: (key) => store.get(key), write: (value, key) => value ? store.set(key, value) : store.delete(key)},
-    $httpClient: {post: (request, callback) => { calls.push(request); if (!options.hang) callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)})); }},
+    $request: {headers: {}},
+    $httpClient: {post: (request, callback) => { calls.push(request); if (options.fail) callback("timeout"); else if (!options.hang) callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)})); }},
     $done: (output) => outputs.push(output)};
   vm.runInNewContext(fs.readFileSync(path.join(directory, "youtube.prewarm.client.js"), "utf8"), context);
-  return {store, calls, outputs, context};
+  return {store, calls, outputs, logs, context};
 }
 test("captions Off UI still prewarms the configured Enhance language; Music starts AI only with a token", async () => {
   const run = bootstrap();
@@ -406,5 +407,189 @@ test("coordination and durable persistence failures cannot discard a valid foreg
       }), env, {});
       assert.equal(result.status, 200, mode); assert.equal((await result.json()).provider, "cloudflare-ai");
     }
+  } finally { global.caches = oldCaches; }
+});
+
+test("a lost prewarm acknowledgement retains the exact content-addressed caption job, including Unicode XML", async () => {
+  await ready;
+  for (const body of [undefined, xml.replace("Hello &amp; world", "泰文 ไทย 😀 &amp; 中文")]) {
+    const run = bootstrap({fail: true, settings: {lyricsLang: "off", debug: true}});
+    if (body) run.context.$httpClient.get = (_, callback) => callback(null, {status: 200}, body);
+    run.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false);
+    run.context.$done({});
+    const record = [...run.store].find(([key]) => key.startsWith("YouTubeCaption.Prewarm."));
+    const saved = JSON.parse(record[1]);
+    const payload = JSON.parse(run.calls[0].body);
+    assert.equal(payload.body, body);
+    const source = shared.captionSource(payload.url);
+    assert.equal(saved.jobId, await shared.identifier({version: 1, track: source.track, target: payload.target, body: payload.body}));
+    assert.equal(saved.confirmed, false);
+    assert(run.logs.some((line) => line.includes("submitted-unconfirmed")));
+    assert(!run.logs.some((line) => line.includes("unavailable")));
+  }
+});
+
+test("a mature unacknowledged caption prewarm returns full XML with one lookup and no resubmission", async () => {
+  await ready;
+  const boot = bootstrap({fail: true, settings: {lyricsLang: "off"}});
+  boot.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false); boot.context.$done({});
+  for (const [key, value] of boot.store) if (key.startsWith("YouTubeCaption.Prewarm.")) {
+    boot.store.set(key, JSON.stringify({...JSON.parse(value), savedAt: Date.now() - 20000}));
+  }
+  const body = shared.renderCaptions(xml, shared.parseCaptions(xml), ["已完成譯文"]);
+  const run = captionClient(boot.store, (_, request, callback) => {
+    assert(request.url.includes("/prewarm/"));
+    callback(null, {status: 200}, JSON.stringify({status: "complete", sourceFetched: true,
+      sourceHash: shared.fingerprint(xml), target: "zh-TW", provider: "google-translate", body}));
+  });
+  assert.equal((await run.output).body, body); assert.equal(run.calls.length, 1);
+  let sourceReads = 0;
+  const again = bootstrap({fail: true, store: boot.store, settings: {lyricsLang: "off"}});
+  again.context.$httpClient.get = (_, callback) => { sourceReads++; callback(null, {status: 200}, xml); };
+  again.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false); again.context.$done({});
+  assert.equal(sourceReads, 0, "verified Worker source retrieval should skip the next speculative phone download");
+  assert.equal(JSON.parse(again.calls[0].body).body, undefined);
+});
+
+test("a stalled mature lookup is bounded and keeps immediate fallback available", async () => {
+  const boot = bootstrap({fail: true, settings: {lyricsLang: "off"}});
+  boot.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false); boot.context.$done({});
+  for (const [key, value] of boot.store) if (key.startsWith("YouTubeCaption.Prewarm."))
+    boot.store.set(key, JSON.stringify({...JSON.parse(value), savedAt: Date.now() - 20000}));
+  const start = Date.now();
+  const run = captionClient(boot.store, (method, request, callback) => {
+    if (request.url.includes("/prewarm/")) return;
+    if (method === "post") callback(null, {status: 202}, JSON.stringify({jobId: "00000000-0000-0000-0000-000000000000", reused: true}));
+    else callback(null, {status: 200}, JSON.stringify({status: "complete", translations: ["後備譯文"]}));
+  });
+  assert((await run.output).body.includes("後備譯文"));
+  assert(Date.now() - start >= 1400); assert(Date.now() - start < 2400);
+});
+
+test("a local source-routing preference write failure cannot discard completed captions", async () => {
+  const boot = bootstrap({fail: true, settings: {lyricsLang: "off"}});
+  boot.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false); boot.context.$done({});
+  for (const [key, value] of boot.store) if (key.startsWith("YouTubeCaption.Prewarm."))
+    boot.store.set(key, JSON.stringify({...JSON.parse(value), savedAt: Date.now() - 20000}));
+  const originalSet = boot.store.set.bind(boot.store);
+  boot.store.set = (key, value) => { if (key.startsWith("YouTubeCaption.SourceRoute.")) throw new Error("Preferences unavailable"); return originalSet(key, value); };
+  const body = shared.renderCaptions(xml, shared.parseCaptions(xml), ["安全譯文"]);
+  const run = captionClient(boot.store, (_, request, callback) => {
+    assert(request.url.includes("/prewarm/"));
+    callback(null, {status: 200}, JSON.stringify({status: "complete", sourceFetched: true, sourceHash: shared.fingerprint(xml),
+      target: "zh-TW", provider: "google-translate", body}));
+  });
+  assert.equal((await run.output).body, body); assert.equal(run.calls.length, 1);
+});
+
+test("Worker origin failures restore phone prefetch", async () => {
+  const boot = bootstrap({fail: true, settings: {lyricsLang: "off"}});
+  boot.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false); boot.context.$done({});
+  for (const [key, value] of boot.store) if (key.startsWith("YouTubeCaption.Prewarm."))
+    boot.store.set(key, JSON.stringify({...JSON.parse(value), savedAt: Date.now() - 20000}));
+  const routeKey = `YouTubeCaption.SourceRoute.v1.${shared.fingerprint(JSON.stringify(["", "", "asr"]))}`;
+  boot.store.set(routeKey, JSON.stringify({workerUntil: Date.now() + 60000}));
+  const run = captionClient(boot.store, (method, request, callback) => {
+    if (request.url.includes("/prewarm/")) callback(null, {status: 200}, JSON.stringify({status: "failed", code: "source-http-429"}));
+    else if (method === "post") callback(null, {status: 202}, JSON.stringify({jobId: "00000000-0000-0000-0000-000000000000", reused: true}));
+    else callback(null, {status: 200}, JSON.stringify({status: "complete", translations: ["新來源譯文"]}));
+  });
+  assert((await run.output).body.includes("新來源譯文")); assert(!boot.store.get(routeKey));
+  let sourceReads = 0;
+  const again = bootstrap({fail: true, store: boot.store, settings: {lyricsLang: "off"}});
+  again.context.$httpClient.get = (_, callback) => { sourceReads++; callback(null, {status: 200}, xml); };
+  again.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false); again.context.$done({});
+  assert.equal(sourceReads, 1);
+});
+
+test("mature prewarm lookup rejects a completed document with a different source fingerprint", async () => {
+  const boot = bootstrap({fail: true, settings: {lyricsLang: "off"}});
+  boot.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false); boot.context.$done({});
+  for (const [key, value] of boot.store) if (key.startsWith("YouTubeCaption.Prewarm."))
+    boot.store.set(key, JSON.stringify({...JSON.parse(value), savedAt: Date.now() - 20000}));
+  const run = captionClient(boot.store, (method, request, callback) => {
+    if (request.url.includes("/prewarm/")) callback(null, {status: 200}, JSON.stringify({status: "complete", sourceHash: "old-source", target: "zh-TW", provider: "google-translate", body: "<timedtext>stale</timedtext>"}));
+    else if (method === "post") callback(null, {status: 202}, JSON.stringify({jobId: "00000000-0000-0000-0000-000000000000", reused: true}));
+    else callback(null, {status: 200}, JSON.stringify({status: "complete", translations: ["正確時間軸"]}));
+  });
+  const result = await run.output; assert(result.body.includes("正確時間軸")); assert(result.body.includes('t="123" d="456"'));
+});
+
+async function seededSong(lyrics, count = 34) {
+  const namespace = new Namespace(lyrics.LyricsPrewarm), target = "zh-TW";
+  const texts = Array.from({length: count}, (_, i) => `Whole song line ${i}`);
+  const translations = texts.map((_, i) => `整首譯文${i}`);
+  const id = await shared.identifier({version: 2, videoId: "abcdefghijk", target, model: "@cf/qwen/qwen3-30b-a3b-fp8"});
+  const ids = [];
+  for (let i = 0; i < count; i += 12) {
+    const key = await lyrics.__test.cacheRequest(texts.slice(i, i + 12), "auto", target), child = `batch:${key.identifier}`;
+    ids.push(child); await shared.jobCall(namespace, child, "prepare", {work: {}});
+    await shared.jobCall(namespace, child, "complete", {result: {sourceTexts: texts.slice(i, i + 12), translations: translations.slice(i, i + 12), provider: "cloudflare-ai"}});
+  }
+  await shared.jobCall(namespace, id, "prepare", {work: {}});
+  await shared.jobCall(namespace, id, "complete", {result: {available: true, batchJobIds: ids}});
+  return {namespace, id, ids, texts, translations};
+}
+
+test("whole-song cache-only lookup merges once and persists the bundle across edge-cache misses", async () => {
+  const {lyrics} = await ready, song = await seededSong(lyrics);
+  const oldCaches = global.caches, oldFetch = global.fetch; global.caches = undefined;
+  global.fetch = async () => { throw new Error("Cache-only route cannot retrieve sources"); };
+  let childReads = 0;
+  const namespace = {idFromName: (id) => id, get(id) { const stub = song.namespace.get(id); return {fetch(url, init) {
+    if (id.startsWith("batch:") && new URL(url).pathname === "/state") childReads++;
+    return stub.fetch(url, init);
+  }}; }};
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: namespace,
+    LYRICS_QUEUE: {send() { throw new Error("Completed prewarm must not enqueue AI again"); }},
+    AI: {run() { throw new Error("Cache-only route cannot run AI"); }}};
+  try {
+    const tasks = [];
+    const accepted = await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant"}), env,
+      {waitUntil: (task) => tasks.push(task)});
+    assert.equal(accepted.status, 202); await Promise.all(tasks);
+    assert((await shared.jobCall(song.namespace, song.id, "state")).result.body, "completed prewarm should prepare the bundle before the lyrics panel opens");
+    const payload = {videoId: "abcdefghijk", target: "zh-Hant", texts: song.texts};
+    const first = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", payload), env, {})).json();
+    assert.equal(first.status, "complete"); assert.deepEqual(first.translations, song.translations); assert.equal(childReads, 3);
+    childReads = 0;
+    const second = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", payload), env, {})).json();
+    assert.deepEqual(second.translations, song.translations); assert.equal(childReads, 0);
+    const normal = await lyrics.default.fetch(request("https://worker.test/lyrics", {...payload, source: "auto"}), env, {});
+    assert.equal(normal.status, 400, "34-line cache reads must not enlarge the 12-line AI limit");
+  } finally { global.caches = oldCaches; global.fetch = oldFetch; }
+});
+
+test("partial song caches never accept Google results, wrong targets or unknown lines as completed AI", async () => {
+  const {lyrics} = await ready, song = await seededSong(lyrics, 13);
+  const oldCaches = global.caches; global.caches = undefined;
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: song.namespace};
+  await shared.jobCall(song.namespace, song.ids[1], "complete", {result: {sourceTexts: song.texts.slice(12), translations: ["谷歌"], provider: "google-translate"}});
+  try {
+    const result = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId: "abcdefghijk", target: "zh-Hant", texts: [...song.texts, "Unknown verse"]}), env, {})).json();
+    assert.equal(result.status, "partial"); assert.equal(result.translations[12], null); assert.equal(result.translations[13], null);
+    assert(result.translations.slice(0, 12).every(Boolean));
+    const wrong = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId: "abcdefghijk", target: "ja", texts: song.texts}), env, {})).json();
+    assert.equal(wrong.status, "pending");
+    assert.equal((await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId: "abcdefghijk", target: "zh-Hant", texts: song.texts}, {}), env, {})).status, 401);
+  } finally { global.caches = oldCaches; }
+});
+
+test("a large merged song bundle uses chunked durable storage below the per-value limit", async () => {
+  const {lyrics} = await ready, song = await seededSong(lyrics);
+  for (let index = 0; index < song.ids.length; index++) {
+    const sourceTexts = song.texts.slice(index * 12, index * 12 + 12);
+    await shared.jobCall(song.namespace, song.ids[index], "complete", {result: {sourceTexts,
+      translations: sourceTexts.map(() => "譯".repeat(2000)), provider: "cloudflare-ai"}});
+  }
+  const oldCaches = global.caches; global.caches = undefined;
+  try {
+    const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: song.namespace};
+    const result = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId: "abcdefghijk", target: "zh-Hant", texts: song.texts}), env, {})).json();
+    assert.equal(result.status, "complete");
+    const stored = await song.namespace.objects.get(song.id).ctx.storage.get("state");
+    assert(stored.result.bodyRef.count > 1);
+    const again = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId: "abcdefghijk", target: "zh-Hant", texts: song.texts}), env, {})).json();
+    assert.equal(again.translations[33].length, 2000);
   } finally { global.caches = oldCaches; }
 });

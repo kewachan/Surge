@@ -3,7 +3,7 @@ import {PrewarmJob, identifier, fingerprint, captionSource, parseCaptions, rende
 export {PrewarmJob as CaptionPrewarm};
 
 const JOBS_PATH = "/caption/jobs";
-const WORKER_BUILD = "caption-queue-v23-prewarm";
+const WORKER_BUILD = "caption-queue-v24-prewarm-cache";
 const GOOGLE_TRANSLATE_ENDPOINTS = [
   "https://translate.googleapis.com/translate_a/t",
   "https://translate.google.com/translate_a/t",
@@ -421,13 +421,14 @@ async function captionPrewarm(request, env, authenticated) {
   const state = await jobCall(env.CAPTION_PREWARM, id, "state");
   if (state.status !== "complete") return json({status: state.status, code: state.code});
   const result = state.result;
-  if (url.searchParams.get("sourceHash") !== result.sourceHash) return json({status: "source-mismatch"});
+  const sourceFetched = result.sourceFetched;
+  if (url.searchParams.get("sourceHash") !== result.sourceHash) return json({status: "source-mismatch", sourceFetched});
   const statusResponse = await getJobStatus(result.translationJobId, env);
   if (!statusResponse.ok) return json({status: "missing"});
   const status = await statusResponse.json();
-  if (status.status !== "complete") return json({status: status.status});
+  if (status.status !== "complete") return json({status: status.status, sourceFetched});
   return json({status: "complete", sourceHash: result.sourceHash, target: result.target,
-    provider: "google-translate", body: renderCaptions(result.body, parseCaptions(result.body), status.translations)});
+    provider: "google-translate", sourceFetched, body: renderCaptions(result.body, parseCaptions(result.body), status.translations)});
 }
 
 async function processCaptionPrewarm(message, env) {
@@ -443,7 +444,7 @@ async function processCaptionPrewarm(message, env) {
     }), env, true);
     if (!response.ok) throw new Error("Translation enqueue failed");
     const job = await response.json();
-    return {body, sourceHash: fingerprint(body), target: work.target, translationJobId: job.jobId};
+    return {body, sourceHash: fingerprint(body), target: work.target, translationJobId: job.jobId, sourceFetched: !work.body};
   });
 }
 
