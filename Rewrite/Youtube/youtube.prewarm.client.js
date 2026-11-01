@@ -107,7 +107,7 @@
     return null;
   }
   function prefetchLyrics(plan, budget, ready) {
-    const sourceMs = Math.min(700, Math.max(0, budget - 150));
+    const sourceMs = Math.min(850, Math.max(0, budget - 100));
     if (sourceMs < 150) { ready(); return; }
     let settled = false;
     const deadline = Date.now() + sourceMs;
@@ -139,6 +139,7 @@
     api("next", {videoId: plan.payload.videoId}, (document) => {
       const browseId = find(document, (node) => /^MPLY[\w-]{1,300}$/.test(node.browseEndpoint?.browseId || "") ? node.browseEndpoint.browseId : null);
       if (!browseId) { finish(); return; }
+      plan.payload.browseId = browseId;
       api("browse", {browseId}, (document) => {
         const description = find(document, (node) => node.musicDescriptionShelfRenderer?.description || null);
         const text = description?.runs?.map((run) => run.text || "").join("") || description?.simpleText || "";

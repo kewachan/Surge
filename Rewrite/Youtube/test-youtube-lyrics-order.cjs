@@ -18,7 +18,7 @@ function loadClient(options = {}) {
   let output;
   const context = {
     console, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer, setTimeout, clearTimeout,
-    $argument: JSON.stringify({lyricsLang: "zh-Hant", lyricsToken: options.token || token}),
+    $argument: JSON.stringify({lyricsLang: options.target || "zh-Hant", lyricsToken: options.token || token}),
     $response: {bodyBytes: options.input},
     $persistentStore: {
       read: (key) => store.get(key) || null,

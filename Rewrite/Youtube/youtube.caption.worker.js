@@ -3,7 +3,7 @@ import {PrewarmJob, identifier, fingerprint, captionSource, parseCaptions, rende
 export {PrewarmJob as CaptionPrewarm};
 
 const JOBS_PATH = "/caption/jobs";
-const WORKER_BUILD = "caption-queue-v25-result-cache";
+const WORKER_BUILD = "caption-queue-v26-queue-batches";
 const GOOGLE_TRANSLATE_ENDPOINTS = [
   "https://translate.googleapis.com/translate_a/t",
   "https://translate.google.com/translate_a/t",

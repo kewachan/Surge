@@ -2,7 +2,7 @@ import {PrewarmJob, identifier, enqueue, consume, jobCall, json, lyricBatches, f
 export {PrewarmJob as LyricsPrewarm};
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v19-fast-prewarm";
+const WORKER_BUILD = "lyrics-translate-v20-source-hint";
 // Do not reuse source lookups that older builds cached after one empty response.
 const PREWARM_SOURCE_VERSION = 2;
 const MAX_REQUEST_BYTES = 48 * 1024;
@@ -368,6 +368,9 @@ async function lyricsPrewarm(request, env, context) {
     try { payload = JSON.parse(raw); } catch (_) { return response("Invalid JSON", 400); }
     const target = normalizeLanguage(payload?.target, false);
     if (!target || !/^[\w-]{11}$/.test(payload?.videoId || "")) return response("Invalid prewarm request", 400);
+    const browseId = payload.browseId;
+    if (browseId !== undefined && (typeof browseId !== "string" || !/^MPLY[\w-]{1,300}$/.test(browseId)))
+      return response("Invalid lyric browse hint", 400);
     let sourceLines;
     if (payload.sourceLines !== undefined) {
       if (!Array.isArray(payload.sourceLines) || !payload.sourceLines.length || payload.sourceLines.length > 384
@@ -380,8 +383,8 @@ async function lyricsPrewarm(request, env, context) {
     const id = await identifier({version: PREWARM_SOURCE_VERSION, videoId: payload.videoId, target, model: AI_MODEL});
     const saved = await jobCall(env.LYRICS_PREWARM, id, "state");
     if (["queued", "processing", "complete"].includes(saved.status)) {
-      if (sourceLines && saved.status === "queued") {
-        await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id, {kind: "source", videoId: payload.videoId, target, sourceLines});
+      if ((sourceLines || browseId) && saved.status === "queued") {
+        await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id, {kind: "source", videoId: payload.videoId, target, sourceLines, browseId});
       }
       if (saved.status === "complete" && saved.result?.available && !saved.result.body) {
         const aggregate = prewarmedSongBatch(payload.videoId, [], target, env).then(() => undefined);
@@ -394,11 +397,11 @@ async function lyricsPrewarm(request, env, context) {
       // Source availability can differ between the HTTP edge and Queue consumers.
       // The producer is held by waitUntil after the phone leaves; only acquisition happens here.
       if (!sourceLines) {
-        const lines = await fetchMusicLyrics(payload.videoId);
+        const lines = await fetchMusicLyrics(payload.videoId, browseId);
         if (lines.length) sourceLines = checkedLyricBatches(lines).flat();
       }
     } catch (_) {} // The persistent consumer retains bounded source retries.
-    return json(await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id, {kind: "source", videoId: payload.videoId, target, sourceLines}), 202);
+    return json(await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id, {kind: "source", videoId: payload.videoId, target, sourceLines, browseId}), 202);
   }
   const id = url.pathname.slice("/lyrics/prewarm/".length);
   if (request.method !== "GET" || !/^[a-f0-9]{64}$/.test(id)) return response("Not Found", 404);
@@ -491,7 +494,7 @@ async function handleLyricsQueue(batch, env, context) {
         if (work.videoId) song = work;
         return {...result, sourceTexts: work.texts};
       }
-      const lines = work.sourceLines || await fetchMusicLyrics(work.videoId);
+      const lines = work.sourceLines || await fetchMusicLyrics(work.videoId, work.browseId);
       if (!lines.length) throw Object.assign(new Error("Lyric source currently unavailable"), {
         code: "lyrics-source-empty", retryAfterSeconds: Math.min(12, 3 * message.attempts),
       });

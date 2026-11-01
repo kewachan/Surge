@@ -109,3 +109,57 @@ test("private pw HAR lyric batches collapse into one native cache lookup", {skip
   }, get() { throw new Error("Warm HAR replay must not request Google"); }}});
   await run.client.main(); assert(run.output().body); assert.equal(requests, 1);
 });
+
+test("Simplified Chinese lyrics become one Traditional row while English refrains stay bilingual", async () => {
+  const originals = ["我爱你", "这一刻，你在远方", "Stay with me", "Baby 我爱你"], translated = ["我愛你", "這一刻，你在遠方", "陪在我身邊", "Baby 我愛你"];
+  const seed = loadClient(), input = lyricDocument(seed.client, originals);
+  const run = loadClient({input, workerResult: {provider: "cloudflare-ai", translations: translated}});
+  await run.client.main(); const output = Buffer.from(run.output().body);
+  assert(!output.includes(Buffer.from("我爱你"))); assert(!output.includes(Buffer.from("这一刻，你在远方")));
+  assert(output.includes(Buffer.from("我愛你"))); assert(output.includes(Buffer.from("這一刻，你在遠方")));
+  assert(output.includes(Buffer.from("Stay with me\n陪在我身邊")));
+  assert(output.includes(Buffer.from("Baby 我愛你"))); assert(!output.includes(Buffer.from("Baby 我爱你")));
+  const cached = loadClient({input, store: run.store, httpClient: {post() { throw new Error("Cached display must not translate again"); }}});
+  await cached.client.main(); assert(Buffer.from(cached.output().body).equals(output));
+});
+
+test("Google Simplified-to-Traditional fallback also replaces the original instead of doubling Chinese rows", async () => {
+  const originals = ["我爱你", "让我们重新开始"], translated = ["我愛你", "讓我們重新開始"];
+  const seed = loadClient(), input = lyricDocument(seed.client, originals);
+  const calls = [], run = loadClient({input, httpClient: {
+    post(_, callback) { calls.push("ai"); callback("HTTP request timeout"); },
+    get(_, callback) { calls.push("google"); callback(null, {status: 200}, JSON.stringify([[[translated.join("\n[[YTL:1]]\n")]]])); },
+  }});
+  await run.client.main(); const output = Buffer.from(run.output().body);
+  assert.deepEqual(calls, ["ai", "google"]);
+  assert(!output.includes(Buffer.from("我爱你"))); assert(output.includes(Buffer.from("我愛你")));
+  assert(!output.includes(Buffer.from("让我们重新开始"))); assert(output.includes(Buffer.from("讓我們重新開始")));
+});
+
+test("the Simplified Chinese argument replaces Traditional originals with one Simplified row", async () => {
+  for (const target of ["zh-Hans", "zh-CN"]) {
+    const originals = ["我愛你", "這一刻，你在遠方", "Baby 我愛你"], translations = ["我爱你", "这一刻，你在远方", "Baby 我爱你"];
+    const seed = loadClient(), input = lyricDocument(seed.client, originals);
+    const run = loadClient({input, target, workerResult: {provider: "cloudflare-ai", translations}});
+    await run.client.main(); const output = Buffer.from(run.output().body);
+    originals.forEach((line) => assert(!output.includes(Buffer.from(line))));
+    translations.forEach((line) => assert(output.includes(Buffer.from(line))));
+  }
+});
+
+test("Chinese-to-English and Japanese kanji lines keep originals, and unchanged Traditional Chinese stays byte-identical", async () => {
+  const cases = [
+    {originals: ["我爱你", "等你回来"], translations: ["I love you", "Waiting for you"], target: "en"},
+    {originals: ["君を待っている", "世界"], translations: ["我在等你", "世界各地"]},
+    {originals: ["ฉันรักเธอ", "คืนนี้"], translations: ["我愛你", "今晚"]},
+  ];
+  for (const {originals, translations, target} of cases) {
+    const seed = loadClient(), input = lyricDocument(seed.client, originals);
+    const run = loadClient({input, target, workerResult: {provider: "cloudflare-ai", translations}});
+    await run.client.main(); const output = Buffer.from(run.output().body);
+    originals.forEach((line, i) => assert(output.includes(Buffer.from(`${line}\n${translations[i]}`))));
+  }
+  const originals = ["我愛你", "這一刻，你在遠方"], seed = loadClient(), input = lyricDocument(seed.client, originals);
+  const run = loadClient({input, workerResult: {provider: "cloudflare-ai", translations: originals}});
+  await run.client.main(); assert(Buffer.from(run.output().body || input).equals(Buffer.from(input)));
+});

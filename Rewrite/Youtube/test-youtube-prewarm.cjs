@@ -604,7 +604,7 @@ test("phone lyric-source prefetch supplies public lines without account headers 
     calls.push(request);
     if (request.url.startsWith("https://music.youtube.com/")) {
       assert.equal(request.headers.Authorization, undefined); assert.equal(request.headers.Cookie, undefined);
-      assert(request.timeout > 0 && request.timeout <= 0.7);
+      assert(request.timeout > 0 && request.timeout <= 0.85);
       const document = request.url.includes("/next?") ? {tabs: [{browseEndpoint: {browseId: "MPLYvalid"}}]}
         : {musicDescriptionShelfRenderer: {description: {runs: [{text: "First verse\nSecond verse\nFirst verse"}]}}};
       callback(null, {status: 200}, JSON.stringify(document));
@@ -631,7 +631,7 @@ test("slow or malformed public lyric sources retain URL-only background work wit
       } else { submissions.push(request); callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)})); }
     };
     const start = Date.now(); run.context.YouTubePrewarm.capture({videoId: "abcdefghijk"}, true); run.context.$done({});
-    if (mode === "hung") await new Promise((resolve) => setTimeout(resolve, 750));
+    if (mode === "hung") await new Promise((resolve) => setTimeout(resolve, 900));
     assert.equal(submissions.length, 1, mode); assert.equal(JSON.parse(submissions[0].body).sourceLines, undefined);
     assert.equal(run.outputs.length, 1); assert(Date.now() - start < 1000);
   }
@@ -730,4 +730,72 @@ test("an already-warm caption taking 1.8 seconds returns directly inside the unc
   });
   assert.equal((await run.output).body, result); assert.equal(run.calls.length, 1);
   assert(Date.now() - start >= 1750 && Date.now() - start < 2600);
+});
+
+test("a 780ms device source fits the existing playback deadline instead of losing the second RPC at 700ms", async () => {
+  const run = bootstrap({settings: {captionLang: "off"}}), submissions = [];
+  run.context.$httpClient.post = (request, callback) => {
+    if (request.url.includes("/next?")) setTimeout(() => callback(null, {status: 200}, '{"browseEndpoint":{"browseId":"MPLYslow"}}'), 430);
+    else if (request.url.includes("/browse?")) setTimeout(() => callback(null, {status: 200}, '{"musicDescriptionShelfRenderer":{"description":{"simpleText":"Device verse"}}}'), 350);
+    else { submissions.push(JSON.parse(request.body)); callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)})); }
+  };
+  const start = Date.now(); run.context.YouTubePrewarm.capture({videoId: "abcdefghijk"}, true); run.context.$done({});
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.deepEqual(submissions[0].sourceLines, ["Device verse"]); assert.equal(submissions[0].browseId, "MPLYslow");
+  assert.equal(run.outputs.length, 1); assert(Date.now() - start < 1050);
+});
+
+test("a stalled device browse preserves its validated MPLY hint for background retrieval, ignoring late callbacks", async () => {
+  const run = bootstrap({settings: {captionLang: "off"}}), submissions = []; let late;
+  run.context.$httpClient.post = (request, callback) => {
+    if (request.url.includes("/next?")) callback(null, {status: 200}, '{"browseEndpoint":{"browseId":"MPLYfallback"}}');
+    else if (request.url.includes("/browse?")) late = callback;
+    else { submissions.push(JSON.parse(request.body)); callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)})); }
+  };
+  run.context.YouTubePrewarm.capture({videoId: "abcdefghijk"}, true); run.context.$done({});
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.equal(submissions.length, 1); assert.equal(submissions[0].sourceLines, undefined); assert.equal(submissions[0].browseId, "MPLYfallback");
+  late(null, {status: 200}, '{"musicDescriptionShelfRenderer":{"description":{"simpleText":"Too late"}}}');
+  assert.equal(submissions.length, 1); assert.equal(run.outputs.length, 1);
+});
+
+test("a validated device browse hint bypasses an empty Worker next response and is retained for Queue retries", async () => {
+  const {lyrics} = await ready, oldFetch = global.fetch, namespace = new Namespace(lyrics.LyricsPrewarm), messages = [], calls = [];
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: namespace, LYRICS_QUEUE: {send: async (body) => messages.push(body)}};
+  global.fetch = async (url, init) => {
+    calls.push(new URL(url).pathname); assert(new URL(url).pathname.endsWith("/browse"));
+    assert.equal(JSON.parse(init.body).browseId, "MPLYfromDevice");
+    return Response.json({musicDescriptionShelfRenderer: {description: {simpleText: "Background verse"}}});
+  };
+  try {
+    const response = await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant", browseId: "MPLYfromDevice"}), env, {});
+    assert.equal(response.status, 202); assert.equal(calls.length, 1);
+    const id = (await response.json()).jobId, state = await shared.jobCall(namespace, id, "state");
+    assert.equal(state.work.browseId, "MPLYfromDevice"); assert.deepEqual(state.work.sourceLines, ["Background verse"]);
+    for (const browseId of ["https://foreign.test/path", "MPLY", "MPLYx?cookie=secret", null])
+      assert.equal((await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant", browseId}), env, {})).status, 400);
+    const queuedId = "f".repeat(64), work = {kind: "source", videoId: "abcdefghijk", target: "zh-TW", sourceLines: ["Keep source"]};
+    await shared.enqueue(namespace, env.LYRICS_QUEUE, queuedId, work);
+    await shared.enqueue(namespace, env.LYRICS_QUEUE, queuedId, {kind: "source", videoId: "abcdefghijk", target: "zh-TW", browseId: "MPLYfromDevice"});
+    const upgraded = await shared.jobCall(namespace, queuedId, "state"); assert.deepEqual(upgraded.work.sourceLines, ["Keep source"]); assert.equal(upgraded.work.browseId, "MPLYfromDevice");
+  } finally { global.fetch = oldFetch; }
+});
+
+test("private Pw3 lost-browse replay still submits the known lyric endpoint without waiting for the source body", {skip: !process.env.PW3_HAR_PATH}, async () => {
+  const entries = JSON.parse(fs.readFileSync(process.env.PW3_HAR_PATH, "utf8")).log.entries;
+  const failedBrowse = entries.find((e) => e.request?.url.startsWith("https://music.youtube.com/youtubei/v1/browse") && !e.response);
+  assert(failedBrowse, "Pw3 must contain the device browse timeout");
+  const browseId = JSON.parse(failedBrowse.request.postData.text).browseId;
+  const next = entries.find((e) => e.request?.url.startsWith("https://music.youtube.com/youtubei/v1/next") && e.response?.content?.text?.includes(browseId));
+  assert(next); const videoId = JSON.parse(next.request.postData.text).videoId;
+  const run = bootstrap({settings: {captionLang: "off"}}), submitted = [];
+  run.context.$httpClient.post = (request, callback) => {
+    if (request.url.includes("/next?")) callback(null, {status: 200}, next.response.content.text);
+    else if (request.url.includes("/browse?")) return;
+    else { submitted.push(JSON.parse(request.body)); callback("HTTP request timeout"); }
+  };
+  run.context.YouTubePrewarm.capture({videoId}, true); run.context.$done({});
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.equal(submitted.length, 1); assert.equal(submitted[0].browseId, browseId); assert.equal(submitted[0].videoId, videoId);
+  assert.equal(run.outputs.length, 1);
 });

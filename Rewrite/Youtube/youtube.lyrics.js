@@ -216,7 +216,11 @@
     return cleaned ? `${cleaned}\n${attribution}` : attribution;
   }
 
-  function rewriteLyricsRenderer(rendererBytes, translatedByOriginal, hideTranslateControl, attribution) {
+  function chineseLyricLine(text) {
+    return /\p{Script=Han}/u.test(text) && !/\p{Letter}/u.test(text.replace(/[\p{Script=Han}\p{Script=Latin}]/gu, ""));
+  }
+
+  function rewriteLyricsRenderer(rendererBytes, translatedByOriginal, hideTranslateControl, attribution, replaceChinese) {
     const lyrics = lyricList(rendererBytes);
     if (!lyrics) return [rendererBytes, false];
     let listChanged = false;
@@ -260,9 +264,9 @@
         continue;
       }
 
-      const bilingual = TEXT_ENCODER.encode(`${original}\n${translated}`);
+      const displayed = TEXT_ENCODER.encode(replaceChinese && chineseLyricLine(original) ? translated : `${original}\n${translated}`);
       const itemChunks = itemFields.map((field) => (
-        field === textField ? encodeField(field.number, bilingual) : rawField(itemBytes, field)
+        field === textField ? encodeField(field.number, displayed) : rawField(itemBytes, field)
       ));
       listChunks.push(encodeField(itemField.number, join(itemChunks)));
       listChanged = true;
@@ -285,7 +289,7 @@
     return [join(rendererChunks), true];
   }
 
-  function rewriteNested(bytes, translatedByOriginal, depth = 0, hideTranslateControl = false, attribution = "") {
+  function rewriteNested(bytes, translatedByOriginal, depth = 0, hideTranslateControl = false, attribution = "", replaceChinese = false) {
     if (depth > 14) return [bytes, false];
     const fields = parseMessage(bytes);
     if (!fields) return [bytes, false];
@@ -301,10 +305,10 @@
       let rewritten = data;
       let fieldChanged = false;
       if (field.number === LYRICS_RENDERER_FIELD) {
-        [rewritten, fieldChanged] = rewriteLyricsRenderer(data, translatedByOriginal, hideTranslateControl, attribution);
+        [rewritten, fieldChanged] = rewriteLyricsRenderer(data, translatedByOriginal, hideTranslateControl, attribution, replaceChinese);
       }
       if (!fieldChanged && data.length >= 4) {
-        [rewritten, fieldChanged] = rewriteNested(data, translatedByOriginal, depth + 1, hideTranslateControl, attribution);
+        [rewritten, fieldChanged] = rewriteNested(data, translatedByOriginal, depth + 1, hideTranslateControl, attribution, replaceChinese);
       }
       if (fieldChanged) {
         chunks.push(encodeField(field.number, rewritten));
@@ -730,7 +734,10 @@
       }
 
       const attribution = providerLabel(providers);
-      const [output, translated] = rewriteNested(inputWithoutControl, translatedByOriginal, 0, false, attribution);
+      // Kanji-only lines inside Japanese/Korean/Thai songs still need their original-language row.
+      const replaceChinese = /^zh(?:-|$)/i.test(target)
+        && !lines.some((line) => /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u.test(line));
+      const [output, translated] = rewriteNested(inputWithoutControl, translatedByOriginal, 0, false, attribution, replaceChinese);
       const changed = controlChanged || translated;
       if (options.debug) console.log(`YouTube lyrics: ${translated ? attribution : "already matches target language"}; translate control ${controlChanged ? "hidden" : "absent"} (${translatedByOriginal.size}/${uniqueLines.length} unique lines)`);
       return $done(changed ? { body: output } : {});

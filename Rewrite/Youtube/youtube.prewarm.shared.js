@@ -107,9 +107,9 @@ export class PrewarmJob {
     const payload = await request.json();
     if (action === "prepare") {
       if (state && !["failed", "missing"].includes(state.status)) {
-        if (state.status === "queued" && state.work?.kind === "source" && !state.work.sourceLines
-          && payload.work?.kind === "source" && Array.isArray(payload.work.sourceLines) && payload.work.sourceLines.length) {
-          state.work = await this.storeBody(payload.work);
+        if (state.status === "queued" && state.work?.kind === "source" && payload.work?.kind === "source"
+          && ((!state.work.sourceLines && payload.work.sourceLines?.length) || (!state.work.browseId && payload.work.browseId))) {
+          state.work = await this.storeBody({...state.work, ...payload.work, sourceLines: payload.work.sourceLines || state.work.sourceLines});
           await this.ctx.storage.put("state", state);
         }
         return json({enqueue: false, status: state.status});
@@ -225,19 +225,23 @@ function visit(value, predicate, depth = 0) {
   return null;
 }
 
-export async function fetchMusicLyrics(videoId) {
+export async function fetchMusicLyrics(videoId, browseIdHint) {
   if (!/^[\w-]{11}$/.test(videoId)) throw new Error("Invalid video");
+  if (browseIdHint !== undefined && !/^MPLY[\w-]{1,300}$/.test(browseIdHint)) throw new Error("Invalid lyric browse hint");
   const context = {client: {clientName: "WEB_REMIX", clientVersion: "1.20261026.01.00", hl: "en", gl: "HK"}};
   async function api(path, payload) {
     return JSON.parse(await fetchDocument(`https://music.youtube.com/youtubei/v1/${path}?prettyPrint=false`, {
       method: "POST", headers: {"Content-Type": "application/json", "Origin": "https://music.youtube.com"}, body: JSON.stringify({context, ...payload}),
     }));
   }
-  const next = await api("next", {videoId});
-  const browseId = visit(next, (node) => {
-    const id = node.browseEndpoint?.browseId;
-    return typeof id === "string" && /^MPLY[\w-]{1,300}$/.test(id) ? id : null;
-  });
+  let browseId = browseIdHint;
+  if (!browseId) {
+    const next = await api("next", {videoId});
+    browseId = visit(next, (node) => {
+      const id = node.browseEndpoint?.browseId;
+      return typeof id === "string" && /^MPLY[\w-]{1,300}$/.test(id) ? id : null;
+    });
+  }
   if (!browseId) return [];
   const document = await api("browse", {browseId});
   const description = visit(document, (node) => node.musicDescriptionShelfRenderer?.description || null);
