@@ -1,8 +1,9 @@
 import {PrewarmJob, identifier, enqueue, consume, jobCall, json, lyricBatches, fetchMusicLyrics, readLimitedText} from "./youtube.prewarm.shared.js";
+import {chineseConversionEnabled, chineseLyricLine} from "./youtube.chinese.js";
 export {PrewarmJob as LyricsPrewarm};
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v20-source-hint";
+const WORKER_BUILD = "lyrics-translate-v21-chinese-local";
 // Do not reuse source lookups that older builds cached after one empty response.
 const PREWARM_SOURCE_VERSION = 2;
 const MAX_REQUEST_BYTES = 48 * 1024;
@@ -412,7 +413,8 @@ async function lyricsPrewarm(request, env, context) {
   const completedBatches = batches.filter((batch) => batch.status === "complete").length;
   const status = batches.some((batch) => batch.status === "failed") ? "failed"
     : completedBatches === batches.length ? "complete" : "processing";
-  return json({status, available: true, completedBatches, batchCount: batches.length});
+  return json({status, available: true, completedBatches, batchCount: batches.length,
+    ...(state.result.localConversion ? {localConversion: true} : {})});
 }
 
 async function prewarmedSongBatch(videoId, texts, target, env, context, allowPartial = false) {
@@ -498,7 +500,9 @@ async function handleLyricsQueue(batch, env, context) {
       if (!lines.length) throw Object.assign(new Error("Lyric source currently unavailable"), {
         code: "lyrics-source-empty", retryAfterSeconds: Math.min(12, 3 * message.attempts),
       });
-      const batches = checkedLyricBatches(lines);
+      const convertLocally = chineseConversionEnabled(work.target, lines);
+      const aiLines = convertLocally ? lines.filter((line) => !chineseLyricLine(line)) : lines;
+      const batches = checkedLyricBatches(aiLines);
       const batchJobIds = [];
       for (const texts of batches) {
         const key = await cacheRequest(texts, "auto", work.target);
@@ -506,7 +510,7 @@ async function handleLyricsQueue(batch, env, context) {
         await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id, {kind: "batch", texts, source: "auto", target: work.target, videoId: work.videoId});
       }
       song = work;
-      return {available: true, batchJobIds};
+      return {available: true, batchJobIds, ...(aiLines.length !== lines.length ? {localConversion: true} : {})};
     });
     // Materialize only after consume has durably completed the source/batch.
     // Empty texts request no translation; incomplete sibling batches remain untouched.

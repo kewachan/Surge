@@ -4,7 +4,9 @@ const path = require("node:path");
 const vm = require("node:vm");
 function inlinePrewarm(source) {
   const shared = fs.readFileSync(path.join(__dirname, "youtube.prewarm.shared.js"), "utf8").replace(/^export /gm, "");
-  return source.replace(/^import \{[^\n]+\} from "\.\/youtube\.prewarm\.shared\.js";$/m, shared);
+  return source.replace(/^import \{[^\n]+\} from "\.\/youtube\.prewarm\.shared\.js";$/m, shared)
+    .replace(/^import \{[^\n]+\} from "\.\/youtube\.chinese\.js";$/m,
+      fs.readFileSync(path.join(__dirname, "youtube.chinese.js"), "utf8").replace(/^export /gm, ""));
 }
 
 

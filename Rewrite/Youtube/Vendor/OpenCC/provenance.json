@@ -1,0 +1,15 @@
+{
+  "package": "opencc-js",
+  "version": "1.4.2",
+  "source": "https://github.com/nk2028/opencc-js",
+  "distribution": "https://registry.npmjs.org/opencc-js/-/opencc-js-1.4.2.tgz",
+  "integrity": "sha512-EdcspgdROiCCZDM+jZR6Pa670xW+EW2QhctPBQ8gRjg6lrx4IHEl+2s+kt5izk/TkxVRgdWuFgaGkaEdIUfdaw==",
+  "license": "MIT AND Apache-2.0",
+  "files": {
+    "LICENSE": "960f7fc16d8baa126802316a7df9078a383af4fb6bc60033adb28e85c08d5e5e",
+    "opencc.js": "95b04abf136d9c28263773bb7d357eac80b7954d101efd23c4d09c737d3d379e",
+    "THIRD_PARTY_LICENSES.md": "42c7dbe71c178fcca97ba945e9ac9ff360fb69bbfea4cb50556f6c65bfa59806",
+    "Apache-2.0.txt": "b534e465949558eec2597b04f5092b5e161236a68dfbfd04d547592ac3964308"
+  },
+  "usage": "Standard s2t/t2s script conversion only; no regional phrase replacement, AI, network or runtime dictionary download."
+}

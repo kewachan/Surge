@@ -113,25 +113,30 @@ test("private pw HAR lyric batches collapse into one native cache lookup", {skip
 test("Simplified Chinese lyrics become one Traditional row while English refrains stay bilingual", async () => {
   const originals = ["我爱你", "这一刻，你在远方", "Stay with me", "Baby 我爱你"], translated = ["我愛你", "這一刻，你在遠方", "陪在我身邊", "Baby 我愛你"];
   const seed = loadClient(), input = lyricDocument(seed.client, originals);
-  const run = loadClient({input, workerResult: {provider: "cloudflare-ai", translations: translated}});
+  const requests = [], run = loadClient({input, httpClient: {post(request, callback) {
+    const payload = JSON.parse(request.body); requests.push(payload.texts);
+    assert.deepEqual(payload.texts, ["Stay with me"]);
+    callback(null, {status: 200}, JSON.stringify({provider: "cloudflare-ai", translations: [translated[2]]}));
+  }}});
   await run.client.main(); const output = Buffer.from(run.output().body);
   assert(!output.includes(Buffer.from("我爱你"))); assert(!output.includes(Buffer.from("这一刻，你在远方")));
   assert(output.includes(Buffer.from("我愛你"))); assert(output.includes(Buffer.from("這一刻，你在遠方")));
   assert(output.includes(Buffer.from("Stay with me\n陪在我身邊")));
   assert(output.includes(Buffer.from("Baby 我愛你"))); assert(!output.includes(Buffer.from("Baby 我爱你")));
+  assert.deepEqual(requests, [["Stay with me"]]);
   const cached = loadClient({input, store: run.store, httpClient: {post() { throw new Error("Cached display must not translate again"); }}});
   await cached.client.main(); assert(Buffer.from(cached.output().body).equals(output));
 });
 
-test("Google Simplified-to-Traditional fallback also replaces the original instead of doubling Chinese rows", async () => {
+test("Chinese conversion without a token makes zero AI or Google requests and adds no attribution", async () => {
   const originals = ["我爱你", "让我们重新开始"], translated = ["我愛你", "讓我們重新開始"];
   const seed = loadClient(), input = lyricDocument(seed.client, originals);
-  const calls = [], run = loadClient({input, httpClient: {
-    post(_, callback) { calls.push("ai"); callback("HTTP request timeout"); },
-    get(_, callback) { calls.push("google"); callback(null, {status: 200}, JSON.stringify([[[translated.join("\n[[YTL:1]]\n")]]])); },
+  const calls = [], run = loadClient({input, token: "paste-token-here", httpClient: {
+    post() { calls.push("ai"); throw new Error("Chinese must be converted offline"); },
+    get() { calls.push("google"); throw new Error("Chinese must never use Google Translate"); },
   }});
   await run.client.main(); const output = Buffer.from(run.output().body);
-  assert.deepEqual(calls, ["ai", "google"]);
+  assert.deepEqual(calls, []); assert(!output.includes(Buffer.from("Translated by")));
   assert(!output.includes(Buffer.from("我爱你"))); assert(output.includes(Buffer.from("我愛你")));
   assert(!output.includes(Buffer.from("让我们重新开始"))); assert(output.includes(Buffer.from("讓我們重新開始")));
 });
@@ -140,7 +145,7 @@ test("the Simplified Chinese argument replaces Traditional originals with one Si
   for (const target of ["zh-Hans", "zh-CN"]) {
     const originals = ["我愛你", "這一刻，你在遠方", "Baby 我愛你"], translations = ["我爱你", "这一刻，你在远方", "Baby 我爱你"];
     const seed = loadClient(), input = lyricDocument(seed.client, originals);
-    const run = loadClient({input, target, workerResult: {provider: "cloudflare-ai", translations}});
+    const run = loadClient({input, target, httpClient: {post() { throw new Error("No AI for script conversion"); }, get() { throw new Error("No Google for script conversion"); }}});
     await run.client.main(); const output = Buffer.from(run.output().body);
     originals.forEach((line) => assert(!output.includes(Buffer.from(line))));
     translations.forEach((line) => assert(output.includes(Buffer.from(line))));
@@ -162,4 +167,17 @@ test("Chinese-to-English and Japanese kanji lines keep originals, and unchanged 
   const originals = ["我愛你", "這一刻，你在遠方"], seed = loadClient(), input = lyricDocument(seed.client, originals);
   const run = loadClient({input, workerResult: {provider: "cloudflare-ai", translations: originals}});
   await run.client.main(); assert(Buffer.from(run.output().body || input).equals(Buffer.from(input)));
+});
+
+test("local conversion preserves wording, punctuation, whitespace and ambiguous characters instead of using old AI paraphrases", async () => {
+  const originals = ["  头发与发展，皇后以后。  ", "\t计算机和鼠标，不要说再见！\t"];
+  const converted = ["  頭髮與發展，皇后以後。  ", "\t計算機和鼠標，不要說再見！\t"];
+  const seed = loadClient(), input = lyricDocument(seed.client, originals);
+  const key = seed.client.cacheKey(originals.map(s => s.trim()), "zh-Hant");
+  const old = JSON.stringify({provider: "cloudflare-ai", translations: ["無關文字不應加入", "錯誤改寫"], savedAt: Date.now(), expiresAt: Date.now() + 60000});
+  const store = new Map([[key, old]]), run = loadClient({input, store, httpClient: {post() { throw new Error("No network for Chinese"); }, get() { throw new Error("No network for Chinese"); }}});
+  await run.client.main(); const output = Buffer.from(run.output().body);
+  converted.forEach(line => assert(output.includes(Buffer.from(line))));
+  assert(!output.includes(Buffer.from("無關文字"))); assert(!output.includes(Buffer.from("滑鼠"))); assert(!output.includes(Buffer.from("Translated by")));
+  assert.equal(store.get(key), old, "existing AI records are ignored, not overwritten with local conversions");
 });

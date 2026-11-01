@@ -13,6 +13,8 @@ async function load(name) {
   let source = fs.readFileSync(path.join(directory, name), "utf8");
   const common = fs.readFileSync(path.join(directory, "youtube.prewarm.shared.js"), "utf8").replace(/^export /gm, "");
   source = source.replace(/^import \{[^\n]+\} from "\.\/youtube\.prewarm\.shared\.js";$/m, common)
+    .replace(/^import \{[^\n]+\} from "\.\/youtube\.chinese\.js";$/m,
+      fs.readFileSync(path.join(directory, "youtube.chinese.js"), "utf8").replace(/^export /gm, ""))
     .replace('import { DurableObject } from "cloudflare:workers";', 'class DurableObject { constructor(ctx, env) { this.ctx=ctx; this.env=env; } }');
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
@@ -798,4 +800,25 @@ test("private Pw3 lost-browse replay still submits the known lyric endpoint with
   await new Promise((resolve) => setTimeout(resolve, 900));
   assert.equal(submitted.length, 1); assert.equal(submitted[0].browseId, browseId); assert.equal(submitted[0].videoId, videoId);
   assert.equal(run.outputs.length, 1);
+});
+
+test("Chinese prewarm source schedules no AI, while mixed songs schedule only their foreign lines", async () => {
+  const {lyrics} = await ready, oldFetch = global.fetch, oldCaches = global.caches;
+  global.fetch = async () => { throw new Error("Supplied source must not need retrieval"); }; global.caches = undefined;
+  try {
+    for (const mixed of [false, true]) {
+      const messages = [], namespace = new Namespace(lyrics.LyricsPrewarm); let aiCalls = 0;
+      const sourceLines = ["我爱你", "让我们重新开始", ...(mixed ? ["Stay with me"] : [])];
+      const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: namespace, LYRICS_QUEUE: {send: async (body) => messages.push(body)},
+        AI: {run: async (_, params) => {
+          aiCalls++; assert.deepEqual(JSON.parse(params.messages[1].content.match(/Target lines JSON: (.*)/)[1]), ["Stay with me"]);
+          return {response: '{"translations":["陪在我身邊"]}'};
+        }}};
+      const created = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-Hant", sourceLines}), env, {})).json();
+      for (let index = 0; index < messages.length; index++) await lyrics.default.queue({messages: [message(messages[index])]}, env, {});
+      const status = await (await lyrics.default.fetch(new Request("https://worker.test/lyrics/prewarm/" + created.jobId, {headers: authorization}), env, {})).json();
+      assert.equal(status.status, "complete"); assert.equal(status.localConversion, true);
+      assert.equal(aiCalls, mixed ? 1 : 0); assert.equal(status.batchCount, mixed ? 1 : 0); assert.equal(messages.length, mixed ? 2 : 1);
+    }
+  } finally { global.fetch = oldFetch; global.caches = oldCaches; }
 });
