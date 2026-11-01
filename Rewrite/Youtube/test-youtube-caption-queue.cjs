@@ -2,6 +2,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+function inlinePrewarm(source) {
+  const shared = fs.readFileSync(path.join(__dirname, "youtube.prewarm.shared.js"), "utf8").replace(/^export /gm, "");
+  return source.replace(/^import \{[^\n]+\} from "\.\/youtube\.prewarm\.shared\.js";$/m, shared);
+}
+
 
 if (!globalThis.crypto) globalThis.crypto = require("node:crypto").webcrypto;
 
@@ -44,7 +49,7 @@ class MockStorage {
 }
 
 async function loadWorker() {
-  const source = fs.readFileSync(workerPath, "utf8").replace(
+  const source = inlinePrewarm(fs.readFileSync(workerPath, "utf8")).replace(
     'import { DurableObject } from "cloudflare:workers";',
     "class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
   );

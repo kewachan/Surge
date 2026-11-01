@@ -1,7 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
+import {PrewarmJob, identifier, fingerprint, captionSource, parseCaptions, renderCaptions, fetchDocument, readLimitedText, enqueue, consume, jobCall, json} from "./youtube.prewarm.shared.js";
+export {PrewarmJob as CaptionPrewarm};
 
 const JOBS_PATH = "/caption/jobs";
-const WORKER_BUILD = "caption-queue-v22";
+const WORKER_BUILD = "caption-queue-v23-prewarm";
 const GOOGLE_TRANSLATE_ENDPOINTS = [
   "https://translate.googleapis.com/translate_a/t",
   "https://translate.google.com/translate_a/t",
@@ -393,17 +395,74 @@ async function getJobStatus(jobId, env) {
   return jobStub(env, jobId).fetch("https://caption-job/internal/status");
 }
 
-async function handleRequest(request, env) {
+async function captionPrewarm(request, env, authenticated) {
+  if (!env.CAPTION_PREWARM) return textResponse("Prewarm unavailable", 503);
+  const url = new URL(request.url);
+  if (request.method === "POST" && url.pathname === "/caption/prewarm") {
+    let source, target, body;
+    try {
+      const payload = JSON.parse(await readLimitedText(request, 2000000));
+      source = captionSource(payload.url); target = normalizeLanguage(payload.target);
+      if (!target) throw new Error();
+      if (payload.body !== undefined) {
+        if (typeof payload.body !== "string" || payload.body.length > 1500000) throw new Error();
+        parseCaptions(payload.body); body = payload.body;
+      }
+    } catch (error) { return textResponse("Invalid prewarm request", error.status || 400); }
+    if (!authenticated && !(await allowPublicJob(request, env))) return textResponse("Too Many Requests", 429);
+    // Including the full supplied document in SHA-256 keeps anonymous raw-caption jobs unguessable,
+    // matching the existing content-addressed translation jobs rather than exposing them by video ID.
+    const id = await identifier({version: 1, track: source.track, target, body});
+    const result = await enqueue(env.CAPTION_PREWARM, env.CAPTION_QUEUE, id, {...source, target, body});
+    return json(result, 202);
+  }
+  const id = url.pathname.slice("/caption/prewarm/".length);
+  if (request.method !== "GET" || !/^[a-f0-9]{64}$/.test(id)) return textResponse("Not Found", 404);
+  const state = await jobCall(env.CAPTION_PREWARM, id, "state");
+  if (state.status !== "complete") return json({status: state.status, code: state.code});
+  const result = state.result;
+  if (url.searchParams.get("sourceHash") !== result.sourceHash) return json({status: "source-mismatch"});
+  const statusResponse = await getJobStatus(result.translationJobId, env);
+  if (!statusResponse.ok) return json({status: "missing"});
+  const status = await statusResponse.json();
+  if (status.status !== "complete") return json({status: status.status});
+  return json({status: "complete", sourceHash: result.sourceHash, target: result.target,
+    provider: "google-translate", body: renderCaptions(result.body, parseCaptions(result.body), status.translations)});
+}
+
+async function processCaptionPrewarm(message, env) {
+  return consume(message, env.CAPTION_PREWARM, async (work) => {
+    const source = captionSource(work.url);
+    const body = work.body || await fetchDocument(source.url);
+    let entries;
+    try { entries = parseCaptions(body); }
+    catch (_) { throw Object.assign(new Error("Invalid source captions"), {code: "invalid-caption-source", retryable: false}); }
+    const response = await createJob(new Request("https://caption.internal/caption/jobs", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({purpose: "captions", source: source.source, target: work.target, texts: entries.map((entry) => entry.text)}),
+    }), env, true);
+    if (!response.ok) throw new Error("Translation enqueue failed");
+    const job = await response.json();
+    return {body, sourceHash: fingerprint(body), target: work.target, translationJobId: job.jobId};
+  });
+}
+
+async function handleRequest(request, env, context) {
   try {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
       return jsonResponse({ status: "ok", build: WORKER_BUILD });
     }
-    if (!url.pathname.startsWith(JOBS_PATH)) return textResponse("Not Found", 404);
+    if (!url.pathname.startsWith(JOBS_PATH) && !url.pathname.startsWith("/caption/prewarm")) return textResponse("Not Found", 404);
     const authorization = request.headers.get("authorization") || "";
     const authenticated = hasValidAccessToken(request, env);
     if (authorization && !authenticated) {
       return textResponse("Unauthorized", 401, { "WWW-Authenticate": "Bearer" });
+    }
+    if (url.pathname.startsWith("/caption/prewarm")) {
+      const work = captionPrewarm(request, env, authenticated);
+      if (request.method === "POST") context?.waitUntil?.(work.then(() => undefined, () => undefined));
+      return await work;
     }
     if (request.method === "POST" && url.pathname === JOBS_PATH) {
       return createJob(request, env, authenticated);
@@ -484,7 +543,8 @@ async function processQueueMessage(message, env) {
 }
 
 async function handleQueue(batch, env) {
-  await Promise.all(batch.messages.map((message) => processQueueMessage(message, env)));
+  await Promise.all(batch.messages.map((message) => message.body?.prewarm
+    ? processCaptionPrewarm(message, env) : processQueueMessage(message, env)));
 }
 
 export class CaptionJob extends DurableObject {

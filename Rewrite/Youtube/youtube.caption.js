@@ -60,6 +60,38 @@ function cacheKey(query, source, target) {
   return `YouTubeCaption.v6.${(hash >>> 0).toString(16)}`;
 }
 
+function prewarmFingerprint(text) {
+  let first = 2166136261, second = 2246822519;
+  for (let index = 0; index < text.length; index++) {
+    first = Math.imul(first ^ text.charCodeAt(index), 16777619);
+    second = Math.imul(second ^ text.charCodeAt(index), 3266489917);
+  }
+  return `${text.length}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`;
+}
+
+async function readPrewarmedCaption(body, target, options, deadline) {
+  try {
+    const query = (name) => {
+      const match = $request.url.match(new RegExp(`[?&]${name}=([^&#]*)`));
+      return match ? decodeURIComponent(match[1].replace(/\+/g, " ")) : "";
+    };
+    const identity = JSON.stringify([query("v"), query("lang"), query("kind"), query("name"), target]);
+    const key = `YouTubeCaption.Prewarm.v1.${prewarmFingerprint(identity)}`;
+    const saved = JSON.parse($persistentStore.read(key) || "null");
+    if (!/^[a-f0-9]{64}$/.test(saved?.jobId || "") || Date.now() - saved.savedAt > CACHE_TTL_MS) return null;
+    const remaining = deadline - Date.now();
+    if (remaining < 1000) return null;
+    const token = validCaptionToken(options.captionToken) ? options.captionToken.trim() : "";
+    const hash = prewarmFingerprint(body);
+    const result = await captionWorkerRequest("GET", `${CAPTION_WORKER_ENDPOINT.replace(/\/jobs$/, "/prewarm")}/${saved.jobId}?sourceHash=${encodeURIComponent(hash)}`,
+      token, undefined, 0.7);
+    if (result.status !== "complete" || result.sourceHash !== hash || result.target !== target
+      || result.provider !== "google-translate" || typeof result.body !== "string"
+      || result.body.length > 1500000 || !/<timedtext\b/.test(result.body)) return null;
+    return result.body;
+  } catch (_) { return null; }
+}
+
 function captionJobCacheKey(entries, source, target) {
   let primary = 2166136261;
   let secondary = 2246822519;
@@ -495,10 +527,15 @@ async function translateCaptionResponse() {
   applyCachedTranslations(captions, source, target);
   const entries = captions.map((caption, captionIndex) => ({captionIndex, text: caption.text}));
   const allTranslated = () => captions.every((caption) => caption.translated);
+  let prewarmedBody = null;
   if (!allTranslated()) {
     let resolveComplete;
     const complete = new Promise((resolve) => { resolveComplete = resolve; });
     const onProgress = () => { if (allTranslated()) resolveComplete(); };
+    const warmWork = (async () => {
+      prewarmedBody = await readPrewarmedCaption(body, target, options, responseDeadline);
+      if (prewarmedBody) resolveComplete();
+    })();
     const queueWork = (async () => {
       try {
         const queued = await translateWithQueue(entries, source, target, options.captionToken,
@@ -516,10 +553,12 @@ async function translateCaptionResponse() {
       await translateBatches(batches, captions, source, target, responseDeadline, onProgress);
     })();
     let timer;
-    await Promise.race([complete, Promise.all([queueWork, directWork]),
+    await Promise.race([complete, Promise.all([queueWork, directWork, warmWork]),
       new Promise((resolve) => { timer = setTimeout(resolve, Math.max(0, responseDeadline - Date.now())); })]);
     if (timer) clearTimeout(timer);
   }
+  if (prewarmedBody) return $done({status: 200, body: prewarmedBody,
+    headers: {...rewrittenResponseHeaders(responseHeaders), "X-YouTube-Caption-State": "complete"}});
   writeResolvedCaches(captions, source, target);
   if (!allTranslated()) return $done(pendingCaptionResponse());
   let output = "";

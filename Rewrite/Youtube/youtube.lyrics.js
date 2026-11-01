@@ -27,7 +27,7 @@
   const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
   function settings() {
-    const output = { lyricsLang: "zh-Hant", lyricsToken: "", debug: false };
+    const output = { lyricsLang: "zh-Hant", lyricsToken: "", prewarm: true, debug: false };
     try {
       if (typeof $argument === "string" && !$argument.includes("{{{")) {
         Object.assign(output, JSON.parse($argument));
@@ -412,7 +412,14 @@
   }
 
   function requestTranslations(lines, target, timeoutSeconds, accessToken) {
-    const payload = JSON.stringify({ purpose: "lyrics", texts: lines, source: "auto", target });
+    let prewarmVideoId;
+    try {
+      const active = JSON.parse($persistentStore.read("YouTubeLyrics.Prewarm.Active.v1") || "null");
+      const options = settings();
+      if (options.prewarm !== false && options.prewarm !== "false" && /^[\w-]{11}$/.test(active?.videoId || "")
+        && Date.now() - active.savedAt < 30 * 60 * 1000) prewarmVideoId = active.videoId;
+    } catch (_) {}
+    const payload = JSON.stringify({ purpose: "lyrics", texts: lines, source: "auto", target, prewarmVideoId });
     const headers = {
       Accept: "application/json",
       Authorization: `Bearer ${accessToken}`,

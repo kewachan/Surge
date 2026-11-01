@@ -1,6 +1,8 @@
+import {PrewarmJob, identifier, enqueue, consume, jobCall, json, lyricBatches, fetchMusicLyrics, readLimitedText} from "./youtube.prewarm.shared.js";
+export {PrewarmJob as LyricsPrewarm};
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v14-ai-first";
+const WORKER_BUILD = "lyrics-translate-v15-prewarm";
 const MAX_REQUEST_BYTES = 48 * 1024;
 const MAX_ITEMS = 12;
 const MAX_LINE_CHARS = 500;
@@ -290,18 +292,60 @@ async function writeCache(request, result) {
   }
 }
 
-async function translateCached(texts, source, target, env, context) {
+async function translateCached(texts, source, target, env, context, prewarmVideoId) {
   const key = await cacheRequest(texts, source, target);
   const cached = await readCache(key.request, texts.length, target);
   if (cached) return { ...cached, cacheStatus: "HIT" };
+  const warmed = await prewarmedSongBatch(prewarmVideoId, texts, target, env);
+  if (warmed) { await writeCache(key.request, warmed); return warmed; }
 
   let work = IN_FLIGHT_TRANSLATIONS.get(key.identifier);
   if (!work) {
     work = (async () => {
-      const runAI = createRequestLimiter(MAX_AI_CONCURRENCY);
-      const result = await translateLyricsAdaptive(texts, source, target, env, texts, true, runAI);
-      await writeCache(key.request, result);
-      return result;
+      const namespace = env.LYRICS_PREWARM;
+      const id = `batch:${key.identifier}`;
+      let ownsJob = false;
+      if (namespace && env.LYRICS_QUEUE) {
+        try {
+          await jobCall(namespace, id, "prepare", {work: {kind: "batch", texts, source, target}});
+          const claim = await jobCall(namespace, id, "run", {});
+          ownsJob = claim.run;
+          if (!ownsJob) {
+            const deadline = Date.now() + 4500;
+            do {
+              const state = await jobCall(namespace, id, "state");
+              if (state.status === "complete") {
+                if (state.result?.provider !== "cloudflare-ai" || !validatedTranslations(state.result.translations, texts.length)
+                  || hasTargetScriptMismatch(state.result.translations, target)) throw new Error("Invalid AI cache");
+                return {...state.result, cacheStatus: "HIT"};
+              }
+              if (state.status === "failed" || state.status === "missing") throw new Error("AI prewarm unavailable");
+              await new Promise((resolve) => setTimeout(resolve, 250));
+            } while (Date.now() < deadline);
+            throw Object.assign(new Error("AI prewarm pending"), {code: "AI_PREWARM_PENDING"});
+          }
+          // Recover the same job if this HTTP invocation ends before the AI completes.
+          try { await env.LYRICS_QUEUE.send({prewarm: true, jobId: id}, {delaySeconds: 125}); } catch (_) {}
+        } catch (error) {
+          if (error.code === "AI_PREWARM_PENDING") throw error;
+          // Coordination is an optimization; a storage outage must not disable the existing AI path.
+          ownsJob = false;
+        }
+      }
+      try {
+        const runAI = createRequestLimiter(MAX_AI_CONCURRENCY);
+        const result = await translateLyricsAdaptive(texts, source, target, env, texts, true, runAI);
+        await writeCache(key.request, result);
+        if (ownsJob) {
+          const persistence = jobCall(namespace, id, "complete", {result: {...result, sourceTexts: texts}}).catch(() => {});
+          if (typeof context?.waitUntil === "function") context.waitUntil(persistence);
+          else await persistence;
+        }
+        return result;
+      } catch (error) {
+        if (ownsJob) await jobCall(namespace, id, "retry", {}).catch(() => {});
+        throw error;
+      }
     })();
     IN_FLIGHT_TRANSLATIONS.set(key.identifier, work);
     const remove = () => IN_FLIGHT_TRANSLATIONS.delete(key.identifier);
@@ -311,7 +355,85 @@ async function translateCached(texts, source, target, env, context) {
   if (typeof context?.waitUntil === "function") {
     context.waitUntil(work.then(() => undefined, () => undefined));
   }
-  return { ...await work, cacheStatus: "MISS" };
+  const result = await work;
+  return {...result, cacheStatus: result.cacheStatus || "MISS"};
+}
+
+async function lyricsPrewarm(request, env) {
+  if (!env.LYRICS_PREWARM || !env.LYRICS_QUEUE) return response("Prewarm unavailable", 503);
+  const url = new URL(request.url);
+  if (request.method === "POST" && url.pathname === "/lyrics/prewarm") {
+    const raw = await readLimitedText(request, 2048);
+    if (raw.length > 2048) return response("Request Too Large", 413);
+    let payload;
+    try { payload = JSON.parse(raw); } catch (_) { return response("Invalid JSON", 400); }
+    const target = normalizeLanguage(payload.target, false);
+    if (!target || !/^[\w-]{11}$/.test(payload.videoId || "")) return response("Invalid prewarm request", 400);
+    const id = await identifier({version: 1, videoId: payload.videoId, target, model: AI_MODEL});
+    return json(await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id, {kind: "source", videoId: payload.videoId, target}), 202);
+  }
+  const id = url.pathname.slice("/lyrics/prewarm/".length);
+  if (request.method !== "GET" || !/^[a-f0-9]{64}$/.test(id)) return response("Not Found", 404);
+  const state = await jobCall(env.LYRICS_PREWARM, id, "state");
+  if (state.status !== "complete") return json({status: state.status, code: state.code});
+  if (!state.result.available) return json({status: "unavailable", available: false});
+  const batches = await Promise.all(state.result.batchJobIds.map((id) => jobCall(env.LYRICS_PREWARM, id, "state")));
+  const completedBatches = batches.filter((batch) => batch.status === "complete").length;
+  const status = batches.some((batch) => batch.status === "failed") ? "failed"
+    : completedBatches === batches.length ? "complete" : "processing";
+  return json({status, available: true, completedBatches, batchCount: batches.length});
+}
+
+async function prewarmedSongBatch(videoId, texts, target, env) {
+  if (!env.LYRICS_PREWARM || !/^[\w-]{11}$/.test(videoId || "")) return null;
+  try {
+    const id = await identifier({version: 1, videoId, target, model: AI_MODEL});
+    const song = await jobCall(env.LYRICS_PREWARM, id, "state");
+    if (song.status !== "complete" || !song.result.available) return null;
+    const ids = song.result.batchJobIds;
+    if (!Array.isArray(ids) || ids.length > 32) return null;
+    const batches = await Promise.all(ids.map((id) => jobCall(env.LYRICS_PREWARM, id, "state")));
+    const byOriginal = new Map();
+    for (const batch of batches) {
+      const result = batch.result;
+      if (batch.status !== "complete" || result?.provider !== "cloudflare-ai"
+        || !Array.isArray(result.sourceTexts) || result.sourceTexts.length !== result.translations?.length) continue;
+      result.sourceTexts.forEach((line, index) => {
+        const translated = result.translations[index];
+        if (typeof translated === "string" && translated.trim()) byOriginal.set(line, translated);
+      });
+    }
+    if (!texts.every((text) => byOriginal.has(text))) return null;
+    return {translations: texts.map((text) => byOriginal.get(text)), provider: "cloudflare-ai", cacheStatus: "HIT"};
+  } catch (_) { return null; }
+}
+
+async function handleLyricsQueue(batch, env, context) {
+  await Promise.all(batch.messages.map((message) => consume(message, env.LYRICS_PREWARM, async (work) => {
+    if (work.kind === "batch") {
+      // The consumer owns the lease. Do not join a foreground promise waiting on that lease.
+      const key = await cacheRequest(work.texts, work.source, work.target);
+      const cached = await readCache(key.request, work.texts.length, work.target);
+      if (cached) return {...cached, sourceTexts: work.texts};
+      const result = await translateLyricsAdaptive(work.texts, work.source, work.target, env, work.texts, true,
+        createRequestLimiter(MAX_AI_CONCURRENCY));
+      await writeCache(key.request, result);
+      return {...result, sourceTexts: work.texts};
+    }
+    const lines = await fetchMusicLyrics(work.videoId);
+    if (!lines.length) return {available: false};
+    const batches = lyricBatches(lines);
+    if (batches.length > 32 || batches.some((texts) => texts.some((line) => line.length > MAX_LINE_CHARS)
+      || texts.join("").length > MAX_TOTAL_CHARS))
+      throw Object.assign(new Error("Unsupported lyric source"), {code: "lyrics-source-unsupported", retryable: false});
+    const batchJobIds = [];
+    for (const texts of batches) {
+      const key = await cacheRequest(texts, "auto", work.target);
+      const id = `batch:${key.identifier}`; batchJobIds.push(id);
+      await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id, {kind: "batch", texts, source: "auto", target: work.target});
+    }
+    return {available: true, batchJobIds};
+  })));
 }
 
 async function handleLyricsRequest(request, env, context) {
@@ -352,7 +474,7 @@ async function handleLyricsRequest(request, env, context) {
   }
 
   try {
-    const result = await translateCached(normalizedTexts, source, target, env, context);
+    const result = await translateCached(normalizedTexts, source, target, env, context, payload.prewarmVideoId);
     return response(
       {
         translations: result.translations,
@@ -375,17 +497,25 @@ async function handleLyricsRequest(request, env, context) {
 
 async function handleRequest(request, env, context) {
   try {
-    if (request.method !== "POST") {
+    const pathname = new URL(request.url).pathname;
+    if (request.method === "GET" && pathname === "/health") return response({status: "ok", build: WORKER_BUILD});
+    if (request.method !== "POST" && !(request.method === "GET" && pathname.startsWith("/lyrics/prewarm/"))) {
       return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
     }
-    if (new URL(request.url).pathname !== LYRICS_PATH) return new Response("Not Found", { status: 404 });
+    if (pathname !== LYRICS_PATH && !pathname.startsWith("/lyrics/prewarm")) return new Response("Not Found", { status: 404 });
     if (!env?.LYRICS_ACCESS_TOKEN) return response("Service Unavailable", 503);
     if (!hasValidAccessToken(request, env)) {
       return response("Unauthorized", 401, { "WWW-Authenticate": "Bearer" });
     }
+    if (pathname.startsWith("/lyrics/prewarm")) {
+      const work = lyricsPrewarm(request, env);
+      if (request.method === "POST") context?.waitUntil?.(work.then(() => undefined, () => undefined));
+      return await work;
+    }
     return await handleLyricsRequest(request, env, context);
   } catch (error) {
     console.error("YouTube lyric request failed before a response was generated:", error?.message || String(error));
+    if (error?.status === 413) return response("Request Too Large", 413);
     return response("Internal Server Error", 500);
   }
 }
@@ -404,4 +534,4 @@ export const __test = {
   handleRequest,
 };
 
-export default { fetch: handleRequest };
+export default { fetch: handleRequest, queue: handleLyricsQueue };

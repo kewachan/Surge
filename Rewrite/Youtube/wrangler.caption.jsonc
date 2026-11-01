@@ -28,11 +28,19 @@
       {
         "name": "CAPTION_JOBS",
         "class_name": "CaptionJob"
+      },
+      {
+        "name": "CAPTION_PREWARM",
+        "class_name": "CaptionPrewarm"
       }
     ]
   },
   "exports": {
     "CaptionJob": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "CaptionPrewarm": {
       "type": "durable-object",
       "storage": "sqlite"
     }

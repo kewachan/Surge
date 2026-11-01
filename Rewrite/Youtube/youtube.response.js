@@ -1,3 +1,159 @@
+// BEGIN YOUTUBE PREWARM BOOTSTRAP
+// Playback-time prewarm bootstrap. Embedded into youtube.response.js by the build helper.
+(() => {
+  const options = {captionLang: "off", captionToken: "", lyricsLang: "off", lyricsToken: "", prewarm: true, debug: false};
+  try {
+    if (typeof $argument === "string" && !$argument.includes("{{{")) Object.assign(options, JSON.parse($argument));
+    else if (typeof $argument === "object" && $argument) Object.assign(options, $argument);
+  } catch (_) {}
+  const plans = [];
+  const INDEX = "YouTubeTranslation.PrewarmIndex.v1";
+  const originalDone = $done;
+  let finished = false;
+
+  function language(value) {
+    const text = String(value || "").trim();
+    return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(text) && text.toLowerCase() !== "off" ? text : "";
+  }
+  function captionTarget(value) {
+    return {"zh-hant": "zh-TW", "zh-tw": "zh-TW", "zh-hans": "zh-CN", "zh-cn": "zh-CN"}[value.toLowerCase()] || value;
+  }
+  function query(url, name) {
+    const match = String(url).match(new RegExp(`[?&]${name}=([^&#]*)`));
+    try { return match ? decodeURIComponent(match[1].replace(/\+/g, " ")) : ""; } catch (_) { return ""; }
+  }
+  function fingerprint(text) {
+    let first = 2166136261, second = 2246822519;
+    for (let index = 0; index < text.length; index++) {
+      first = Math.imul(first ^ text.charCodeAt(index), 16777619);
+      second = Math.imul(second ^ text.charCodeAt(index), 3266489917);
+    }
+    return `${text.length}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`;
+  }
+  function findTracks(value, depth = 0) {
+    if (!value || typeof value !== "object" || depth > 8) return [];
+    if (Array.isArray(value.captionTracks)) return value.captionTracks;
+    for (const child of Object.values(value)) {
+      const found = findTracks(child, depth + 1); if (found.length) return found;
+    }
+    return [];
+  }
+  function remember(key, value) {
+    try {
+      $persistentStore.write(JSON.stringify(value), key);
+      const index = JSON.parse($persistentStore.read(INDEX) || "[]");
+      const next = (Array.isArray(index) ? index : []).filter((item) => item.key !== key);
+      next.push({key});
+      while (next.length > 64) $persistentStore.write("", next.shift().key);
+      $persistentStore.write(JSON.stringify(next), INDEX);
+    } catch (_) {}
+  }
+  function recent(key) {
+    try {
+      const saved = JSON.parse($persistentStore.read(key) || "null");
+      return saved && Date.now() - saved.savedAt < (saved.jobId ? 600000 : 15000);
+    } catch (_) { return false; }
+  }
+  function detailsVideoId(fields) {
+    const data = fields?.find((field) => field.no === 11 && field.wireType === 2)?.data;
+    if (!data) return "";
+    let position = 0;
+    const read = () => {
+      let value = 0, multiplier = 1, count = 0;
+      while (position < data.length && count++ < 5) {
+        const byte = data[position++]; value += (byte & 127) * multiplier;
+        if (!(byte & 128)) return value;
+        multiplier *= 128;
+      }
+      throw new Error("Invalid details");
+    };
+    try {
+      if (read() !== data.length - position || read() !== 10 || read() !== 11 || position + 11 > data.length) return "";
+      const id = String.fromCharCode(...data.slice(position, position + 11));
+      return /^[\w-]{11}$/.test(id) ? id : "";
+    } catch (_) { return ""; }
+  }
+  function capture(player, music, unknownFields) {
+    if (options.prewarm === false || options.prewarm === "false" || plans.length || !player) return;
+    const target = language(options.captionLang);
+    const tracks = findTracks(player.captions).filter((track) => typeof track.baseUrl === "string"
+      && /^https:\/\/www\.youtube\.com\/api\/timedtext\?/.test(track.baseUrl)
+      && !query(track.baseUrl, "tlang") && !query(track.baseUrl, "enhance_tlang"));
+    const track = tracks.find((track) => captionTarget(track.languageCode || "").toLowerCase() === captionTarget(target).toLowerCase())
+      || tracks.find((track) => track.languageCode === "en") || tracks[0];
+    let videoId = track ? query(track.baseUrl, "v") : "";
+    if (!/^[\w-]{11}$/.test(videoId)) {
+      const tracking = JSON.stringify(player.playbackTracking || {});
+      const match = tracking.match(/[?&](?:docid|v)=([\w-]{11})(?:[&"\\]|$)/);
+      videoId = match?.[1] || "";
+    }
+    if (!videoId) videoId = detailsVideoId(unknownFields);
+    if (target && track && captionTarget(track.languageCode || "").toLowerCase() !== captionTarget(target).toLowerCase()) {
+      const normalizedTarget = captionTarget(target);
+      const identity = JSON.stringify([query(track.baseUrl, "v"), query(track.baseUrl, "lang"), query(track.baseUrl, "kind"), query(track.baseUrl, "name"), normalizedTarget]);
+      plans.push({kind: "caption", key: `YouTubeCaption.Prewarm.v1.${fingerprint(identity)}`,
+        url: "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/prewarm",
+        token: String(options.captionToken || "").trim(), payload: {url: track.baseUrl, target: normalizedTarget}});
+    }
+    const lyricsTarget = language(options.lyricsLang), lyricsToken = String(options.lyricsToken || "").trim();
+    if (music && lyricsTarget && /^[\w-]{11}$/.test(videoId) && /^[a-f0-9]{64}$/i.test(lyricsToken)) {
+      try { $persistentStore.write(JSON.stringify({videoId, savedAt: Date.now()}), "YouTubeLyrics.Prewarm.Active.v1"); } catch (_) {}
+      plans.push({kind: "lyrics", key: `YouTubeLyrics.Prewarm.v1.${videoId}.${lyricsTarget}`,
+        url: "https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/lyrics/prewarm",
+        token: lyricsToken, payload: {videoId, target: lyricsTarget}});
+    }
+  }
+  globalThis.YouTubePrewarm = {capture};
+  $done = (result) => {
+    if (finished) return;
+    const pending = plans.filter((plan) => !recent(plan.key));
+    if (!pending.length) { finished = true; originalDone(result); return; }
+    let left = pending.length;
+    const finish = () => { if (!finished) { finished = true; clearTimeout(timer); originalDone(result); } };
+    const timer = setTimeout(finish, 950);
+    for (const plan of pending) {
+      remember(plan.key, {savedAt: Date.now()});
+      const headers = {"Content-Type": "application/json"};
+      if (/^[\w-]{32,128}$/.test(plan.token) && plan.token !== "paste-token-here") headers.Authorization = `Bearer ${plan.token}`;
+      function submit() {
+        if (finished) return;
+        try {
+          $httpClient.post({url: plan.url, headers, body: JSON.stringify(plan.payload), timeout: 0.9}, (error, response, body) => {
+          if (finished) return;
+          if (!error && Number(response?.status ?? response?.statusCode) === 202) {
+            try {
+              const data = JSON.parse(body);
+              if (/^[a-f0-9]{64}$/.test(data.jobId || "")) remember(plan.key, {jobId: data.jobId, savedAt: Date.now()});
+            } catch (_) {}
+          }
+          if (options.debug) console.log(`YouTube ${plan.kind} prewarm: ${error ? "unavailable" : response?.status ?? response?.statusCode}`);
+          if (!--left) finish();
+          });
+        } catch (_) { if (!--left) finish(); }
+      }
+      if (plan.kind !== "caption" || typeof $httpClient.get !== "function") { submit(); continue; }
+      // A bounded local source fetch also handles URLs that cannot be fetched from Cloudflare's IP.
+      // Only subtitle text is uploaded; no YouTube cookies or authorization headers leave the device.
+      let sourceSettled = false;
+      const sourceTimer = setTimeout(() => { if (!sourceSettled) { sourceSettled = true; submit(); } }, 300);
+      try {
+        const sourceHeaders = {Accept: "text/xml"};
+        const agent = $request?.headers?.["User-Agent"] || $request?.headers?.["user-agent"];
+        if (agent) sourceHeaders["User-Agent"] = agent;
+        const sourceUrl = plan.payload.url.replace(/([?&])fmt=[^&#]*&?/g, "$1").replace(/[?&]$/, "") + "&fmt=srv3";
+        $httpClient.get({url: sourceUrl, headers: sourceHeaders, timeout: 0.3}, (error, response, body) => {
+          if (sourceSettled || finished) return;
+          sourceSettled = true; clearTimeout(sourceTimer);
+          if (!error && Number(response?.status ?? response?.statusCode) === 200 && typeof body === "string"
+            && body.length <= 350000 && /<timedtext\b/.test(body)) plan.payload.body = body;
+          submit();
+        });
+      } catch (_) { sourceSettled = true; clearTimeout(sourceTimer); submit(); }
+    }
+  };
+})();
+
+// END YOUTUBE PREWARM BOOTSTRAP
 // Build: 2026/8/28 kewachan post-play More videos ad fix
 // Advertisement learning caches are versioned, bounded, and scoped by endpoint
 // in the generated bundle below so one response type cannot poison another.
@@ -63,7 +219,7 @@
 function Wi(l){let e=l?.playabilityStatus;if(!e)return;e.pictureInPictureRender=me.create({pictureInPictureAbility:{active:!0,f4:0,f6:0,f8:1}}),e.backgroundPlayerRender=ge.create({backgroundAbility:{active:!0}})}
 function ce(l,e,t){let n=l!=null&&typeof l=="object"?[l]:[];for(;n.length;){let i=n.pop();for(let r of Object.keys(i)){if(r===e&&t(i))return;i[r]!=null&&typeof i[r]=="object"&&n.push(i[r])}}}var Ni={de:"Deutsch",ru:"\u0420\u0443\u0441\u0441\u043A\u0438\u0439",fr:"Fran\xE7ais",fil:"Filipino",ko:"\uD55C\uAD6D\uC5B4",ja:"\u65E5\u672C\u8A9E",en:"English",vi:"Ti\u1EBFng Vi\u1EC7t","zh-Hant":"\u4E2D\u6587\uFF08\u7E41\u9AD4\uFF09","zh-Hans":"\u4E2D\u6587\uFF08\u7B80\u4F53\uFF09",und:"@VirgilClyne"};
 function Si(l,e){e!=="off"&&ce(l,"captionTracks",t=>{let n=t.captionTracks,i=t.audioTracks;if(Array.isArray(n)&&n.length){let r={[e]:2,en:1},c=-1,o=0;for(let s=0;s<n.length;s++){let a=n[s],u=r[a.languageCode];u&&u>c&&(c=u,o=s),a.isTranslatable=!0}let s=c===2?o:-1;if(s<0&&typeof n[o]?.baseUrl==="string"){let a=be.create({baseUrl:n[o].baseUrl+`&tlang=${e}`,name:{runs:[{text:`Enhance (${e})`}]},vssId:`.${e}`,languageCode:e});n.push(a),s=n.length-1}if(Array.isArray(i)&&s>=0){for(let a of i)Array.isArray(a.captionTrackIndices)||(a.captionTrackIndices=[]),a.captionTrackIndices.includes(s)||a.captionTrackIndices.push(s),delete a.defaultCaptionTrackIndex,delete a.forcedCaptionTrackIndex,a.hasDefaultTrack=!1,a.hasForcedTrack=!1,a.captionsInitialState=2;delete t.defaultCaptionTrackIndex}}return t.translationLanguages=Object.entries(Ni).map(([r,c])=>ke.create({languageCode:r,languageName:{runs:[{text:c}]}})),!0})}
-function Rr(l,e){xi(l),Wi(l),Si(l,e)}function ei(l){if(l.length<1e3)return!1;let e=[112,97,103,101,97,100],t=l.length,n=e.length,i=new Int32Array(256).fill(n+1);for(let c=0;c<n;c++)i[e[c]]=n-c;let r=0;for(;r<=t-n;){if(l[r]===e[0]&&l[r+1]===e[1]&&l[r+2]===e[2]&&l[r+3]===e[3]&&l[r+4]===e[4]&&l[r+5]===e[5])return!0;r+=i[l[r+n]]||n+1}return!1}function Oi(l){return l?d.list(l)?.some(t=>ei(t.data))??!1:!1}function Pi(l,e){let t=l.no;if(e.whiteNo.includes(t))return!1;if(e.blackNo.includes(t))return!0;let n=ei(l.data);return n?e.blackNo.push(t):e.whiteNo.push(t),e.dirty=!0,n}function Ui(l,e){let t=!1;return ce(l,"renderInfo",n=>{let i=n.renderInfo?.layoutRender?.eml?.split("|")?.[0]??"";if(e.whiteEml.includes(i))t=!1;else if(e.blackEml.includes(i)||/shorts(?!_pivot_item)/.test(i))t=!0;else{let r=n?.videoInfo?.videoContext?.videoContent;r&&(t=Oi(r),t?e.blackEml.push(i):e.whiteEml.push(i),e.dirty=!0)}return!0}),t}function Ei(l,e){let t=d.list(l)[0];return t?Pi(t,e):Ui(l,e)}function wr(l,e){let t=!1;return ce(l,"richItemContents",n=>{let i=n.richItemContents;if(!Array.isArray(i))return!1;for(let r=i.length-1;r>=0;r--)Ei(i[r],e)&&(i.splice(r,1),t=!0)}),t}function Br(l,{state:e}){return{bodyChanged:wr(l,e.adCache),stateChanged:e.adCache.dirty}}function Fi(l,{params:e}){return Rr(l,e.captionLang),{bodyChanged:!0,stateChanged:!1}}function Li(l){let e=!1,t=l.entries?.length??0;for(let n=t-1;n>=0;n--)l.entries[n].command?.reelWatchEndpoint?.overlay||(l.entries.splice(n,1),e=!0);return{bodyChanged:e,stateChanged:!1}}
+function Rr(l,e){globalThis.YouTubePrewarm?.capture(l,Vi(),d.list(l));xi(l),Wi(l),Si(l,e)}function ei(l){if(l.length<1e3)return!1;let e=[112,97,103,101,97,100],t=l.length,n=e.length,i=new Int32Array(256).fill(n+1);for(let c=0;c<n;c++)i[e[c]]=n-c;let r=0;for(;r<=t-n;){if(l[r]===e[0]&&l[r+1]===e[1]&&l[r+2]===e[2]&&l[r+3]===e[3]&&l[r+4]===e[4]&&l[r+5]===e[5])return!0;r+=i[l[r+n]]||n+1}return!1}function Oi(l){return l?d.list(l)?.some(t=>ei(t.data))??!1:!1}function Pi(l,e){let t=l.no;if(e.whiteNo.includes(t))return!1;if(e.blackNo.includes(t))return!0;let n=ei(l.data);return n?e.blackNo.push(t):e.whiteNo.push(t),e.dirty=!0,n}function Ui(l,e){let t=!1;return ce(l,"renderInfo",n=>{let i=n.renderInfo?.layoutRender?.eml?.split("|")?.[0]??"";if(e.whiteEml.includes(i))t=!1;else if(e.blackEml.includes(i)||/shorts(?!_pivot_item)/.test(i))t=!0;else{let r=n?.videoInfo?.videoContext?.videoContent;r&&(t=Oi(r),t?e.blackEml.push(i):e.whiteEml.push(i),e.dirty=!0)}return!0}),t}function Ei(l,e){let t=d.list(l)[0];return t?Pi(t,e):Ui(l,e)}function wr(l,e){let t=!1;return ce(l,"richItemContents",n=>{let i=n.richItemContents;if(!Array.isArray(i))return!1;for(let r=i.length-1;r>=0;r--)Ei(i[r],e)&&(i.splice(r,1),t=!0)}),t}function Br(l,{state:e}){return{bodyChanged:wr(l,e.adCache),stateChanged:e.adCache.dirty}}function Fi(l,{params:e}){return Rr(l,e.captionLang),{bodyChanged:!0,stateChanged:!1}}function Li(l){let e=!1,t=l.entries?.length??0;for(let n=t-1;n>=0;n--)l.entries[n].command?.reelWatchEndpoint?.overlay||(l.entries.splice(n,1),e=!0);return{bodyChanged:e,stateChanged:!1}}
 function Ai(l,{params:e}){let t=["SPunlimited"];e.blockUpload&&t.push("FEuploads"),e.blockImmersive&&t.push("FEmusic_immersive"),e.blockShorts&&t.push("FEshorts");let n=!1;return ce(l,"rendererItems",i=>{let r=i.rendererItems;if(!Array.isArray(r))return!1;for(let c=r.length-1;c>=0;c--){let o=r[c]?.iconRender?.browseId??r[c]?.labelRender?.browseId;o&&t.includes(o)&&(r.splice(c,1),n=!0)}return!1}),{bodyChanged:n,stateChanged:!1}}
 function Di(l){if(!l||typeof l!=="object")return{bodyChanged:!1,stateChanged:!1};let t=Array.isArray(l.settingItems)?l.settingItems:l.settingItems=[];return ce(t,"categoryId",e=>{if(e.categoryId===10135){Array.isArray(e.subSettings)||(e.subSettings=[]),e.subSettings.push(Re.create({settingBooleanRenderer:{itemId:0,enableServiceEndpoint:{setClientSettingEndpoint:{settingData:{clientSettingEnum:{item:151},boolValue:!0}}},disableServiceEndpoint:{setClientSettingEndpoint:{settingData:{clientSettingEnum:{item:151},boolValue:!1}}}}}))}}),t.push(_.create({backgroundPlayBackSettingRenderer:{backgroundPlayback:!0,download:!0,downloadQualitySelection:!0,smartDownload:!0,icon:{iconType:1093}}})),{bodyChanged:!0,stateChanged:!1}}
 function $i(l,{params:e,state:t}){for(let n of l.contents)n.player&&Rr(n.player,e.captionLang),n.next&&wr(n.next,t.adCache);return{bodyChanged:l.contents.length>0,stateChanged:t.adCache.dirty}}function ti(l,{state:e,platformKey:t}){let n=l.responseContext?.globalConfigGroup?.hotConfigGroup?.mediaHotConfig?.onesieHotConfig;if(!n)return{bodyChanged:!1,stateChanged:!1};let i=n.clientKey,r=n.encryptKey;if(!i?.length||!r?.length)return console.log("\u5F02\u5E38\uFF1AhotConfig \u672A\u5305\u542B\u5B8C\u6574\u7684 onesie key"),{bodyChanged:!1,stateChanged:!1};let c=Q(i),o=Q(r),s=e.config[t];return s?.clientKey===c&&s?.encryptKey===o?{bodyChanged:!1,stateChanged:!1}:(e.config[t]={clientKey:c,encryptKey:o},{bodyChanged:!1,stateChanged:!0})}var ji=[{path:"browse",msgType:Jr,handler:Br},{path:"next",msgType:re,handler:Br},{path:"player",msgType:oe,handler:Fi},{path:"search",msgType:Xr,handler:Br},{path:"reel_watch_sequence",msgType:qr,handler:Li},{path:"guide",msgType:Yr,handler:Ai},{path:"get_setting",msgType:zr,handler:Di},{path:"get_watch",msgType:Zr,handler:$i},{path:"config",msgType:gr,handler:ti},{path:"log_event",msgType:gr,handler:ti}];

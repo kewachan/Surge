@@ -8,5 +8,15 @@
   },
   "ai": {
     "binding": "AI"
+  },
+  "queues": {
+    "producers": [{"binding": "LYRICS_QUEUE", "queue": "youtube-lyrics-translate"}],
+    "consumers": [{"queue": "youtube-lyrics-translate", "max_batch_size": 3, "max_batch_timeout": 1, "max_retries": 5, "max_concurrency": 2}]
+  },
+  "durable_objects": {
+    "bindings": [{"name": "LYRICS_PREWARM", "class_name": "LyricsPrewarm"}]
+  },
+  "exports": {
+    "LyricsPrewarm": {"type": "durable-object", "storage": "sqlite"}
   }
 }

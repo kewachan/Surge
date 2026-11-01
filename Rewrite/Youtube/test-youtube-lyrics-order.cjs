@@ -2,6 +2,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+function inlinePrewarm(source) {
+  const shared = fs.readFileSync(path.join(__dirname, "youtube.prewarm.shared.js"), "utf8").replace(/^export /gm, "");
+  return source.replace(/^import \{[^\n]+\} from "\.\/youtube\.prewarm\.shared\.js";$/m, shared);
+}
+
 
 const clientSource = fs.readFileSync(path.join(__dirname, "youtube.lyrics.js"), "utf8");
 const token = "a".repeat(64); // Synthetic test credential, never sent to a live service.
@@ -115,7 +120,7 @@ async function verifyClient() {
 }
 
 async function verifyWorker() {
-  const source = fs.readFileSync(path.join(__dirname, "youtube.lyrics.worker.js"), "utf8");
+  const source = inlinePrewarm(fs.readFileSync(path.join(__dirname, "youtube.lyrics.worker.js"), "utf8"));
   const worker = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
   const values = new Map();
   const originalCaches = globalThis.caches;
