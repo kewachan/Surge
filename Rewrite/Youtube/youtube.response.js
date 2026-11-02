@@ -8,6 +8,10 @@
   } catch (_) {}
   const plans = [];
   const INDEX = "YouTubeTranslation.PrewarmIndex.v1";
+  const PENDING = "YouTubeTranslation.PrewarmPending.v1";
+  const LEASE = "YouTubeTranslation.PrewarmLease.v1";
+  const background = typeof $request === "undefined";
+  const runId = `${Date.now()}:${Math.random()}`;
   const originalDone = $done;
   let finished = false;
 
@@ -173,12 +177,57 @@
       if (wrote) { try { $persistentStore.write(null, key); } catch (_) {} }
     }
   }
-  function recent(key) {
+  function recent(key, confirmedOnly = false) {
     try {
       const saved = JSON.parse($persistentStore.read(key) || "null");
+      if (confirmedOnly && !(saved?.jobId && saved.confirmed !== false)) return false;
       const interval = key.startsWith("YouTubeLyrics.") ? 60000 : 600000;
       return saved && Date.now() - saved.savedAt < (saved.jobId && saved.confirmed !== false ? interval : 15000);
     } catch (_) { return false; }
+  }
+  function pendingPlans(checkOptions = true) {
+    try {
+      const saved = JSON.parse($persistentStore.read(PENDING) || "[]");
+      if (!Array.isArray(saved)) return [];
+      return saved.filter(plan => {
+        if (!plan || typeof plan.id !== "string" || !Number.isFinite(plan.queuedAt)
+          || plan.queuedAt > Date.now() || Date.now() - plan.queuedAt >= 300000) return false;
+        const target = language(checkOptions ? (plan.kind === "caption" ? options.captionLang : options.lyricsLang) : plan.payload?.target);
+        if (!target || (checkOptions && (options.prewarm === false || options.prewarm === "false"))) return false;
+        return plan.kind === "caption"
+          ? /^YouTubeCaption\.Prewarm\.v1\./.test(plan.key || "") && plan.payload?.target === captionTarget(target)
+            && /^https:\/\/www\.youtube\.com\/api\/timedtext\?/.test(plan.payload?.url || "") && plan.payload.url.length <= 12000
+          : plan.kind === "lyrics" && /^YouTubeLyrics\.Prewarm\.v1\./.test(plan.key || "")
+            && plan.payload?.target === target && /^[\w-]{11}$/.test(plan.payload?.videoId || "")
+            && (!checkOptions || /^[a-f0-9]{64}$/i.test(String(options.lyricsToken || "").trim()));
+      }).slice(-8).map(plan => ({id: plan.id, queuedAt: plan.queuedAt, key: plan.key, kind: plan.kind,
+        payload: plan.kind === "caption" ? {url: plan.payload.url, target: plan.payload.target}
+          : {videoId: plan.payload.videoId, target: plan.payload.target}}));
+    } catch (_) { return []; }
+  }
+  function savePending(plans) {
+    try { return $persistentStore.write(plans.length ? JSON.stringify(plans.slice(-8)) : null, PENDING) !== false; }
+    catch (_) { return false; }
+  }
+  function removePending(plan) {
+    savePending(pendingPlans(false).filter(item => item.id !== plan.id));
+  }
+  function queuePlans(plans) {
+    if (!plans.length) return;
+    const queued = pendingPlans(false);
+    for (const plan of plans) {
+      if (queued.some(item => item.key === plan.key)) continue;
+      queued.push({id: `${runId}:${queued.length}`, queuedAt: Date.now(), key: plan.key, kind: plan.kind,
+        payload: plan.kind === "caption" ? {url: plan.payload.url, target: plan.payload.target}
+          : {videoId: plan.payload.videoId, target: plan.payload.target}});
+    }
+    if (!savePending(queued)) return;
+    if (options.debug) console.log(`YouTube prewarm: queued ${Math.min(8, queued.length)} background jobs`);
+    // Invocation has its own script session. A minute cron retries retained jobs
+    // if the API kick is unavailable; playback never waits for either one.
+    try {
+      if (typeof $httpAPI === "function") $httpAPI("POST", "v1/scripting/cron/evaluate", {script_name: "youtube.prewarm.background"}, () => {});
+    } catch (_) {}
   }
   function detailsVideoId(fields) {
     const data = fields?.find((field) => field.no === 11 && field.wireType === 2)?.data;
@@ -234,8 +283,12 @@
     && Boolean(language(options.captionLang) || (language(options.lyricsLang) && /^[a-f0-9]{64}$/i.test(String(options.lyricsToken || "").trim())))};
   $done = (result) => {
     if (finished) return;
-    const pending = plans.filter((plan) => !recent(plan.key));
-    const budget = Math.max(0, Math.min(950, (globalThis.YouTubePrewarm.deadline || Infinity) - Date.now()));
+    const pending = plans.filter((plan) => !recent(plan.key, background));
+    if (!background) {
+      if ((globalThis.YouTubePrewarm.deadline || Infinity) > Date.now()) queuePlans(pending);
+      finished = true; originalDone(result); return;
+    }
+    const budget = 5000;
     if (!pending.length || budget < 100) { finished = true; originalDone(result); return; }
     let left = pending.length;
     const trace = (plan, state) => { if (options.debug) console.log(`YouTube ${plan.kind} prewarm: ${state}`); };
@@ -243,6 +296,10 @@
       if (finished) return;
       finished = true; clearTimeout(timer);
       for (const plan of pending) if (plan.waiting) trace(plan, "submitted-unconfirmed");
+      try {
+        const lease = JSON.parse($persistentStore.read(LEASE) || "null");
+        if (lease?.owner === runId) $persistentStore.write(null, LEASE);
+      } catch (_) {}
       originalDone(result);
     };
     const timer = setTimeout(finish, budget);
@@ -262,7 +319,7 @@
         remember(plan.key, record);
         plan.waiting = true;
         try {
-          $httpClient.post({url: plan.url, headers, body: JSON.stringify(plan.payload), timeout: 0.9}, (error, response, body) => {
+          $httpClient.post({url: plan.url, headers, body: JSON.stringify(plan.payload), timeout: 3}, (error, response, body) => {
           if (finished) return;
           plan.waiting = false;
           let accepted = false;
@@ -271,6 +328,7 @@
               const data = JSON.parse(body);
               if (/^[a-f0-9]{64}$/.test(data.jobId || "")) {
                 remember(plan.key, {...record, jobId: data.jobId, confirmed: true}); accepted = true;
+                removePending(plan);
               }
             } catch (_) {}
           }
@@ -292,7 +350,8 @@
       const sourceTimer = setTimeout(() => { if (!sourceSettled) { sourceSettled = true; submit(); } }, 300);
       try {
         const sourceHeaders = {Accept: "text/xml"};
-        const agent = $request?.headers?.["User-Agent"] || $request?.headers?.["user-agent"];
+        const requestHeaders = typeof $request === "object" ? $request?.headers : null;
+        const agent = requestHeaders?.["User-Agent"] || requestHeaders?.["user-agent"];
         if (agent) sourceHeaders["User-Agent"] = agent;
         const sourceUrl = plan.payload.url.replace(/([?&])fmt=[^&#]*&?/g, "$1").replace(/[?&]$/, "") + "&fmt=srv3";
         $httpClient.get({url: sourceUrl, headers: sourceHeaders, timeout: 0.3}, (error, response, body) => {
@@ -305,6 +364,28 @@
       } catch (_) { sourceSettled = true; clearTimeout(sourceTimer); submit(); }
     }
   };
+  if (background) {
+    const queued = pendingPlans().filter(plan => !recent(plan.key, true));
+    if (!queued.length) {
+      const remaining = options.prewarm === false || options.prewarm === "false" ? []
+        : pendingPlans(false).filter(plan => !recent(plan.key, true));
+      if ($persistentStore.read(PENDING) !== null) savePending(remaining);
+      finished = true; originalDone({}); return;
+    }
+    let lease;
+    try { lease = JSON.parse($persistentStore.read(LEASE) || "null"); } catch (_) {}
+    try {
+      if (Number.isFinite(lease?.until) && lease.until > Date.now() && lease.until <= Date.now() + 8000) {
+        finished = true; originalDone({}); return;
+      }
+      if ($persistentStore.write(JSON.stringify({owner: runId, until: Date.now() + 8000}), LEASE) === false) throw Error("lease unavailable");
+    } catch (_) { finished = true; originalDone({}); return; }
+    plans.push(...queued.map(plan => ({...plan,
+      url: plan.kind === "caption" ? "https://youtube-caption-translate.hmtw47cv7m.workers.dev/caption/prewarm"
+        : "https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/lyrics/prewarm",
+      token: String(plan.kind === "caption" ? options.captionToken : options.lyricsToken).trim()})));
+    $done({});
+  }
 })();
 
 // END YOUTUBE PREWARM BOOTSTRAP

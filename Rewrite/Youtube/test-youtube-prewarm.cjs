@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const {test} = require("node:test");
+const {run: nativeRun} = require("../../Tools/Testing/surge-harness.cjs");
 const directory = __dirname;
 const token = "a".repeat(64);
 const authorization = {Authorization: `Bearer ${token}`};
@@ -278,7 +279,7 @@ test("HTTP-edge lyric source acquisition survives a Queue origin that cannot ret
 });
 
 function bootstrap(options = {}) {
-  const store = options.store || new Map(), calls = [], outputs = [], logs = [];
+  const store = options.store || new Map(), calls = [], outputs = [], backgroundOutputs = [], apiCalls = [], logs = [];
   const context = {console: {log(text) { logs.push(text); }}, setTimeout, clearTimeout, $argument: JSON.stringify({captionLang: "zh-Hant", captionToken: token,
     lyricsLang: "zh-Hant", lyricsToken: token, ...options.settings}),
     $persistentStore: {read: (key) => store.get(key) ?? null, write: (value, key) => {value === null ? store.delete(key) : store.set(key, value); return true;}},
@@ -288,8 +289,16 @@ function bootstrap(options = {}) {
       calls.push(request); if (options.fail) callback("timeout"); else if (!options.hang) callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)}));
     }},
     $done: (output) => outputs.push(output)};
-  vm.runInNewContext(fs.readFileSync(path.join(directory, "youtube.prewarm.client.js"), "utf8"), context);
-  return {store, calls, outputs, logs, context};
+  const source = fs.readFileSync(path.join(directory, "youtube.prewarm.client.js"), "utf8");
+  context.$httpAPI = (method, endpoint, body, callback) => {
+    apiCalls.push({method, endpoint, body});
+    if (options.noKick) return;
+    const child = {...context, $request: undefined, $response: undefined,
+      $done: (output) => { backgroundOutputs.push(output); callback({}); }};
+    vm.runInNewContext(source, child);
+  };
+  vm.runInNewContext(source, context);
+  return {store, calls, outputs, backgroundOutputs, apiCalls, logs, context};
 }
 test("captions Off UI still prewarms the configured Enhance language; Music starts AI only with a token", async () => {
   const run = bootstrap();
@@ -304,13 +313,130 @@ test("captions Off UI still prewarms the configured Enhance language; Music star
   noAI.context.YouTubePrewarm.capture({playbackTracking: {url: {baseUrl: "https://s.youtube.com/api/stats/watchtime?docid=abcdefghijk&x=1"}}}, true);
   noAI.context.$done(output); assert.equal(noAI.calls.length, 0);
 });
-test("hung prewarm submission releases the unchanged player within its 950ms cap; late callbacks cannot finish twice", async () => {
+test("hung background submission cannot hold playback or complete the player twice", async () => {
   const run = bootstrap({hang: true});
   run.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false);
   const started = Date.now(), output = {body: "play immediately"}; run.context.$done(output);
-  await new Promise((resolve) => setTimeout(resolve, 1050));
-  assert.equal(run.outputs.length, 1); assert.equal(run.outputs[0], output); assert(Date.now() - started < 1300);
+  assert.equal(run.outputs.length, 1); assert.equal(run.outputs[0], output); assert(Date.now() - started < 100);
   run.context.$done({}); assert.equal(run.outputs.length, 1);
+});
+
+const pendingKey = "YouTubeTranslation.PrewarmPending.v1", leaseKey = "YouTubeTranslation.PrewarmLease.v1";
+const backgroundArgs = {captionLang: "off", lyricsLang: "zh-Hant", lyricsToken: token, prewarm: true};
+function queuedLyrics(options = {}) {
+  const boot = bootstrap({noKick: true, settings: backgroundArgs, ...options});
+  boot.context.YouTubePrewarm.capture({videoId: "abcdefghijk"}, true);
+  const output = {body: "unchanged audio"}; boot.context.$done(output);
+  assert.equal(boot.outputs[0], output); assert.equal(boot.calls.length, 0);
+  return boot;
+}
+function runBackground(store, options = {}) {
+  return nativeRun("Rewrite/Youtube/youtube.prewarm.client.js", {store, now: Date.now(),
+    globals: {$request: undefined}, argument: JSON.stringify(backgroundArgs), ...options});
+}
+test("a lost API kick leaves a credential-free durable job for cron, without delaying playback", async () => {
+  const boot = queuedLyrics();
+  assert.equal(boot.apiCalls.length, 1); assert.equal(boot.apiCalls[0].endpoint, "v1/scripting/cron/evaluate");
+  assert.equal(boot.apiCalls[0].body.script_name, "youtube.prewarm.background");
+  assert(!boot.store.get(pendingKey).includes(token));
+  const background = await runBackground(boot.store, {http: (_method, req) => {
+    if (req.url.includes("/next?")) return {delay: 200, body: '{"browseEndpoint":{"browseId":"MPLYtest"}}'};
+    if (req.url.includes("/browse?")) return {delay: 200, body: '{"musicDescriptionShelfRenderer":{"description":{"simpleText":"Device verse"}}}'};
+    assert.equal(req.timeout, 3); assert.equal(JSON.parse(req.body).sourceLines[0], "Device verse");
+    return {delay: 1200, status: 202, body: JSON.stringify({jobId: "b".repeat(64)})};
+  }});
+  assert.equal(background.elapsed, 1600, "background must accept an ACK beyond the former 900ms limit");
+  assert.equal(background.done.length, 1);
+  assert.equal(JSON.parse(boot.store.get("YouTubeLyrics.Prewarm.v1.abcdefghijk.zh-Hant")).confirmed, true);
+  assert(!boot.store.has(pendingKey)); assert(!boot.store.has(leaseKey));
+});
+test("background failures retain work, active leases prevent duplicates, and disabling prewarm clears pending work", async () => {
+  const boot = queuedLyrics(), started = Date.now();
+  boot.store.set(leaseKey, JSON.stringify({owner: "other", until: started + 7000}));
+  const blocked = await runBackground(boot.store, {now: started});
+  assert.equal(blocked.requests.length, 0); assert(boot.store.has(pendingKey));
+  boot.store.delete(leaseKey);
+  const failure = await runBackground(boot.store, {http: (_method, req) => req.url.includes("workers.dev")
+    ? {error: "timeout"} : {body: "{}"}});
+  assert.equal(failure.requests.length, 2); assert(boot.store.has(pendingKey)); assert(!boot.store.has(leaseKey));
+  const disabled = await runBackground(boot.store, {argument: JSON.stringify({...backgroundArgs, prewarm: false})});
+  assert.equal(disabled.requests.length, 0); assert(!boot.store.has(pendingKey));
+  const empty = await runBackground(boot.store);
+  assert.equal(empty.requests.length, 0); assert.equal(empty.writes.length, 0);
+});
+test("an accepted background job cannot delete newly queued work and storage errors cannot stall the player", async () => {
+  const boot = queuedLyrics(); let newId;
+  await runBackground(boot.store, {http: (_method, req) => {
+    if (!req.url.includes("workers.dev")) return {body: "{}"};
+    const pending = JSON.parse(boot.store.get(pendingKey));
+    const next = {...pending[0], id: "new-generation", key: "YouTubeLyrics.Prewarm.v1.abcdefghijl.ja",
+      payload: {videoId: "abcdefghijl", target: "ja"}};
+    newId = next.id; boot.store.set(pendingKey, JSON.stringify([...pending, next]));
+    return {status: 202, body: JSON.stringify({jobId: "b".repeat(64)})};
+  }});
+  assert.deepEqual(JSON.parse(boot.store.get(pendingKey)).map(plan => plan.id), [newId]);
+  const oldArguments = await runBackground(boot.store);
+  assert.equal(oldArguments.requests.length, 0);
+  assert.equal(JSON.parse(boot.store.get(pendingKey))[0].payload.target, "ja", "old arguments must not discard a newly selected language");
+  const fail = bootstrap({noKick: true, settings: backgroundArgs});
+  fail.context.$persistentStore.write = () => false;
+  fail.context.YouTubePrewarm.capture({videoId: "abcdefghijk"}, true); fail.context.$done({body: "audio"});
+  assert.equal(fail.outputs[0].body, "audio"); assert.equal(fail.apiCalls.length, 0); assert.equal(fail.calls.length, 0);
+});
+test("pending work is bounded and stale or malformed records cannot cause background requests", async () => {
+  const store = new Map();
+  for (let index = 0; index < 12; index++) {
+    const boot = bootstrap({noKick: true, store, settings: backgroundArgs});
+    boot.context.YouTubePrewarm.capture({videoId: `abcdefghij${index.toString(16)}`}, true);
+    boot.context.$done({});
+  }
+  const pending = JSON.parse(store.get(pendingKey)); assert.equal(pending.length, 8);
+  assert(pending.every(item => !Object.hasOwn(item, "token")));
+  const base = Date.now();
+  store.set(pendingKey, JSON.stringify([
+    {...pending[0], queuedAt: base - 300001}, {...pending[0], queuedAt: base + 10000},
+    {...pending[0], kind: "unknown"}, {...pending[0], key: "private-setting"}]));
+  const invalid = await runBackground(store, {now: base});
+  assert.equal(invalid.requests.length, 0); assert(!store.has(pendingKey));
+  store.set("private-setting", "keep"); store.set(pendingKey, "invalid JSON");
+  const malformed = await runBackground(store);
+  assert.equal(malformed.requests.length, 0); assert.equal(store.get("private-setting"), "keep");
+});
+test("private pwfail sources queue independently of audio and accept delayed Worker ACKs", {skip: !process.env.PREWARM_FAILURE_HAR_PATH}, async () => {
+  const entries = JSON.parse(fs.readFileSync(process.env.PREWARM_FAILURE_HAR_PATH, "utf8")).log.entries;
+  const decode = data => data.encoding === "base64" ? Buffer.from(data.text, "base64").toString("utf8") : data.text;
+  let songs = 0, supplied = 0, empty = 0;
+  for (const entry of entries) {
+    const url = new URL(entry.request.url);
+    if (url.hostname !== "youtube-lyrics-translate.hmtw47cv7m.workers.dev" || url.pathname !== "/lyrics/prewarm") continue;
+    const payload = JSON.parse(decode(entry.request.postData));
+    const sources = entries.filter(item => new URL(item.request.url).hostname === "music.youtube.com");
+    const next = sources.find(item => new URL(item.request.url).pathname.endsWith("/next")
+      && JSON.parse(decode(item.request.postData)).videoId === payload.videoId);
+    const browse = sources.find(item => new URL(item.request.url).pathname.endsWith("/browse")
+      && JSON.parse(decode(item.request.postData)).browseId === payload.browseId);
+    assert(next && browse, "fixture must include the phone's public source requests");
+    const boot = bootstrap({noKick: true, settings: backgroundArgs});
+    boot.context.YouTubePrewarm.capture({videoId: payload.videoId}, true);
+    boot.context.$done({body: "audio"});
+    assert.equal(boot.outputs[0].body, "audio"); assert.equal(boot.calls.length, 0);
+    const result = await runBackground(boot.store, {http: (_method, req) => {
+      if (req.url.includes("workers.dev")) {
+        const submitted = JSON.parse(req.body);
+        assert.equal(submitted.browseId, payload.browseId);
+        assert.equal(submitted.sourceLines?.length || 0, payload.sourceLines?.length || 0);
+        if (submitted.sourceLines?.length) supplied++; else empty++;
+        return {delay: 1200, status: 202, body: JSON.stringify({jobId: "b".repeat(64)})};
+      }
+      assert.equal(req.headers.Authorization, undefined); assert.equal(req.headers.Cookie, undefined);
+      const source = req.url.includes("/next?") ? next : browse;
+      return {delay: Math.round(source.time), status: source.response.status, body: decode(source.response.content)};
+    }});
+    assert.equal(result.done.length, 1); assert(!boot.store.has(pendingKey));
+    assert.equal(JSON.parse(boot.store.get(`YouTubeLyrics.Prewarm.v1.${payload.videoId}.zh-Hant`)).confirmed, true);
+    songs++;
+  }
+  assert.equal(songs, 6); assert.equal(supplied, 4); assert.equal(empty, 2);
 });
 test("a fast local subtitle prefetch uploads only XML and never the YouTube account headers", async () => {
   const run = bootstrap();

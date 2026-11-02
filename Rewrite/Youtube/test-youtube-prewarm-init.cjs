@@ -79,6 +79,11 @@ async function client(input, key, options = {}) {
     },
     $done(output) { count++; resolve(output); }
   };
+  context.$httpAPI = (_method, _path, _body, callback) => {
+    if (options.noKick) return;
+    const child = {...context, $request: undefined, $response: undefined, $done() { callback({}); }};
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "youtube.prewarm.client.js"), "utf8"), child);
+  };
   const source = fs.readFileSync(path.join(__dirname, "youtube.init.response.js"), "utf8");
   vm.runInNewContext(source, context, {filename: "youtube.init.response.js"});
   let guard;
@@ -122,6 +127,15 @@ test("native encrypted long-video startup queues original captions and lyrics wi
   assert.equal(JSON.parse(caption.body).url, sourceUrl);
   assert(run.calls.some((call) => call.url.endsWith("/lyrics/prewarm")));
 });
+test("encrypted audio is returned before the background script or its API callback runs", async () => {
+  const f = fixture({captions: true}), run = await client(f.input, f.key, {noKick: true});
+  assert(run.output.body);
+  assert.equal(run.calls.filter(call => /\/(?:caption|lyrics)\/prewarm$/.test(call.url)).length, 0);
+  const pending = JSON.parse(run.store.get("YouTubeTranslation.PrewarmPending.v1"));
+  assert.equal(pending.length, 2);
+  assert(!JSON.stringify(pending).includes(token));
+  assert.equal(Buffer.from(worker.__test.parseUmp(new Uint8Array(run.output.body)).at(-1).data).toString(), "audio-unchanged");
+});
 test("disabled prewarm, malformed hints and an exhausted playback deadline keep playback intact without jobs", async () => {
   const f = fixture({captions: true});
   for (const options of [{settings: {prewarm: false}}, {badHint: true}, {expired: true}]) {
@@ -134,7 +148,11 @@ test("disabled prewarm, malformed hints and an exhausted playback deadline keep 
 test("module passes prewarm languages, tokens and the switch to the encrypted Music response handler", () => {
   const line = fs.readFileSync(path.join(__dirname, "YouTube.Enhance.sgmodule"), "utf8").split("\n").find((line) => line.startsWith("youtube.init_playback.response ="));
   for (const setting of ["captionLang", "captionToken", "lyricsLang", "lyricsToken", "prewarm"]) assert(line.includes(`"${setting}"`));
-  assert(line.includes("youtube.init.response.js?v=20261103-1"));
+  assert(line.includes("youtube.init.response.js?v=20261103-2"));
+  const background = fs.readFileSync(path.join(__dirname, "YouTube.Enhance.sgmodule"), "utf8").split("\n")
+    .find(line => line.startsWith("youtube.prewarm.background ="));
+  assert(background.includes('type=cron,cronexp="* * * * *",wake-system=false,timeout=8,engine=webview'));
+  for (const setting of ["captionLang", "captionToken", "lyricsLang", "lyricsToken", "prewarm"]) assert(background.includes(`"${setting}"`));
 });
 test("private HAR encrypted-only startup replay submits the missing jobs before the lyric/caption panels", {skip: !process.env.PREWARM_HAR_PATH}, async () => {
   const entries = JSON.parse(fs.readFileSync(process.env.PREWARM_HAR_PATH, "utf8")).log.entries;
