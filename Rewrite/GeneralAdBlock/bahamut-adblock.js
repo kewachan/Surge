@@ -1,232 +1,216 @@
-// Token requests start validation; playback waits only for the remaining interval.
-(function () {
-  "use strict";
-  const WAIT_MS = 25000;
-  const TTL_MS = 120000;
-  const HTTP_TIMEOUT_SECONDS = 3;
-  const KEY = "bahamut_ad_prewarm_v3";
-  const url = $request.url || "";
-  const budget = /\/token\.php(?:\?|$)/.test(url) ? 4000 : 36000;
-  const owner = `${Date.now()}:${Math.random()}`;
-  const deadline = Date.now() + budget;
-  let completed = false;
-  const timer = setTimeout(() => {
-    clearOwnedState();
-    console.log("[BahamutAnimeAds] Validation time budget exhausted; original response kept");
-    finish({});
-  }, budget);
+/**
+ * Bahamut Anime ad bypass for Surge.
+ *
+ * Bahamut validates the ad viewing interval server-side. Start that interval
+ * on the detail-page token request so it can finish before playback begins.
+ * The playback-source handler retains the original wait-and-retry fallback.
+ * Supports both the legacy m3u8.php endpoint and the current video_src.php.
+ */
 
-  function finish(result) {
-    if (completed) return;
-    completed = true;
-    if (typeof clearTimeout === "function") clearTimeout(timer);
-    $done(result);
-  }
+const AD_WAIT_MS = 25000;
+const PREWARM_TTL_MS = 120000;
+const PREWARM_STALE_MS = AD_WAIT_MS + 10000;
+const PREWARM_KEY = "bahamut_ad_prewarm_v1";
+const requestURL = $request.url || "";
+let responseJSON;
 
-  function readStates() {
-    try {
-      const saved = JSON.parse($persistentStore.read(KEY) || "{}");
-      const now = Date.now();
-      return Object.fromEntries(Object.entries(saved).filter(([sn, value]) => /^\d{1,20}$/.test(sn)
-        && value && ["starting", "pending", "ending", "ready", "complete"].includes(value.phase)
-        && typeof value.generation === "string" && value.generation.length > 0
-        && Number.isFinite(value.updatedAt) && value.updatedAt <= now && now - value.updatedAt < TTL_MS
-        && (value.phase === "starting" ||
-          (Number.isFinite(value.startedAt) && value.startedAt <= now && now - value.startedAt < TTL_MS))
-        && (value.phase !== "complete" || value.sourceValidated === true)));
-    } catch (_) { return {}; }
-  }
+try {
+  responseJSON = JSON.parse($response.body || "{}");
+} catch (error) {
+  console.log(`[BahamutAnimeAds] Invalid JSON response: ${error.message || error}`);
+  $done({});
+}
 
-  function saveState(sn, state) {
-    if (completed) return false;
-    const states = readStates();
-    if (state) states[sn] = {...state, updatedAt: Date.now()};
-    else delete states[sn];
-    const entries = Object.entries(states).sort((a, b) => b[1].updatedAt - a[1].updatedAt
-      || Number(b[0] === sn) - Number(a[0] === sn)).slice(0, 8);
-    try { return $persistentStore.write(JSON.stringify(Object.fromEntries(entries)), KEY) !== false; }
-    catch (_) { return false; }
-  }
-
-  function clearOwnedState(preserveReady = false) {
-    const sn = videoSn();
-    const state = sn ? readStates()[sn] : null;
-    if (state?.owner === owner && !(preserveReady && state.phase === "ready")) saveState(sn, null);
-  }
-
-  function videoSn() {
-    const matches = url.matchAll(/[?&](?:sn|videoSn)=([^&#]*)/gi);
-    const values = new Set();
-    for (const match of matches) {
-      let value;
-      try { value = decodeURIComponent(match[1]); } catch (_) { return ""; }
-      if (!/^\d{1,20}$/.test(value)) return "";
-      values.add(value);
-    }
-    return values.size === 1 ? [...values][0] : "";
-  }
-
-  function hasError(body) {
-    if (!body || typeof body !== "object") return false;
-    if (body.error || body.success === false || body.ok === false) return true;
-    if (body.code !== undefined && !["0", "200"].includes(String(body.code))) return true;
-    const source = body.src || body.url || body.data?.src || body.data?.url;
-    return Boolean(body.message && !source && !/^(?:ok|success)$/i.test(String(body.message).trim()));
-  }
-
-  function adWaiting(body, sn) {
-    if (!hasError(body)) return false;
-    const message = [body.message, body.error?.message, typeof body.error === "string" ? body.error : ""]
-      .filter(value => typeof value === "string").join(" ");
-    if (/\b(?:login|log[ -]in|unauthori[sz]ed|region|geo[ -]?blocked|premium|payment)\b|登入|登錄|登录|地區限制|地区限制|裝置驗證|设备验证|付費|付费/.test(message.toLowerCase())) return false;
-    const code = body.error?.code ?? body.code;
-    // Known ad-wait code; all other explicit errors retain the server response.
-    if (code !== undefined && !["0", "200"].includes(String(code))) return String(code) === "1015";
-    const active = readStates()[sn];
-    return /\bad(?:vertisement)?\s+(?:is\s+)?(?:required|pending|incomplete|not\s+(?:finished|completed|watched))\b/i.test(message)
-      || /(?:廣告|广告).{0,20}(?:尚未|未完成|未結束|未结束|等待)|(?:尚未|請先|请先|等待).{0,20}(?:廣告|广告)/.test(message)
-      // Older mobile responses can be generic; a verified ad-bearing token is
-      // the context needed to keep their existing validation path compatible.
-      || Boolean(active && ["pending", "ending", "ready"].includes(active.phase));
-  }
-
-  function hasPlaybackSource(value, depth = 0) {
-    if (depth > 4) return false;
-    if (typeof value === "string") return /^https?:\/\/[^\s]+$/i.test(value);
-    if (!value || typeof value !== "object") return false;
-    if (Array.isArray(value)) return value.some(item => hasPlaybackSource(item, depth + 1));
-    return ["src", "url", "playlist", "m3u8", "sources", "data"].some(key => hasPlaybackSource(value[key], depth + 1));
-  }
-
-  function hasAdSlots(body) {
-    return [body.ad, body.data?.ad].some(ad => ad && [ad.major, ad.minor].some(slots => Array.isArray(slots) && slots.length));
-  }
-
-  function clearAdSlots(body) {
-    for (const ad of [body.ad, body.data?.ad]) if (ad && typeof ad === "object") {
-      if (Array.isArray(ad.major)) ad.major = [];
-      if (Array.isArray(ad.minor)) ad.minor = [];
-    }
-  }
-
-  function fetchResponse(target) {
-    return new Promise((resolve, reject) => {
-      if (completed || deadline - Date.now() < 100) return reject(new Error("Validation time budget exhausted"));
-      const headers = Object.fromEntries(Object.entries($request.headers || {}).filter(([name]) =>
-        !/^(?:host|content-length|content-encoding|transfer-encoding)$/i.test(name)));
-      $httpClient.get({url: target, headers,
-        timeout: Math.min(HTTP_TIMEOUT_SECONDS, (deadline - Date.now()) / 1000),
-        "auto-redirect": false, "auto-cookie": false}, (error, response, body) => {
-        if (completed) return;
-        const status = Number(response?.status ?? response?.statusCode);
-        if (error || status < 200 || status >= 300 || !Number.isFinite(status)) {
-          reject(new Error(error ? "Validation request failed" : `Validation HTTP ${status || "unknown"}`));
-        } else resolve({status, body: String(body || "")});
-      });
+if (responseJSON) {
+  run()
+    .then(() => $done({ body: JSON.stringify(responseJSON) }))
+    .catch((error) => {
+      console.log(`[BahamutAnimeAds] ${error.message || error}`);
+      $done({});
     });
+}
+
+async function run() {
+  if (requestURL.includes("/token.php")) {
+    clearAdSlots(responseJSON);
+
+    const videoSn = getVideoSn(requestURL);
+    if (videoSn) {
+      try {
+        await prewarmAdValidation(videoSn);
+      } catch (error) {
+        clearPrewarmState(videoSn);
+        console.log(`[BahamutAnimeAds] Prewarm failed: ${error.message || error}`);
+      }
+    }
+
+    return;
   }
 
-  async function report(stage, sn) {
-    const {body: text} = await fetchResponse("https://api.gamer.com.tw/mobile_app/anime/v1/stat_ad.php" +
-      `?ad=${stage}&schedule=0&sn=${sn}`);
-    if (!text.trim()) return;
-    let body;
-    try { body = JSON.parse(text); } catch (_) { throw new Error("Invalid validation response"); }
-    if (body === false || hasError(body)) throw new Error("Ad validation was rejected");
+  if (!isPlaybackSource(requestURL)) {
+    return;
   }
 
-  async function changedState(sn, state, reserve) {
-    while (!completed) {
-      const current = readStates()[sn];
-      if (!current || current.generation !== state.generation) throw new Error("Validation state changed");
-      if (current.phase !== state.phase) return current;
-      if (state.phase === "ending" && Date.now() - current.updatedAt >= 4000) throw new Error("Validation owner expired");
-      if (deadline - Date.now() <= reserve) throw new Error("Insufficient validation time budget");
-      await new Promise(resolve => setTimeout(resolve, Math.min(100, deadline - Date.now() - reserve)));
-    }
-    throw new Error("Validation time budget exhausted");
+  const videoSn = getVideoSn(requestURL);
+  if (!videoSn) {
+    throw new Error("Missing video serial number");
   }
 
-  async function start(sn, fresh = false) {
-    let previous = readStates()[sn];
-    if (previous?.phase === "starting" && Date.now() - previous.updatedAt < 4000) {
-      previous = await changedState(sn, previous, 100);
-    }
-    if (previous && previous.phase !== "starting" && !(fresh && ["ending", "ready", "complete"].includes(previous.phase))) return previous;
-    if (!saveState(sn, {phase: "starting", generation: owner, owner})) throw new Error("Unable to reserve validation");
-    try {
-      await report("", sn);
-      if (completed || readStates()[sn]?.owner !== owner) throw new Error("Validation state changed");
-      const state = {phase: "pending", startedAt: Date.now(), generation: owner, owner};
-      if (!saveState(sn, state)) throw new Error("Unable to save validation");
-      return state;
-    } catch (error) { clearOwnedState(); throw error; }
+  if (!hasPlaybackError(responseJSON)) {
+    clearPrewarmState(videoSn);
+    return;
   }
 
-  async function validate(sn) {
-    let state = readStates()[sn];
-    state = await start(sn, ["ending", "ready", "complete"].includes(state?.phase) && Date.now() - state.updatedAt >= 4000);
-    if (state.phase === "complete" || state.phase === "ready") return state;
-    if (state.phase === "ending") {
-      const joined = await changedState(sn, state, 3500);
-      if (["ready", "complete"].includes(joined.phase)) return joined;
-      throw new Error("Validation state changed");
-    }
-    const remaining = Math.max(0, WAIT_MS - (Date.now() - state.startedAt));
-    if (!Number.isFinite(remaining) || Date.now() + remaining + 6500 >= deadline) throw new Error("Insufficient validation time budget");
-    if (remaining) await new Promise(resolve => setTimeout(resolve, remaining));
-    if (completed) throw new Error("Validation time budget exhausted");
-    let refreshed = readStates()[sn];
-    if (refreshed?.generation !== state.generation) throw new Error("Validation state changed");
-    if (refreshed.phase === "ending") refreshed = await changedState(sn, refreshed, 3500);
-    if (["ready", "complete"].includes(refreshed.phase)) return refreshed;
-    if (refreshed.phase !== "pending") throw new Error("Validation state changed");
-    if (!saveState(sn, {...state, phase: "ending", owner})) throw new Error("Unable to save validation");
-    await report("end", sn);
-    if (completed || readStates()[sn]?.owner !== owner) throw new Error("Validation state changed");
-    state = {...state, phase: "ready", owner};
-    if (!saveState(sn, state)) throw new Error("Unable to save validation");
-    return state;
+  clearPrewarmState(videoSn);
+  await completeAdValidation(videoSn);
+
+  const retriedResponse = await fetchJSON(requestURL, $request.headers || {});
+  if (retriedResponse) {
+    responseJSON = retriedResponse;
   }
 
-  async function main() {
-    const status = Number($response.status ?? $response.statusCode ?? 200);
-    if (status !== 200 && status !== 299) return {};
-    let body;
-    try { body = JSON.parse($response.body || "null"); } catch (_) { return {}; }
-    if (!body || typeof body !== "object" || Array.isArray(body)) return {};
-    const playback = /\/(?:m3u8|video_src)\.php(?:\?|$)/.test(url);
-    // The mobile API uses HTTP 299 for ad-wait code 1015. Other non-200
-    // responses retain their status/body and must not start validation.
-    if (status !== 200 && (!playback || String(body.error?.code ?? body.code) !== "1015")) return {};
-    const sn = videoSn();
-    if (!sn) return {};
-    if (/\/token\.php(?:\?|$)/.test(url)) {
-      if (hasError(body) || !hasAdSlots(body)) return {};
-      await start(sn);
-      clearAdSlots(body);
-      return {body: JSON.stringify(body)};
-    }
-    if (!playback || !adWaiting(body, sn)) return {};
-    const validation = await validate(sn);
-    if (completed) return {};
-    const retry = await fetchResponse(url);
-    const retried = JSON.parse(retry.body);
-    if (!retried || typeof retried !== "object" || Array.isArray(retried) || hasError(retried) || !hasPlaybackSource(retried)) {
-      throw new Error("Playback source is still unavailable");
-    }
-    const current = readStates()[sn];
-    if (!current || current.generation === validation.generation) {
-      saveState(sn, {...validation, phase: "complete", sourceValidated: true, owner});
-    }
-    return {status: retry.status, body: retry.body};
+  clearPrewarmState(videoSn);
+}
+
+async function prewarmAdValidation(videoSn) {
+  const state = readPrewarmState();
+  const now = Date.now();
+
+  if (
+    state &&
+    state.videoSn === videoSn &&
+    state.status === "complete" &&
+    now - state.completedAt < PREWARM_TTL_MS
+  ) {
+    console.log(`[BahamutAnimeAds] Prewarm ready for ${videoSn}`);
+    return;
   }
 
-  main().then(finish).catch(error => {
-    if (completed) return;
-    // An accepted end can serve other waiters briefly; it is not a playable source.
-    clearOwnedState(true);
-    console.log(`[BahamutAnimeAds] ${error.message || "Validation failed"}; original response kept`);
-    finish({});
+  if (
+    state &&
+    state.videoSn === videoSn &&
+    state.status === "pending" &&
+    now - state.startedAt < PREWARM_STALE_MS
+  ) {
+    const remaining = Math.max(0, AD_WAIT_MS - (now - state.startedAt));
+    await sleep(remaining + 500);
+
+    const refreshedState = readPrewarmState();
+    if (
+      refreshedState &&
+      refreshedState.videoSn === videoSn &&
+      refreshedState.status === "complete"
+    ) {
+      return;
+    }
+
+    await reportAdProgress("end", videoSn);
+    writePrewarmState({
+      videoSn,
+      status: "complete",
+      completedAt: Date.now()
+    });
+    return;
+  }
+
+  await reportAdProgress("", videoSn);
+  writePrewarmState({
+    videoSn,
+    status: "pending",
+    startedAt: Date.now()
   });
-})();
+  await sleep(AD_WAIT_MS);
+  await reportAdProgress("end", videoSn);
+  writePrewarmState({
+    videoSn,
+    status: "complete",
+    completedAt: Date.now()
+  });
+}
+
+async function completeAdValidation(videoSn) {
+  await reportAdProgress("", videoSn);
+  await sleep(AD_WAIT_MS);
+  await reportAdProgress("end", videoSn);
+}
+
+function clearAdSlots(body) {
+  if (body.ad) {
+    body.ad.minor = [];
+    body.ad.major = [];
+  }
+
+  if (body.data && body.data.ad) {
+    body.data.ad.minor = [];
+    body.data.ad.major = [];
+  }
+}
+
+function isPlaybackSource(url) {
+  return url.includes("/m3u8.php") || url.includes("/video_src.php");
+}
+
+function hasPlaybackError(body) {
+  return Boolean(body && (body.error || body.message));
+}
+
+function getVideoSn(url) {
+  const match = url.match(/[?&](?:videoSn|sn)=(\d+)/i);
+  return match ? match[1] : "";
+}
+
+function readPrewarmState() {
+  try {
+    const value = $persistentStore.read(PREWARM_KEY);
+    return value ? JSON.parse(value) : null;
+  } catch (error) {
+    console.log(`[BahamutAnimeAds] Invalid prewarm state: ${error.message || error}`);
+    return null;
+  }
+}
+
+function writePrewarmState(state) {
+  $persistentStore.write(JSON.stringify(state), PREWARM_KEY);
+}
+
+function clearPrewarmState(videoSn) {
+  const state = readPrewarmState();
+  if (!videoSn || !state || state.videoSn === videoSn) {
+    $persistentStore.write(null, PREWARM_KEY);
+  }
+}
+
+function reportAdProgress(stage, videoSn) {
+  const url =
+    "https://api.gamer.com.tw/mobile_app/anime/v1/stat_ad.php" +
+    `?ad=${encodeURIComponent(stage)}&schedule=0&sn=${encodeURIComponent(videoSn)}`;
+
+  return fetchText(url, $request.headers || {}).then(() => undefined);
+}
+
+function fetchJSON(url, headers) {
+  return fetchText(url, headers).then((body) => {
+    try {
+      return JSON.parse(body || "{}");
+    } catch (error) {
+      throw new Error(`Invalid retry response: ${error.message || error}`);
+    }
+  });
+}
+
+function fetchText(url, headers) {
+  return new Promise((resolve, reject) => {
+    $httpClient.get({ url, headers }, (error, response, body) => {
+      if (error) {
+        reject(new Error(String(error)));
+        return;
+      }
+
+      resolve(body || "");
+    });
+  });
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
