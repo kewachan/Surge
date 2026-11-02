@@ -181,6 +181,77 @@ test('known ad-wait signals retain the bounded validation flow and accept comple
   }
 });
 
+test('HTTP 299 ad-wait responses complete validation and relay the successful retry status', async () => {
+  for (const code of [1015, '1015']) {
+    const pending = {phase: 'pending', startedAt: now - 20000, updatedAt: now, generation: 'token', owner: 'token'};
+    const result = await run(bahamut, {now, store: new Map([[key, JSON.stringify({'12345': pending})]]),
+      request: request(source.replace('sn=', 'videoSn=')),
+      response: {...response(JSON.stringify({error: {code, message: '影片載入失敗，請重新整理。'}})), status: 299},
+      http: (_method, req) => ({status: 200, body: req.url.includes('stat_ad.php') ? '{}' : playable})});
+    assert.equal(result.elapsed, 5000);
+    assert.equal(result.requests.length, 2);
+    assert(result.requests[0].url.includes('ad=end'));
+    assert.equal(result.done.length, 1);
+    assert.equal(result.done[0].status, 200, 'valid retry must replace the original error status');
+    assert.equal(result.done[0].body, playable);
+    assert.equal(JSON.parse(result.store.get(key))['12345'].sourceValidated, true);
+  }
+});
+
+test('HTTP 299 compatibility is confined to playback ad-wait code 1015', async () => {
+  const pending = {phase: 'pending', startedAt: now - 25000, updatedAt: now, generation: 'token', owner: 'token'};
+  for (const [url, body, status] of [[source, {error: {code: 1007}}, 299], [source, {error: {code: 401}}, 299],
+    [source, {error: 'ad required'}, 299], [source, {src: video}, 299],
+    [source, {error: {code: 1015, message: 'region blocked'}}, 299],
+    [source, {error: {code: 1015}}, 403], [source, {error: {code: 1015}}, 503],
+    [token, {ad: {major: [1], minor: [2]}}, 299]]) {
+    const store = new Map([[key, JSON.stringify({'12345': pending})]]), saved = store.get(key);
+    const result = await run(bahamut, {store, now, request: request(url), response: {...response(JSON.stringify(body)), status}});
+    assert.deepEqual(Object.keys(result.done[0]), []);
+    assert.equal(result.requests.length, 0);
+    assert.equal(store.get(key), saved, 'unrelated server errors must not change validation state');
+  }
+});
+
+test('failed HTTP 299 recovery preserves the original status/body and never marks a source complete', async () => {
+  for (const failure of [{status: 299, body: '{"error":{"code":1015}}'}, {status: 200, body: '{}'},
+    {status: 403, body: playable}, {error: 'timeout'}]) {
+    const pending = {phase: 'pending', startedAt: now - 25000, updatedAt: now, generation: 'token', owner: 'token'};
+    const result = await run(bahamut, {now, store: new Map([[key, JSON.stringify({'12345': pending})]]),
+      request: request(source), response: {...response('{"error":{"code":1015}}'), status: 299},
+      http: (_method, req) => req.url.includes('stat_ad.php') ? {body: '{}'} : failure});
+    assert.equal(result.requests.length, 2, 'the source recovery must actually be attempted');
+    assert.equal(result.done.length, 1);
+    assert.deepEqual(Object.keys(result.done[0]), []);
+    assert.notEqual(JSON.parse(result.store.get(key))['12345']?.phase, 'complete');
+  }
+});
+
+test('private bh2 HAR playback errors enter validation without replaying device credentials', {skip: !process.env.BAHAMUT_PLAYBACK_HAR_PATH}, async () => {
+  const entries = JSON.parse(fs.readFileSync(process.env.BAHAMUT_PLAYBACK_HAR_PATH, 'utf8')).log.entries;
+  let replays = 0;
+  for (const entry of entries) {
+    const url = new URL(entry.request.url), content = entry.response?.content;
+    if (url.hostname !== 'api.gamer.com.tw' || !/\/(?:m3u8|video_src)\.php$/.test(url.pathname) || entry.response.status !== 299) continue;
+    const body = content.encoding === 'base64' ? Buffer.from(content.text, 'base64').toString('utf8') : content.text;
+    const parsed = JSON.parse(body);
+    assert.equal(parsed.error.code, 1015);
+    // Only the route, parameter name and response are needed. Real identifiers,
+    // authentication and cookies must not enter the synthetic I/O or assertions.
+    const name = url.searchParams.has('videoSn') ? 'videoSn' : 'sn';
+    const result = await run(bahamut, {request: request(`${url.origin}${url.pathname}?${name}=12345`),
+      response: {...response(body), status: entry.response.status},
+      http: (_method, req) => ({status: 200, body: req.url.includes('stat_ad.php') ? '{}' : playable})});
+    assert.equal(result.elapsed, 25000);
+    assert.equal(result.requests.length, 3, 'start, end and source retry must all occur');
+    assert(result.requests[1].url.includes('ad=end'));
+    assert.equal(result.done[0].status, 200);
+    assert.equal(result.done[0].body, playable);
+    replays++;
+  }
+  assert(replays >= 2, 'fixture must contain both captured playback failures');
+});
+
 test('empty or malformed playback successes preserve the original error and cannot leave complete state', async () => {
   for (const body of ['{}', '{"success":true}', '{"src":""}', '{"src":"not-a-url"}', '{"data":{"src":{}}}',
     '{"code":"403","src":"https://example.test/denied"}', 'null', 'false', '<html>login</html>']) {

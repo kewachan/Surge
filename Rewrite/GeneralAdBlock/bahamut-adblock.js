@@ -109,7 +109,7 @@
     }
   }
 
-  function fetchText(target) {
+  function fetchResponse(target) {
     return new Promise((resolve, reject) => {
       if (completed || deadline - Date.now() < 100) return reject(new Error("Validation time budget exhausted"));
       const headers = Object.fromEntries(Object.entries($request.headers || {}).filter(([name]) =>
@@ -121,13 +121,13 @@
         const status = Number(response?.status ?? response?.statusCode);
         if (error || status < 200 || status >= 300 || !Number.isFinite(status)) {
           reject(new Error(error ? "Validation request failed" : `Validation HTTP ${status || "unknown"}`));
-        } else resolve(String(body || ""));
+        } else resolve({status, body: String(body || "")});
       });
     });
   }
 
   async function report(stage, sn) {
-    const text = await fetchText("https://api.gamer.com.tw/mobile_app/anime/v1/stat_ad.php" +
+    const {body: text} = await fetchResponse("https://api.gamer.com.tw/mobile_app/anime/v1/stat_ad.php" +
       `?ad=${stage}&schedule=0&sn=${sn}`);
     if (!text.trim()) return;
     let body;
@@ -190,10 +190,15 @@
   }
 
   async function main() {
-    if (Number($response.status ?? $response.statusCode ?? 200) !== 200) return {};
+    const status = Number($response.status ?? $response.statusCode ?? 200);
+    if (status !== 200 && status !== 299) return {};
     let body;
     try { body = JSON.parse($response.body || "null"); } catch (_) { return {}; }
     if (!body || typeof body !== "object" || Array.isArray(body)) return {};
+    const playback = /\/(?:m3u8|video_src)\.php(?:\?|$)/.test(url);
+    // The mobile API uses HTTP 299 for ad-wait code 1015. Other non-200
+    // responses retain their status/body and must not start validation.
+    if (status !== 200 && (!playback || String(body.error?.code ?? body.code) !== "1015")) return {};
     const sn = videoSn();
     if (!sn) return {};
     if (/\/token\.php(?:\?|$)/.test(url)) {
@@ -202,11 +207,11 @@
       clearAdSlots(body);
       return {body: JSON.stringify(body)};
     }
-    if (!/\/(?:m3u8|video_src)\.php(?:\?|$)/.test(url) || !adWaiting(body, sn)) return {};
+    if (!playback || !adWaiting(body, sn)) return {};
     const validation = await validate(sn);
     if (completed) return {};
-    const text = await fetchText(url);
-    const retried = JSON.parse(text);
+    const retry = await fetchResponse(url);
+    const retried = JSON.parse(retry.body);
     if (!retried || typeof retried !== "object" || Array.isArray(retried) || hasError(retried) || !hasPlaybackSource(retried)) {
       throw new Error("Playback source is still unavailable");
     }
@@ -214,7 +219,7 @@
     if (!current || current.generation === validation.generation) {
       saveState(sn, {...validation, phase: "complete", sourceValidated: true, owner});
     }
-    return {body: text};
+    return {status: retry.status, body: retry.body};
   }
 
   main().then(finish).catch(error => {
