@@ -1,7 +1,7 @@
 #!name=Adblock Rewrite & Redirect
 #!author=kewachan
 #!desc=For daily App advertisement blocking and redirect
-#!date=2026-11-02
+#!date=2026-11-03
 
 [URL Rewrite]
 ##### Macau #####
@@ -119,19 +119,16 @@
 ^https?:\/\/ts-analysis.shoalter.com\/topics\/hktvmall_ios_tracker_event - reject
 
 #Wikipedia
-(https?:\/\/zh.m.wikipedia.org\/)(wiki)(\/.+) $1zh-hk$3 302
-(https?:\/\/zh.m.wikipedia.org\/)(zh-cn)(\/.+) $1zh-hk$3 302
-(https?:\/\/zh.m.wikipedia.org\/)(zh-hans)(\/.+) $1zh-hk$3 302
-(https?:\/\/zh.m.wikipedia.org\/)(zh)(\/.+) $1zh-hk$3 302
-(https?:\/\/zh.wikipedia.org\/)(wiki)(\/.+) $1zh-hk$3 302
-(https?:\/\/zh.wikipedia.org\/)(zh-cn)(\/.+) $1zh-hk$3 302
-(https?:\/\/zh.wikipedia.org\/)(zh-hans)(\/.+) $1zh-hk$3 302
-(https?:\/\/zh.wikipedia.org\/)(zh)(\/.+) $1zh-hk$3 302
+^(https?:\/\/zh\.m\.wikipedia\.org\/)(wiki)(\/.+) $1zh-hk$3 302
+^(https?:\/\/zh\.m\.wikipedia\.org\/)(zh-cn)(\/.+) $1zh-hk$3 302
+^(https?:\/\/zh\.m\.wikipedia\.org\/)(zh-hans)(\/.+) $1zh-hk$3 302
+^(https?:\/\/zh\.m\.wikipedia\.org\/)(zh)(\/.+) $1zh-hk$3 302
+^(https?:\/\/zh\.wikipedia\.org\/)(wiki)(\/.+) $1zh-hk$3 302
+^(https?:\/\/zh\.wikipedia\.org\/)(zh-cn)(\/.+) $1zh-hk$3 302
+^(https?:\/\/zh\.wikipedia\.org\/)(zh-hans)(\/.+) $1zh-hk$3 302
+^(https?:\/\/zh\.wikipedia\.org\/)(zh)(\/.+) $1zh-hk$3 302
 
 #Google
-^(https?:\/\/www\.google\.com\/search\?)(?=(?:[^&#]*&)*q=[^&#]+)(?!(?:[^&#]*&)*(?:udm|tbm)=)client=[^&#]*&([^#]+)(#.*)?$ $1$2&gl=hk&safe=off&udm=14$3 302
-^(https?:\/\/www\.google\.com\/search\?)(?=(?:[^&#]*&)*q=[^&#]+)(?!(?:[^&#]*&)*(?:udm|tbm)=)([^#]+?)&client=[^&#]*(&[^#]*)?(#.*)?$ $1$2$3&gl=hk&safe=off&udm=14$4 302
-^(https?:\/\/www\.google\.com\/search\?)(?=(?:[^&#]*&)*q=[^&#]+)(?!(?:[^&#]*&)*(?:udm|tbm)=)([^#]+)(#.*)?$ $1udm=14&$2$3 302
 ^https?:\/\/www\.google\.com\/ads\/on-device\/conversions - reject
 ^https?:\/\/play\.google\.com\/newsstand\/api\/v3\/people\/me\/analytics - reject
 ^https?:\/\/cse\.google\.com\/adsense\/search\/async-ads\.js - reject
@@ -156,6 +153,9 @@
 
 #ByteDance
 ^https?:\/\/sf19-static\.i18n-pglstatp\.com\/obj\/ad-pattern-sg\/3p_monitor - reject
+
+[Script]
+google.search.request = type=http-request,pattern=^https?:\/\/www\.google\.com\/search\?,engine=jsc,script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Rewrite/google-search.request.js?v=1.0.0
 
 [MITM]
 hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, plus.maasplus.com, macaumovie.com, *.macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, *.xiaohongshu.com, *.rnote.com, *.manhuashe.com, *.lihkg.com, a.line.me, gw.line.naver.jp, legy.line-apps.com, w.line.me, sch.line.me, static.line-scdn.net, web-mmap-pay.line-apps.com, scdn.line-apps.com, crs-event.line.me, cix.line-apps.com, api.whatsapp.net, dit.whatsapp.net, *.amap.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, 3p.ampproject.net, d-*.ampproject.net, statistic.live.126.net, *.shoalter.com, *.fanpiece.com, unwire.hk, *.idownloadblog.com, *.mobile01.com, *.yimg.com, *.alicdn.com, *.i18n-pglstatp.com

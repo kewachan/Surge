@@ -1,14 +1,23 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import {execFileSync} from 'node:child_process';
 import {test} from 'node:test';
 const moduleText = fs.readFileSync(new URL('../../Rewrite/Adrewrite.sgmodule', import.meta.url), 'utf8');
-const rules = moduleText.split('\n').map(line => /^(\S+) (\S+) 302$/.exec(line))
-  .filter(match => match && match[1].includes('google'))
-  .map(match => ({pattern: new RegExp(match[1]), replacement: match[2]}));
-function redirect(url) {
-  const rule = rules.find(rule => rule.pattern.test(url));
-  return rule ? url.replace(rule.pattern, rule.replacement) : url;
+const declaration = moduleText.split('\n').find(line => line.startsWith('google.search.request ='));
+const pattern = new RegExp(/pattern=(.*?),engine=/.exec(declaration)[1]);
+const scriptSource = fs.readFileSync(new URL('../../Rewrite/google-search.request.js', import.meta.url), 'utf8');
+const compiled = new vm.Script(scriptSource);
+function redirect(url, method = 'GET') {
+  if (!pattern.test(url)) return url;
+  const outputs = [];
+  compiled.runInNewContext({$request: {url, method, headers: {}}, $done: result => outputs.push(result)}, {timeout: 1000});
+  assert.equal(outputs.length, 1);
+  const result = outputs[0];
+  if (!result.response) { assert.deepEqual(Object.keys(result), []); return url; }
+  assert.equal(result.response.status, 302);
+  assert.equal(result.response.headers['Cache-Control'], 'no-store');
+  return result.response.headers.Location;
 }
 
 function permutations(fields) {
@@ -47,6 +56,13 @@ const boundaryCases = [
   'https://example.com/search?hl=en&client=safari&q=test',
   'https://www.google.com.example.com/search?hl=en&client=safari&q=test'
 ].map(input => ({ input, expected: input }));
+const conflictingQueries = ['client=safari&q=raw%2Btext&gl=tw&safe=active',
+  'gl=tw&safe=active&q=raw%2Btext&client=safari',
+  'client=safari&client=other&%67l=tw&gl=us&safe=active&q=raw%2Btext&safe=on'];
+const conflictCases = conflictingQueries.map(query => ({input: searchUrl + query + '#results%20here',
+  expected: searchUrl + 'q=raw%2Btext&gl=hk&safe=off&udm=14#results%20here'}));
+const encodedModeCases = ['%75dm=2', '%74bm=nws', 'udm', 'tbm', 'udm=', '%ZZ=broken']
+  .map(tail => searchUrl + 'client=safari&q=test&' + tail).map(input => ({input, expected: input}));
 
 test('Safari client-first searches use Hong Kong and retain query data', () => {
   for (const tail of ['q=Mac%20Safari', 'rls=en&q=C%2B%2B%20%26%20Mac&ie=UTF-8&oe=UTF-8&start=10']) {
@@ -115,17 +131,16 @@ test('middle-client handling retains the search scope and requires a nonempty qu
   assert.equal(redirect(input), searchUrl + 'udm=14&' + input.slice(searchUrl.length));
 });
 
-test('native macOS ICU replacements match the expected redirects without a second redirect', {
+test('native macOS ICU scope and JavaScriptCore produce the expected redirects without a second redirect', {
   skip: process.platform !== 'darwin'
 }, () => {
-  const data = rules.map(rule => ({ pattern: rule.pattern.source, replacement: rule.replacement }));
-  const cases = [...reportedCases, ...orderedCases, ...explicitCases, ...boundaryCases];
-  const source = 'ObjC.import("Foundation"); const data=' + JSON.stringify(data) + ', cases=' + JSON.stringify(cases)
-    + '; const compileFailures=[], compiled=data.map((rule,i)=>{const error=Ref(),re=$.NSRegularExpression.regularExpressionWithPatternOptionsError($(rule.pattern),0,error);'
-    + 'if(ObjC.unwrap(re)===undefined){compileFailures.push(i);return null;}return {re:re,replacement:rule.replacement};});'
-    + 'function redirect(input){for(const rule of compiled){if(!rule)continue;const range=$.NSMakeRange(0,input.length);'
-    + 'if(ObjC.unwrap(rule.re.firstMatchInStringOptionsRange($(input),0,range))!==undefined)'
-    + 'return ObjC.unwrap(rule.re.stringByReplacingMatchesInStringOptionsRangeWithTemplate($(input),0,range,$(rule.replacement)));}return input;}'
+  const cases = [...reportedCases, ...orderedCases, ...explicitCases, ...boundaryCases, ...conflictCases, ...encodedModeCases];
+  const source = 'ObjC.import("Foundation"); const pattern=' + JSON.stringify(pattern.source) + ', cases=' + JSON.stringify(cases)
+    + ', scriptSource=' + JSON.stringify(scriptSource) + '; const compileFailures=[], re=$.NSRegularExpression.regularExpressionWithPatternOptionsError($(pattern),0,Ref());'
+    + 'if(ObjC.unwrap(re)===undefined)compileFailures.push(0);const execute=new Function("$request","$done",scriptSource);'
+    + 'function redirect(input){const range=$.NSMakeRange(0,input.length);'
+    + 'if(ObjC.unwrap(re.firstMatchInStringOptionsRange($(input),0,range))===undefined)return input;'
+    + 'let result;execute({url:input,method:"GET"},function(value){result=value;});return result&&result.response?result.response.headers.Location:input;}'
     + 'let mismatchCount=0;const examples=[];cases.forEach((c,i)=>{const output=redirect(c.input),again=redirect(output);'
     + 'if(output!==c.expected||again!==output){mismatchCount++;if(examples.length<3)examples.push({index:i,output:output,again:again});}});'
     + 'JSON.stringify({compileFailures:compileFailures,mismatchCount:mismatchCount,examples:examples});';
@@ -133,6 +148,46 @@ test('native macOS ICU replacements match the expected redirects without a secon
     input: source, encoding: 'utf8', timeout: 15000
   }));
   assert.deepEqual(result, { compileFailures: [], mismatchCount: 0, examples: [] });
+});
+
+test('Safari defaults replace conflicting and duplicate gl/safe values while preserving other raw fields', () => {
+  for (const query of conflictingQueries) {
+    const output = redirect(searchUrl + query + '#results%20here');
+    const parsed = new URL(output);
+    assert.deepEqual(parsed.searchParams.getAll('gl'), ['hk']);
+    assert.deepEqual(parsed.searchParams.getAll('safe'), ['off']);
+    assert.deepEqual(parsed.searchParams.getAll('udm'), ['14']);
+    assert(!parsed.searchParams.has('client'));
+    assert(output.includes('q=raw%2Btext'));
+    assert(output.endsWith('#results%20here'));
+    assert.equal(redirect(output), output);
+  }
+});
+
+test('encoded and bare explicit modes, non-GET requests and malformed keys preserve the original URL', () => {
+  for (const tail of ['%75dm=2', '%74bm=nws', 'udm', 'tbm', 'udm=', '%ZZ=broken']) {
+    const input = searchUrl + 'client=safari&q=test&' + tail;
+    assert.equal(redirect(input), input);
+  }
+  for (const method of ['POST', 'HEAD', 'OPTIONS']) {
+    const input = searchUrl + 'client=safari&q=test';
+    assert.equal(redirect(input, method), input);
+  }
+  const input = searchUrl + 'client=safari&q=test\r\nX-Injected:value';
+  assert.equal(redirect(input), input);
+});
+
+test('Wikipedia locale redirects cannot match embedded URLs or lookalike domains', () => {
+  const rules = moduleText.split('\n').map(line => /^(\S+) (\S+) 302$/.exec(line))
+    .filter(match => match && match[1].includes('wikipedia')).map(match => ({pattern: new RegExp(match[1]), replacement: match[2]}));
+  const rewrite = input => {const rule = rules.find(rule => rule.pattern.test(input)); return rule ? input.replace(rule.pattern, rule.replacement) : input;};
+  for (const host of ['zh.wikipedia.org', 'zh.m.wikipedia.org']) for (const locale of ['wiki', 'zh-cn', 'zh-hans', 'zh']) {
+    const input = `https://${host}/${locale}/Example%20Title?q=a%2Bb#keep`;
+    assert.equal(rewrite(input), `https://${host}/zh-hk/Example%20Title?q=a%2Bb#keep`);
+  }
+  for (const input of ['http://example.test/continue?next=https://zh.wikipedia.org/wiki/Example',
+    'http://zhXwikipedia.org/wiki/Example', 'https://zh.wikipedia.org.example.test/wiki/Example',
+    'https://zh.wikipedia.org/zh-hk/Example']) assert.equal(rewrite(input), input);
 });
 
  test('existing Google ad blocks and MITM coverage remain in place', () => {

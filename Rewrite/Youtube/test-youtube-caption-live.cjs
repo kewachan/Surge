@@ -81,7 +81,7 @@ function runClient() {
       $response: {status: 200, body: originalBody, headers: {"Content-Type": "text/xml", "Content-Encoding": "gzip"}},
       $persistentStore: {
         read(key) { return store.get(key) || null; },
-        write(value, key) { value ? store.set(key, value) : store.delete(key); return true; },
+        write(value, key) { value === null ? store.delete(key) : store.set(key, value); return true; },
       },
       $httpClient: {
         get: (options, callback) => request("GET", options, callback),

@@ -3,7 +3,7 @@ import {chineseConversionEnabled, chineseLyricLine} from "./youtube.chinese.js";
 export {PrewarmJob as LyricsPrewarm};
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
-const WORKER_BUILD = "lyrics-translate-v21-chinese-local";
+const WORKER_BUILD = "lyrics-translate-v22-source-submit";
 // Do not reuse source lookups that older builds cached after one empty response.
 const PREWARM_SOURCE_VERSION = 2;
 const MAX_REQUEST_BYTES = 48 * 1024;
@@ -382,6 +382,18 @@ async function lyricsPrewarm(request, env, context) {
       catch (_) { return response("Lyric source too large", 413); }
     }
     const id = await identifier({version: PREWARM_SOURCE_VERSION, videoId: payload.videoId, target, model: AI_MODEL});
+    if (sourceLines) {
+      // The device already supplied the source. prepare atomically handles reuse
+      // and queued upgrades, so do not put a redundant state RPC on playback.
+      const queued = await enqueue(env.LYRICS_PREWARM, env.LYRICS_QUEUE, id,
+        {kind: "source", videoId: payload.videoId, target, sourceLines, browseId});
+      if (queued.reused) {
+        const aggregate = prewarmedSongBatch(payload.videoId, [], target, env).then(() => undefined, () => undefined);
+        if (typeof context?.waitUntil === "function") context.waitUntil(aggregate);
+        else await aggregate;
+      }
+      return json(queued, 202);
+    }
     const saved = await jobCall(env.LYRICS_PREWARM, id, "state");
     if (["queued", "processing", "complete"].includes(saved.status)) {
       if ((sourceLines || browseId) && saved.status === "queued") {

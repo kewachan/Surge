@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.9.0
+ * Node Offline Monitor for Surge — v1.10.0
  * Discovers custom proxy policies from the active profile and notifies once
  * when a node goes offline or resumes.
  */
@@ -31,6 +31,7 @@
   let completed = false;
   let unsupportedResultLogged = false;
   let directFallbackUsed = false;
+  let fallbackTargets = null;
   let deadlineTimer;
   let leaseOwner = "";
   const deadline = Date.now() + DEADLINE_MS;
@@ -373,22 +374,24 @@
 
   function statusIsAvailable(status) {
     if (typeof status === "boolean") return status;
-    if (typeof status === "number") return Number.isFinite(status) && status > 0;
+    if (typeof status === "number") return Number.isFinite(status) ? status > 0 : null;
     if (typeof status === "string") {
       const normalized = status.trim().toLowerCase();
       if (/^(ok|online|available|success|true)$/.test(normalized)) return true;
+      if (/^(offline|unavailable|failed|failure|false|timeout)$/.test(normalized)) return false;
+      if (!normalized) return null;
       const number = Number(normalized);
-      return Number.isFinite(number) && number > 0;
+      return Number.isFinite(number) ? number > 0 : null;
     }
-    if (!status || typeof status !== "object") return false;
-    if (Object.keys(status).length === 0 || status.error) return false;
+    if (!status || typeof status !== "object") return null;
+    if (status.error) return /ability|permission|invalid (?:url|uri|policy)|not permitted/i.test(String(status.error)) ? null : false;
     if (Object.prototype.hasOwnProperty.call(status, "available")) {
       return statusIsAvailable(status.available);
     }
     if (typeof status.status === "string") return statusIsAvailable(status.status);
-    return ["latency", "rtt", "tcp", "receive", "delay"].some(key =>
-      typeof status[key] === "number" && status[key] > 0
-    );
+    const measurements = ["latency", "rtt", "tcp", "receive", "delay"].filter(key =>
+      typeof status[key] === "number" && Number.isFinite(status[key]));
+    return measurements.length ? measurements.some(key => status[key] > 0) : null;
   }
 
   function availabilityFromResult(result, policies) {
@@ -397,6 +400,8 @@
     const statusMap = findStatusMap(result, policies, 0) ||
       findNamedStatusMap(result, policies, 0);
     if (!statusMap) return null;
+    if (policies.some(name => !Object.prototype.hasOwnProperty.call(statusMap, name)
+      || statusIsAvailable(statusMap[name]) === null)) return null;
     return new Set(policies.filter(name => statusIsAvailable(statusMap[name])));
   }
 
@@ -419,7 +424,6 @@
     }
 
     const available = new Set();
-    const permissionErrors = [];
     let cursor = 0;
     let active = 0;
     let settled = 0;
@@ -428,23 +432,21 @@
     function completeIfReady() {
       if (finished || settled !== policies.length) return false;
       finished = true;
-      if (permissionErrors.length === policies.length) {
-        callback(new Error("Surge rejected direct policy probing; check the http-client-policy ability"));
-      } else {
-        callback(null, available);
-      }
+      callback(null, available);
       return true;
     }
 
     function settle(policy, error, response) {
-      if (completed) return;
+      if (completed || finished) return;
       active--;
       settled++;
       const status = Number(response && response.status);
       if (!error && Number.isFinite(status) && status > 0) {
         available.add(policy);
-      } else if (/ability|permission|not allowed|not permitted/i.test(String(error || ""))) {
-        permissionErrors.push(policy);
+      } else if (/ability|permission|not allowed|not permitted|invalid (?:url|uri|policy)|policy.*(?:not found|does not exist)/i.test(String(error || ""))) {
+        finished = true;
+        callback(new Error("Surge rejected the probe URL or policy; check Test URL and the http-client-policy ability"));
+        return;
       }
       if (!completeIfReady()) pump();
     }
@@ -475,6 +477,23 @@
   }
 
   function testPolicySet(policies, url, callback) {
+    function fallback() {
+      if (!fallbackTargets) {
+        // Reserve all five rounds at the full eight-second timeout, plus delays.
+        const waves = Math.floor((deadline - Date.now() - CONFIRMATION_DELAY_MS * 4 - 5000)
+          / (REQUIRED_CONFIRMATIONS * PROBE_TIMEOUT * 1000));
+        if (waves < 1) return callback(new Error("Insufficient time for five complete node checks"));
+        const limit = Math.min(policies.length, waves * PROBE_CONCURRENCY);
+        const cursor = readState()?.fallbackCursor;
+        let start = cursor ? policies.findIndex(name => name.localeCompare(cursor) > 0) : 0;
+        if (start < 0) start = 0;
+        fallbackTargets = Array.from({length: limit}, (_, i) => policies[(start + i) % policies.length]);
+        if (limit < policies.length) log(`Fallback batch: ${limit} of ${policies.length} nodes; remaining nodes retain their previous state`);
+      }
+      const targets = policies.filter(name => fallbackTargets.includes(name));
+      probePolicies(targets, url, (error, available) => callback(error, available, targets));
+    }
+    if (directFallbackUsed) { fallback(); return; }
     api("POST", "v1/policies/test", { policy_names: policies, url }, (testError, result) => {
       if (testError) {
         callback(testError);
@@ -482,7 +501,7 @@
       }
       const available = availabilityFromResult(result, policies);
       if (available) {
-        callback(null, available);
+        callback(null, available, policies);
         return;
       }
       if (!unsupportedResultLogged) {
@@ -490,7 +509,7 @@
         log(`Unsupported policy test response; using direct probes. Shape: ${resultShape(result, 0)}`);
       }
       directFallbackUsed = true;
-      probePolicies(policies, url, callback);
+      fallback();
     });
   }
 
@@ -501,6 +520,7 @@
     let offlineCandidates = [];
     let resumeCandidates = [];
     let attempt = 1;
+    let checkedPolicies = policies;
 
     function complete() {
       if (directFallbackUsed) log("Direct policy probe fallback completed");
@@ -509,7 +529,7 @@
       );
       offlineCandidates.forEach(name => confirmedOffline.add(name));
       resumeCandidates.forEach(name => confirmedOffline.delete(name));
-      callback(null, policies.filter(name => confirmedOffline.has(name)));
+      callback(null, policies.filter(name => confirmedOffline.has(name)), checkedPolicies);
     }
 
     function candidateCountText() {
@@ -524,23 +544,26 @@
       const targets = attempt === 1
         ? policies
         : uniqueNames(offlineCandidates.concat(resumeCandidates));
-      testPolicySet(targets, url, (error, available) => {
+      testPolicySet(targets, url, (error, available, tested) => {
         if (skipMaintenance()) return;
         if (error) {
           callback(error);
           return;
         }
+        const testedSet = new Set(tested);
+        const untested = new Set(targets.filter(name => !testedSet.has(name)));
+        checkedPolicies = checkedPolicies.filter(name => !untested.has(name));
 
         if (attempt === 1) {
-          offlineCandidates = policies.filter(name =>
+          offlineCandidates = tested.filter(name =>
             !previousOffline.has(name) && !available.has(name)
           );
-          resumeCandidates = policies.filter(name =>
+          resumeCandidates = tested.filter(name =>
             previousOffline.has(name) && available.has(name)
           );
         } else {
-          offlineCandidates = offlineCandidates.filter(name => !available.has(name));
-          resumeCandidates = resumeCandidates.filter(name => available.has(name));
+          offlineCandidates = offlineCandidates.filter(name => testedSet.has(name) && !available.has(name));
+          resumeCandidates = resumeCandidates.filter(name => testedSet.has(name) && available.has(name));
         }
 
         log(`Status confirmation ${attempt}/${REQUIRED_CONFIRMATIONS}: ${candidateCountText()}`);
@@ -587,12 +610,17 @@
     }
   }
 
-  function saveResult(policies, offline) {
+  function saveResult(policies, offline, checkedPolicies) {
     if (skipMaintenance()) return;
     const previous = readState();
     const previousOffline = new Set(previous && Array.isArray(previous.offline) ? previous.offline : []);
     const currentPolicies = new Set(policies);
     const currentOffline = new Set(offline);
+    const checked = new Set(checkedPolicies);
+    const previousUnknown = new Set(Array.isArray(previous?.unknown) ? previous.unknown : []);
+    const known = new Set(previous?.checkedAt > 0 && Array.isArray(previous.policies) ? previous.policies
+      .filter(name => !previousUnknown.has(name)) : []);
+    const unknown = policies.filter(name => !checked.has(name) && !known.has(name));
     const newlyOffline = offline.filter(name => !previousOffline.has(name));
     const resumed = Array.from(previousOffline).filter(name =>
       currentPolicies.has(name) && !currentOffline.has(name)
@@ -614,10 +642,14 @@
       version: 1,
       policies,
       offline,
+      unknown,
+      checkedPolicies,
+      fallbackCursor: fallbackTargets?.at(-1) || previous?.fallbackCursor || "",
       checkedAt: Date.now(),
       lastError: ""
     }), STORE_KEY);
-    log(`Tested ${nodeCount(policies.length)} from the current profile; ${offline.length} offline`);
+    log(`Tested ${nodeCount(checkedPolicies.length)} of ${policies.length} from the current profile; ` +
+      `${offline.length} confirmed offline; ${unknown.length} unknown`);
   }
 
   function reportError(error) {
@@ -652,8 +684,7 @@
     return;
   }
   deadlineTimer = setTimeout(() => {
-    log("Node check time budget exhausted; previous state preserved; no outage or recovery was confirmed");
-    finish();
+    reportError(new Error("Node check time budget exhausted; no outage or recovery was confirmed"));
   }, DEADLINE_MS);
 
   api("GET", "v1/profiles/current", { sensitive: 0 }, (profileError, profileResult) => {
@@ -669,12 +700,19 @@
       const testUrl = options.testUrl === "auto"
         ? (profileTestUrl || FALLBACK_TEST_URL)
         : options.testUrl;
-      confirmStatusChanges(policies, testUrl, (testError, offline) => {
+      try {
+        const parsed = new URL(testUrl);
+        if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname || /\s/.test(testUrl)) throw new Error();
+      } catch (_) {
+        reportError(new Error("Invalid Test URL; use a complete HTTP or HTTPS URL"));
+        return;
+      }
+      confirmStatusChanges(policies, testUrl, (testError, offline, checkedPolicies) => {
         if (testError) {
           reportError(testError);
           return;
         }
-        saveResult(policies, offline);
+        saveResult(policies, offline, checkedPolicies);
         finish();
       });
     });

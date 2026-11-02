@@ -171,6 +171,48 @@ test("Music source prewarm populates the exact existing AI batch cache; foregrou
     assert.equal(runs, 1, "native/web batch boundaries must not force another AI translation");
   } finally { global.fetch = oldFetch; global.caches = oldCaches; }
 });
+test("device lyric source skips the state preflight and acknowledges only a durable Queue submission", async () => {
+  const {lyrics} = await ready, actions = [], messages = [], held = [];
+  const namespace = new Namespace(lyrics.LyricsPrewarm), originalGet = namespace.get.bind(namespace);
+  namespace.get = (id) => ({fetch: (url, init) => {
+    actions.push(new URL(url instanceof Request ? url.url : url).pathname);
+    return originalGet(id).fetch(url, init);
+  }});
+  let release, entered, finished = false;
+  const queueEntered = new Promise((resolve) => { entered = resolve; });
+  const gate = new Promise((resolve) => { release = resolve; });
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: namespace,
+    LYRICS_QUEUE: {send: async (body) => { entered(); await gate; messages.push(body); }}};
+  const payload = {videoId: "abcdefghijk", target: "zh-Hant", sourceLines: ["Hello world"]};
+  const oldFetch = global.fetch;
+  global.fetch = () => { throw Error("device source must not fetch YouTube"); };
+  try {
+    const pending = lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", payload), env,
+      {waitUntil: (work) => held.push(work)}).then((response) => { finished = true; return response; });
+    await queueEntered;
+    assert.deepEqual(actions, ["/prepare"], "no redundant state RPC on cold playback");
+    assert.equal(finished, false, "202 must not precede Queue.send acknowledgement");
+    release();
+    const response = await pending, created = await response.json();
+    assert.equal(response.status, 202); assert.equal(created.reused, false); assert.equal(messages.length, 1);
+    assert.deepEqual((await shared.jobCall(namespace, created.jobId, "state")).work.sourceLines, payload.sourceLines);
+    const duplicate = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", payload), env,
+      {waitUntil: (work) => held.push(work)})).json();
+    assert.equal(duplicate.jobId, created.jobId); assert.equal(duplicate.reused, true); assert.equal(messages.length, 1);
+    await Promise.all(held);
+  } finally { release(); global.fetch = oldFetch; }
+});
+test("failed device-source Queue submissions stay retryable and never return a successful acknowledgement", async () => {
+  const {lyrics} = await ready, messages = [];
+  let fail = true;
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: new Namespace(lyrics.LyricsPrewarm),
+    LYRICS_QUEUE: {send: async (body) => { if (fail) throw Error("synthetic Queue outage"); messages.push(body); }}};
+  const payload = {videoId: "abcdefghijk", target: "zh-Hant", sourceLines: ["Hello world"]};
+  assert.equal((await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", payload), env)).status, 500);
+  fail = false;
+  const response = await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", payload), env);
+  assert.equal(response.status, 202); assert.equal((await response.json()).reused, false); assert.equal(messages.length, 1);
+});
 test("invalid tokens cannot start prewarm; empty source lookups retry without running AI or caching a permanent absence", async () => {
   const {lyrics} = await ready; const messages = [];
   const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: new Namespace(lyrics.LyricsPrewarm), LYRICS_QUEUE: {send: async (body) => messages.push(body)}};
@@ -239,7 +281,7 @@ function bootstrap(options = {}) {
   const store = options.store || new Map(), calls = [], outputs = [], logs = [];
   const context = {console: {log(text) { logs.push(text); }}, setTimeout, clearTimeout, $argument: JSON.stringify({captionLang: "zh-Hant", captionToken: token,
     lyricsLang: "zh-Hant", lyricsToken: token, ...options.settings}),
-    $persistentStore: {read: (key) => store.get(key), write: (value, key) => value ? store.set(key, value) : store.delete(key)},
+    $persistentStore: {read: (key) => store.get(key) ?? null, write: (value, key) => {value === null ? store.delete(key) : store.set(key, value); return true;}},
     $request: {headers: {}},
     $httpClient: {post: (request, callback) => {
       if (request.url.startsWith("https://music.youtube.com/")) { callback(null, {status: 200}, "{}"); return; }

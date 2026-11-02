@@ -23,8 +23,8 @@ function loadClient(options = {}) {
     $argument: JSON.stringify({lyricsLang: options.target || "zh-Hant", lyricsToken: options.token || token}),
     $response: {bodyBytes: options.input},
     $persistentStore: {
-      read: (key) => store.get(key) || null,
-      write(value, key) { value ? store.set(key, value) : store.delete(key); return true; },
+      read: (key) => store.get(key) ?? null,
+      write(value, key) { value === null ? store.delete(key) : store.set(key, value); return true; },
     },
     $httpClient: options.httpClient || {
       post(request, callback) {

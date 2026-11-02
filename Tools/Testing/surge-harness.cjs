@@ -41,6 +41,7 @@ async function run(file, options = {}) {
     fetch() { throw Error('Tests must not make live requests'); },
     $done(value) { done.push(value); }
   };
+  if (!Object.hasOwn(options, 'argument')) delete context.$argument;
   if (Object.hasOwn(options, 'response')) context.$response = options.response;
   if (options.globals) Object.assign(context, options.globals);
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../..', file), 'utf8'), context, {filename: file, timeout: 3000});

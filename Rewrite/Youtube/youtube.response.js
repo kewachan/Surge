@@ -157,14 +157,21 @@
     return [];
   }
   function remember(key, value) {
+    let wrote = false;
     try {
-      $persistentStore.write(JSON.stringify(value), key);
-      const index = JSON.parse($persistentStore.read(INDEX) || "[]");
-      const next = (Array.isArray(index) ? index : []).filter((item) => item.key !== key);
+      if ($persistentStore.write(JSON.stringify(value), key) === false) return;
+      wrote = true;
+      let index;
+      try { index = JSON.parse($persistentStore.read(INDEX) || "[]"); } catch (_) { index = []; }
+      const owns = itemKey => typeof itemKey === "string" && /^YouTube(?:Caption|Lyrics)\.Prewarm\.v1\./.test(itemKey);
+      const next = (Array.isArray(index) ? index : []).filter((item) => owns(item?.key) && item.key !== key);
       next.push({key});
-      while (next.length > 64) $persistentStore.write("", next.shift().key);
-      $persistentStore.write(JSON.stringify(next), INDEX);
-    } catch (_) {}
+      const remove = itemKey => { try { return $persistentStore.write(null, itemKey) !== false; } catch (_) { return false; } };
+      while (next.length > 64 && remove(next[0].key)) next.shift();
+      if ($persistentStore.write(JSON.stringify(next), INDEX) === false) remove(key);
+    } catch (_) {
+      if (wrote) { try { $persistentStore.write(null, key); } catch (_) {} }
+    }
   }
   function recent(key) {
     try {

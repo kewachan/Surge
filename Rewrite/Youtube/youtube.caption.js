@@ -18,7 +18,9 @@ const DIRECT_FALLBACK_MAX_BATCHES = 32;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_LIMIT = 96;
 const CACHE_INDEX_KEY = "YouTubeCaption.CacheIndex.v6";
+const CACHE_DATA_PREFIX = "YouTubeCaption.v6.";
 const JOB_CACHE_PREFIX = "YouTubeCaption.Job.v20.";
+const JOB_CACHE_INDEX_KEY = "YouTubeCaption.JobIndex.v20";
 
 function scriptOptions() {
   const defaults = {captionToken: "", debug: false};
@@ -109,7 +111,7 @@ async function readPrewarmedCaption(body, target, options, deadline, saved = cap
         && ["complete", "source-mismatch"].includes(result.status))) {
         $persistentStore.write(JSON.stringify({workerUntil: Date.now() + 30 * 60 * 1000}), routeKey);
       } else if (result.status === "failed" && /^(?:source-|invalid-caption-source)/.test(result.code || "")) {
-        $persistentStore.write("", routeKey);
+        $persistentStore.write(null, routeKey);
       }
     } catch (_) {} // Optional routing metadata must not discard a valid translated document.
     if (result.status !== "complete" || result.sourceHash !== hash || result.target !== target
@@ -141,24 +143,51 @@ function readCaptionJob(key, itemCount) {
   try {
     const saved = JSON.parse($persistentStore.read(key) || "null");
     if (saved && /^[0-9a-f-]{36}$/i.test(String(saved.jobId || ""))
-      && saved.itemCount === itemCount && Date.now() - Number(saved.savedAt || 0) < CACHE_TTL_MS) {
+      && saved.itemCount === itemCount && freshCaptionCacheTime(saved.savedAt)) {
       return saved.jobId;
     }
-    if (saved) $persistentStore.write("", key);
+    if (saved) deleteCaptionCache(key);
   } catch (_) {
-    try { $persistentStore.write("", key); } catch (_) {}
+    deleteCaptionCache(key);
   }
   return "";
 }
 
 function writeCaptionJob(key, jobId, itemCount) {
-  try {
-    $persistentStore.write(JSON.stringify({jobId, itemCount, savedAt: Date.now()}), key);
-  } catch (_) {}
+  writeIndexedCaptionCache(key, {jobId, itemCount, savedAt: Date.now()}, JOB_CACHE_INDEX_KEY, JOB_CACHE_PREFIX);
 }
 
 function clearCaptionJob(key) {
-  try { $persistentStore.write("", key); } catch (_) {}
+  deleteCaptionCache(key);
+}
+
+function freshCaptionCacheTime(savedAt) {
+  return Number.isFinite(savedAt) && savedAt <= Date.now() && Date.now() - savedAt < CACHE_TTL_MS;
+}
+
+function deleteCaptionCache(key) {
+  if (typeof key !== "string" || !(key.startsWith(CACHE_DATA_PREFIX) || key.startsWith(JOB_CACHE_PREFIX))) return true;
+  try { return $persistentStore.write(null, key) !== false; } catch (_) { return false; }
+}
+
+function writeIndexedCaptionCache(key, value, indexKey, prefix) {
+  let wrote = false;
+  try {
+    if (!key.startsWith(prefix) || $persistentStore.write(JSON.stringify(value), key) === false) return;
+    wrote = true;
+    let stored;
+    try { stored = JSON.parse($persistentStore.read(indexKey) || "[]"); } catch (_) { stored = []; }
+    const index = [], seen = new Set([key]);
+    for (const item of Array.isArray(stored) ? stored : []) {
+      if (typeof item?.key !== "string" || !item.key.startsWith(prefix) || seen.has(item.key)) continue;
+      seen.add(item.key);
+      if (freshCaptionCacheTime(item.savedAt) || !deleteCaptionCache(item.key)) index.push(item);
+    }
+    index.push({key, savedAt: value.savedAt});
+    // A failed delete stays indexed so a later write can retry it.
+    while (index.length > CACHE_LIMIT && deleteCaptionCache(index[0].key)) index.shift();
+    if ($persistentStore.write(JSON.stringify(index), indexKey) === false) deleteCaptionCache(key);
+  } catch (_) { if (wrote) deleteCaptionCache(key); }
 }
 
 function readCachedParts(key, length) {
@@ -166,29 +195,17 @@ function readCachedParts(key, length) {
     const cached = JSON.parse($persistentStore.read(key) || "null");
     const fresh = cached && Array.isArray(cached.parts)
       && cached.parts.length === length
-      && Date.now() - Number(cached.savedAt || 0) < CACHE_TTL_MS;
+      && freshCaptionCacheTime(cached.savedAt);
     if (fresh) return cached.parts;
-    if (cached) $persistentStore.write("", key);
+    if (cached) deleteCaptionCache(key);
   } catch (_) {
-    try { $persistentStore.write("", key); } catch (_) {}
+    deleteCaptionCache(key);
   }
   return null;
 }
 
 function writeCachedParts(key, parts) {
-  try {
-    const savedAt = Date.now();
-    $persistentStore.write(JSON.stringify({savedAt, parts}), key);
-    const storedIndex = JSON.parse($persistentStore.read(CACHE_INDEX_KEY) || "[]");
-    const index = (Array.isArray(storedIndex) ? storedIndex : [])
-      .filter((item) => item?.key && item.key !== key && savedAt - Number(item.savedAt || 0) < CACHE_TTL_MS);
-    index.push({key, savedAt});
-    while (index.length > CACHE_LIMIT) {
-      const expired = index.shift();
-      if (expired?.key) $persistentStore.write("", expired.key);
-    }
-    $persistentStore.write(JSON.stringify(index), CACHE_INDEX_KEY);
-  } catch (_) {}
+  writeIndexedCaptionCache(key, {savedAt: Date.now(), parts}, CACHE_INDEX_KEY, CACHE_DATA_PREFIX);
 }
 
 function rewriteCaptionRequest(url) {

@@ -338,10 +338,10 @@ function runCaptionClient(queueResults, captionToken = "", options = {}) {
       $request: {url: options.url || "https://www.youtube.com/api/timedtext?v=test&lang=en&enhance_tlang=zh-TW&format=srv3"},
       $response: {status: options.status || 200, body: xml, headers: {"Content-Type": "text/xml"}},
       $persistentStore: {
-        read(key) { return store.get(key) || null; },
+        read(key) { return store.get(key) ?? null; },
         write(value, key) {
-          if (value) store.set(key, value);
-          else store.delete(key);
+          if (value === null) store.delete(key);
+          else store.set(key, value);
           return true;
         },
       },

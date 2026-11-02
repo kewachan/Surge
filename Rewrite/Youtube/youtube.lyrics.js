@@ -401,14 +401,19 @@ globalThis.YouTubeChinese = {
     if (typeof $persistentStore === "undefined") return;
     for (const indexKey of LEGACY_CACHE_INDEX_KEYS) {
       try {
-        const stored = JSON.parse($persistentStore.read(indexKey) || "[]");
+        const raw = $persistentStore.read(indexKey);
+        if (raw === null || raw === undefined) continue;
+        const stored = JSON.parse(raw || "[]");
+        const pending = [];
         if (Array.isArray(stored)) {
           stored.forEach((item) => {
-            if (item?.key) $persistentStore.write("", item.key);
+            if (typeof item?.key !== "string" || !/^YouTubeLyrics\.v\d+\./.test(item.key)) return;
+            try { if ($persistentStore.write(null, item.key) === false) pending.push(item); }
+            catch (_) { pending.push(item); }
           });
         }
+        $persistentStore.write(pending.length ? JSON.stringify(pending) : null, indexKey);
       } catch (_) {}
-      $persistentStore.write("", indexKey);
     }
   }
 
@@ -416,38 +421,44 @@ globalThis.YouTubeChinese = {
     if (typeof $persistentStore === "undefined") return null;
     try {
       const cached = JSON.parse($persistentStore.read(key) || "null");
-      const record = cached ? cacheRecord(cached) : null;
+      const record = cached && Number.isFinite(cached.savedAt) && Number.isFinite(cached.expiresAt)
+        && cached.expiresAt > cached.savedAt ? cacheRecord(cached) : null;
       if (
         record && Array.isArray(record.translations)
         && record.translations.length === expectedLength
         && Date.now() < record.expiresAt
         && isAIResult(record)
       ) return record;
-      if (cached) $persistentStore.write("", key);
+      if (cached) $persistentStore.write(null, key);
     } catch (_) {}
     return null;
   }
 
   function writeCache(key, result) {
     if (typeof $persistentStore === "undefined" || !isAIResult(result)) return;
+    let wrote = false;
     try {
       const record = cacheRecord(result);
       const savedAt = record.savedAt;
-      $persistentStore.write(JSON.stringify(record), key);
-      const stored = JSON.parse($persistentStore.read(CACHE_INDEX_KEY) || "[]");
+      if (!key.startsWith("YouTubeLyrics.v6.") || $persistentStore.write(JSON.stringify(record), key) === false) return;
+      wrote = true;
+      let stored;
+      try { stored = JSON.parse($persistentStore.read(CACHE_INDEX_KEY) || "[]"); } catch (_) { stored = []; }
       const now = Date.now();
-      const index = (Array.isArray(stored) ? stored : [])
-        .filter((item) => (
-          item?.key && item.key !== key
-          && Number(item.expiresAt || (Number(item.savedAt || 0) + CACHE_TTL_MS)) > now
-        ));
-      index.push({ key, savedAt, expiresAt: record.expiresAt });
-      while (index.length > CACHE_LIMIT) {
-        const expired = index.shift();
-        if (expired?.key) $persistentStore.write("", expired.key);
+      const index = [], seen = new Set([key]);
+      const remove = (itemKey) => { try { return $persistentStore.write(null, itemKey) !== false; } catch (_) { return false; } };
+      for (const item of Array.isArray(stored) ? stored : []) {
+        if (typeof item?.key !== "string" || !item.key.startsWith("YouTubeLyrics.v6.") || seen.has(item.key)) continue;
+        seen.add(item.key);
+        const expiresAt = Number(item.expiresAt || (Number(item.savedAt || 0) + CACHE_TTL_MS));
+        if ((Number.isFinite(expiresAt) && expiresAt > now) || !remove(item.key)) index.push(item);
       }
-      $persistentStore.write(JSON.stringify(index), CACHE_INDEX_KEY);
-    } catch (_) {}
+      index.push({ key, savedAt, expiresAt: record.expiresAt });
+      while (index.length > CACHE_LIMIT && remove(index[0].key)) index.shift();
+      if ($persistentStore.write(JSON.stringify(index), CACHE_INDEX_KEY) === false) remove(key);
+    } catch (_) {
+      if (wrote) { try { $persistentStore.write(null, key); } catch (_) {} }
+    }
   }
 
   function activePrewarm(target) {

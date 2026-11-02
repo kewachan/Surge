@@ -72,7 +72,7 @@ test('Adrewrite supplies exact MITM hosts and valid HTTP/HTTPS matching', () => 
 test('native ICU compiles every HTTP pattern and preserves required Bahamut player resources', {skip: process.platform !== 'darwin'}, () => {
   assert(records.length > 1300);
   const source = 'ObjC.import("Foundation"); const records=' + JSON.stringify(records) + ';'
-    + 'const failures=[], hits=[];const urls=["animeVideo","animeVideo2","animeLogo"].map(n=>"https://i2.bahamut.com.tw/JS/ad/"+n+".js?v=123");'
+    + 'const failures=[], hits=[];const urls=["animeVideo","animeVideo2","animeLogo"].flatMap(n=>["",":443"].map(port=>"https://i2.bahamut.com.tw"+port+"/JS/ad/"+n+".js?v=123"));'
     + 'for(const item of records){const error=Ref(); const re=$.NSRegularExpression.regularExpressionWithPatternOptionsError($(item.pattern),0,error);'
     + 'if(ObjC.unwrap(re)===undefined){failures.push(item);continue;}'
     + 'if(item.file==="Rewrite/Advertising.sgmodule")for(const url of urls){if(ObjC.unwrap(re.firstMatchInStringOptionsRange($(url),0,$.NSMakeRange(0,url.length)))!==undefined)hits.push({line:item.line,url:url});}}'

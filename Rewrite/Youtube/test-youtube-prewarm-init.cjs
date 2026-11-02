@@ -21,8 +21,10 @@ function vi(value) {
 const field = (number, body) => Buffer.concat([vi(number * 8 + 2), vi(Buffer.byteLength(body)), Buffer.from(body)]);
 const scalar = (number, value) => Buffer.concat([vi(number * 8), vi(value)]);
 function ump(type, body) {
-  assert(body.length < 0x4000);
-  const length = body.length < 128 ? Buffer.from([body.length]) : Buffer.from([0x80 | body.length % 64, Math.floor(body.length / 64)]);
+  assert(body.length < 0x200000);
+  const length = body.length < 128 ? Buffer.from([body.length]) : body.length < 0x4000
+    ? Buffer.from([0x80 | body.length % 64, Math.floor(body.length / 64)])
+    : Buffer.from([0xc0 | body.length % 32, Math.floor(body.length / 32) % 256, Math.floor(body.length / 8192)]);
   return Buffer.concat([Buffer.from([type]), length, body]);
 }
 function fixture({captions = false, ad = true, nextOnly = false, unicode = false} = {}) {
@@ -132,7 +134,7 @@ test("disabled prewarm, malformed hints and an exhausted playback deadline keep 
 test("module passes prewarm languages, tokens and the switch to the encrypted Music response handler", () => {
   const line = fs.readFileSync(path.join(__dirname, "YouTube.Enhance.sgmodule"), "utf8").split("\n").find((line) => line.startsWith("youtube.init_playback.response ="));
   for (const setting of ["captionLang", "captionToken", "lyricsLang", "lyricsToken", "prewarm"]) assert(line.includes(`"${setting}"`));
-  assert(line.includes("youtube.init.response.js?v=20261101-6"));
+  assert(line.includes("youtube.init.response.js?v=20261103-1"));
 });
 test("private HAR encrypted-only startup replay submits the missing jobs before the lyric/caption panels", {skip: !process.env.PREWARM_HAR_PATH}, async () => {
   const entries = JSON.parse(fs.readFileSync(process.env.PREWARM_HAR_PATH, "utf8")).log.entries;
@@ -156,4 +158,68 @@ test("private HAR encrypted-only startup replay submits the missing jobs before 
   }
   assert(songs > 0, "HAR must contain an encrypted-only startup");
   assert(captions > 0, "HAR must contain a long-caption startup");
+});
+test("private Music startup HAR keeps every audio frame and uses the metadata-only transform", {skip: !process.env.MUSIC_STARTUP_HAR_PATH}, async () => {
+  const entries = JSON.parse(fs.readFileSync(process.env.MUSIC_STARTUP_HAR_PATH, "utf8")).log.entries;
+  const transforms = entries.flatMap((entry) => {
+    const url = new URL(entry.request.url);
+    if (url.hostname !== "youtube-init.hmtw47cv7m.workers.dev" || url.pathname !== "/transform" || entry.response.status !== 200) return [];
+    const decode = (body) => Buffer.from(body.text, body.encoding === "base64" ? "base64" : "utf8");
+    return [{key: Buffer.from(url.searchParams.get("ck"), "base64"),
+      before: worker.__test.parseUmp(decode(entry.request.postData)), after: worker.__test.parseUmp(decode(entry.response.content))}];
+  });
+  let startups = 0, mediaBytes = 0;
+  for (const entry of entries) {
+    const url = new URL(entry.request.url), content = entry.response?.content;
+    if (!url.hostname.endsWith(".googlevideo.com") || url.pathname !== "/initplayback" || url.searchParams.get("c") !== "IOS_MUSIC"
+      || entry.request.method !== "POST" || entry.response.status !== 200 || content?.encoding !== "base64") continue;
+    const captured = Buffer.from(content.text, "base64");
+    if (captured.length < 1024 * 1024) continue;
+    const parts = worker.__test.parseUmp(captured), slots = [];
+    let selected = false;
+    for (const [index, part] of parts.entries()) {
+      if (part.type === 10) selected = worker.__test.parseProto(part.data).find((field) => field.no === 1 && field.wire === 0)?.value.value === 25;
+      else if (part.type === 11 && selected) { slots.push(index); selected = false; }
+    }
+    const pair = transforms.find((candidate) => {
+      const data = candidate.after.filter((part) => part.type === 11);
+      return data.length === slots.length && data.every((part, index) => Buffer.from(part.data).equals(parts[slots[index]].data));
+    });
+    assert(pair, "post-rewrite HAR body must match its captured transform response");
+    const clean = await client(captured, pair.key, {settings: {prewarm: false}});
+    assert(clean.calls.some((call) => call.url.includes("/transform?")));
+    assert(Buffer.from(clean.output.body || captured).equals(captured), "already filtered startup must be idempotent");
+    // Surge records this body after rewriting. Restore only its corresponding
+    // captured request metadata in memory, retaining the real media frames.
+    const originalMetadata = pair.before.filter((part) => part.type === 11);
+    assert.equal(originalMetadata.length, slots.length);
+    slots.forEach((slot, index) => { parts[slot] = originalMetadata[index]; });
+    const original = Buffer.concat(parts.map((part) => ump(part.type, Buffer.from(part.data))));
+    const run = await client(original, pair.key);
+    assert(run.output.body, "original captured ad metadata must be rewritten with prewarm enabled");
+    assert(run.calls.some((call) => call.url.endsWith("/lyrics/prewarm")), "startup must retain lyric prewarm");
+    assert(run.calls.filter((call) => new URL(call.url).hostname === "youtube-init.hmtw47cv7m.workers.dev")
+      .every((call) => new URL(call.url).pathname === "/transform"),
+      "audio must not be routed through the full Worker proxy");
+    assert(!run.logs.some((line) => /failed|unsupported|timeout/i.test(line)));
+    const before = worker.__test.parseUmp(original), after = worker.__test.parseUmp(new Uint8Array(run.output.body));
+    assert.equal(after.length, before.length);
+    let encrypted = false, transformed = 0;
+    for (let index = 0; index < before.length; index++) {
+      const oldPart = before[index], newPart = after[index];
+      assert.equal(newPart.type, oldPart.type);
+      if (oldPart.type === 11 && encrypted) {
+        encrypted = false;
+        if (!Buffer.from(newPart.data).equals(oldPart.data)) transformed++;
+        continue;
+      }
+      assert(Buffer.from(newPart.data).equals(oldPart.data), "non-metadata data must remain byte-for-byte identical");
+      if (oldPart.type === 10) encrypted = worker.__test.parseProto(oldPart.data).find((field) => field.no === 1 && field.wire === 0)?.value.value === 25;
+      if (oldPart.type === 21) mediaBytes += oldPart.data.length;
+    }
+    assert(transformed > 0, "captured ad metadata must still be filtered");
+    startups++;
+  }
+  assert(startups >= 2, "HAR must include both large Music startup responses");
+  assert(mediaBytes > 2 * 1024 * 1024, "large audio payloads must be verified");
 });

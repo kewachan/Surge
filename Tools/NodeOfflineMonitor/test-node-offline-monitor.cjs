@@ -42,7 +42,7 @@ async function execute(input = {}) {
     timers.add(deadline);
     const callback = fn => queueMicrotask(() => { try { fn(); } catch (error) { reject(error); } });
     const context = {
-      Date: Clock, console: {log: value => logs.push(String(value))},
+      Date: Clock, URL, console: {log: value => logs.push(String(value))},
       $argument: new URLSearchParams(input.argument || {}).toString(),
       $surge: {logbook() {}},
       $persistentStore: {
@@ -109,8 +109,8 @@ test('module declares two optional maintenance times without malformed empty def
   assert(!moduleText.includes('maintenance_enabled'));
   assert(!moduleText.includes('maintenance_utc_offset'));
   assert(moduleText.includes('ability=http-client-policy'));
-  assert(moduleText.includes('node-offline-monitor.js?v=1.9.0'));
-  assert(script.includes('Node Offline Monitor for Surge — v1.9.0'));
+  assert(moduleText.includes('node-offline-monitor.js?v=1.10.0'));
+  assert(script.includes('Node Offline Monitor for Surge — v1.10.0'));
 });
 
 test('maintenance skips all Surge APIs and probes and preserves stored state without notifications', async () => {

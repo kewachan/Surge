@@ -25,9 +25,10 @@ const DENIED_URL_REWRITES = new Set([
 const DENIED_MITM_HOSTS = new Set(["s.youtube.com"]);
 const BROAD_AD_PATH_RULE = '"(?i)\\b\\/ad\\/" - reject';
 const PROTECTED_AD_PATH_RULE = '"(?i)^(?!https?://i2\\.bahamut\\.com\\.tw/JS/ad/(?:animeVideo2?|animeLogo)\\.js(?:[?#]|$)).*\\b\\/ad\\/" - reject';
+const PROTECTED_AD_PATH_WITH_PORT_RULE = '"(?i)^(?!https?://i2\\.bahamut\\.com\\.tw(?::443)?/JS/ad/(?:animeVideo2?|animeLogo)\\.js(?:[?#]|$)).*\\b\\/ad\\/" - reject';
 
 export function protectPlayerResources(rules) {
-  return uniqueInOrder(rules.map(rule => rule === BROAD_AD_PATH_RULE ? PROTECTED_AD_PATH_RULE : rule));
+  return uniqueInOrder(rules.map(rule => [BROAD_AD_PATH_RULE, PROTECTED_AD_PATH_RULE].includes(rule) ? PROTECTED_AD_PATH_WITH_PORT_RULE : rule));
 }
 
 const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
