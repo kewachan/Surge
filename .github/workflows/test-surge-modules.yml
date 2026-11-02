@@ -1,0 +1,36 @@
+name: Test Surge Modules
+
+on:
+  push:
+    branches: [main]
+    paths: ['Rewrite/**', 'Tools/**', '.github/workflows/test-surge-modules.yml']
+  pull_request:
+    paths: ['Rewrite/**', 'Tools/**', '.github/workflows/test-surge-modules.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-surge-modules-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+      - name: Check generated bundles
+        run: |
+          node Rewrite/Youtube/build-prewarm.cjs --check
+          node Rewrite/Youtube/build-lyrics-chinese.cjs --check
+      - name: Run offline regressions
+        run: |
+          node --test Tools/Testing/test-module-contracts.cjs Tools/NetworkInfo/network-info.test.cjs Tools/NodeOfflineMonitor/test-node-offline-monitor.cjs Tools/NodeOfflineMonitor/test-node-budgets.cjs Tools/CTMUsage/ctm-usage.test.cjs Tools/Rewrite/*.test.mjs Tools/Advertising/update-advertising-module.test.mjs Tools/Filters/update-imported-filters.test.mjs Rewrite/GeneralAdBlock/test-general-safety.cjs Rewrite/Bilibili/test-*.cjs Rewrite/Youtube/test-youtube-prewarm.cjs Rewrite/Youtube/test-youtube-prewarm-init.cjs Rewrite/Youtube/test-youtube-song-cache.cjs Rewrite/Youtube/test-youtube-module-safety.cjs
+          node Rewrite/Youtube/test-youtube-caption-queue.cjs
+          node Rewrite/Youtube/test-youtube-lyrics-order.cjs
+          git diff --exit-code
