@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.7.0
+ * Node Offline Monitor for Surge — v1.8.0
  * Discovers custom proxy policies from the active profile and notifies once
  * when a node goes offline or resumes.
  */
@@ -13,6 +13,7 @@
   const PROBE_TIMEOUT = 8;
   const CONFIRMATION_DELAY_MS = 5000;
   const REQUIRED_CONFIRMATIONS = 5;
+  const SUPPORTED_CHECK_MINUTES = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30];
   const BUILT_INS = new Set([
     "DIRECT", "REJECT", "REJECT-DROP", "REJECT-NO-DROP", "REJECT-TINYGIF",
     "PROXY", "GLOBAL", "FINAL"
@@ -34,6 +35,20 @@
       completed = true;
       $done();
     }
+  }
+
+  function skipUnsupportedInterval() {
+    if (typeof $cronexp !== "string" || typeof $trigger !== "undefined") return false;
+    const fields = $cronexp.trim().split(/\s+/);
+    if (fields.length === 6 && fields[0] === "0") fields.shift();
+    if (fields.length !== 5 || fields.slice(1).some(field => field !== "*") ||
+        !fields[0].startsWith("*/")) return false;
+    const step = fields[0].slice(2);
+    if (/^\d+$/.test(step) && SUPPORTED_CHECK_MINUTES.includes(Number(step))) return false;
+    log("Unsupported check interval: " + step + ". Use " + SUPPORTED_CHECK_MINUTES.join(", ") +
+      " minutes; automatic node checks skipped; previous state preserved");
+    finish();
+    return true;
   }
 
   function parseArguments(raw) {
@@ -581,6 +596,8 @@
     log(`Monitor failed: ${message}`);
     finish();
   }
+
+  if (skipUnsupportedInterval()) return;
 
   api("GET", "v1/profiles/current", { sensitive: 0 }, (profileError, profileResult) => {
     if (profileError) {
