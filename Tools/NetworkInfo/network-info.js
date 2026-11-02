@@ -2,6 +2,7 @@
   "use strict";
 
   const NAME = "Network Info";
+  const DEADLINE_MS = 110000;
   const DEFAULTS = {
     proxyEndpoint: "https://api-ipv4.ip.sb/ip",
     timeout: 5,
@@ -14,17 +15,26 @@
   const options = parseArguments(
     typeof $argument === "string" ? $argument : ""
   );
+  const deadline = Date.now() + DEADLINE_MS;
+  let completed = false;
+  const timer = setTimeout(() => fail(new Error("Public IP lookup time budget exhausted")), DEADLINE_MS);
 
   run()
-    .then($done)
-    .catch(error => {
-      console.log(`[${NAME}] ${messageFor(error)}`);
-      $done({
-        title: "Network information unavailable",
-        content: messageFor(error),
-        style: "error"
-      });
-    });
+    .then(finish)
+    .catch(fail);
+
+  function finish(result) {
+    if (completed) return;
+    completed = true;
+    if (typeof clearTimeout === "function") clearTimeout(timer);
+    $done(result);
+  }
+
+  function fail(error) {
+    if (completed) return;
+    console.log(`[${NAME}] ${messageFor(error)}`);
+    finish({title: "Network information unavailable", content: messageFor(error), style: "error"});
+  }
 
   async function run() {
     const proxy = await lookup(options.proxyEndpoint);
@@ -39,6 +49,21 @@
 
   function parseArguments(raw) {
     const values = {};
+    // Version 2 places the raw URL last, preserving query separators and encoding.
+    const rawUrl = raw.startsWith("version=2&") ? /&proxy_endpoint=([\s\S]*)$/.exec(raw) : null;
+    const legacy = /^proxy_endpoint=([\s\S]*)&timeout=([^&]*)&retries=([^&]*)&retry_delay=([^&]*)$/.exec(raw);
+    let urlCaptured = false;
+    if (rawUrl) {
+      values.proxy_endpoint = rawUrl[1].trim();
+      raw = raw.slice(0, rawUrl.index);
+      urlCaptured = true;
+    } else if (legacy) {
+      let endpoint = legacy[1];
+      if (/^https?%3a%2f%2f/i.test(endpoint)) { try { endpoint = decodeURIComponent(endpoint); } catch (_) {} }
+      values.proxy_endpoint = endpoint;
+      raw = `timeout=${legacy[2]}&retries=${legacy[3]}&retry_delay=${legacy[4]}`;
+      urlCaptured = true;
+    }
 
     String(raw).split("&").forEach(part => {
       const separator = part.indexOf("=");
@@ -49,7 +74,7 @@
       try {
         value = decodeURIComponent(value);
       } catch (_) {}
-      values[key] = value;
+      if (!urlCaptured || key !== "proxy_endpoint") values[key] = value;
     });
 
     return {
@@ -82,6 +107,7 @@
     let lastError;
 
     for (let attempt = 0; attempt <= options.retries; attempt += 1) {
+      if (completed || deadline - Date.now() < 100) break;
       try {
         const ip = await fetchIPv4(endpoint);
         return enrich(ip);
@@ -92,7 +118,9 @@
           `[${NAME}] Lookup failed; retrying ` +
           `(${attempt + 1}/${options.retries}): ${messageFor(error)}`
         );
-        await delay(options.retryDelay * 1000);
+        const wait = options.retryDelay * 1000;
+        if (Date.now() + wait + 100 >= deadline) break;
+        await delay(wait);
       }
     }
 
@@ -103,7 +131,7 @@
     return new Promise((resolve, reject) => {
       $httpClient.get({
         url,
-        timeout: options.timeout,
+        timeout: Math.max(0.1, Math.min(options.timeout, (deadline - Date.now()) / 1000)),
         headers: { Accept: "text/plain" }
       }, (error, response, data) => {
         if (error) {

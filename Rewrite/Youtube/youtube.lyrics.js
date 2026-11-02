@@ -674,7 +674,7 @@ globalThis.YouTubeChinese = {
       workerError = new Error("Worker skipped to preserve Google fallback budget");
     }
     const status = Number(workerError?.status || 0);
-    if (status && status !== 429 && status < 500) throw workerError;
+    if ([400, 413, 415, 422].includes(status)) throw workerError;
     try {
       return await fetchGoogleTranslations(lines, target, deadline);
     } catch (googleError) {

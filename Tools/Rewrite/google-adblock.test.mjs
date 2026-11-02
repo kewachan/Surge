@@ -59,7 +59,7 @@ test('the installed Google rule matches search and pagination responses with a r
   for (const url of [searchUrl, 'https://www.google.com/search?asearch=arc', 'https://www.google.com/search?async=arc_id%3Aexample']) {
     assert.ok(new RegExp(pattern).test(url));
   }
-  assert.ok(line.endsWith('/google-adblock.js?v=1.0.20'));
+  assert.ok(line.endsWith('/google-adblock.js?v=1.0.21'));
   assert.ok(moduleText.includes('www.google.com'));
 });
 
@@ -195,4 +195,14 @@ test('private Google HAR replay removes the captured footer promotion without ch
     assert.equal(changedScripts, 1, 'only the footer insertion script may change');
   }
   assert.ok(replayed > 0, 'HAR must contain the captured footer promotion');
+});
+
+ test('all four legacy card variants remain idempotent beside ordinary search content', () => {
+  for (const classes of ['B2VR9 CJHX3e', 'CJHX3e B2VR9']) for (const quote of ['"', String.fromCharCode(92, 34)]) {
+    const input = `<div class=${quote}${classes}${quote}>Ask and explore anything with the Google app</div>` + organic;
+    const once = rewrite(input).body;
+    assert.equal(rewrite(once).body, once);
+    assert(once.includes(organic));
+    assert.equal((once.match(/display:none!important/g) || []).length, 1);
+  }
 });

@@ -16,7 +16,7 @@ if (body.includes(original)) body = body.replace(original, updated);
 if (body.includes(previous)) body = body.replace(previous, updated);
 if (body.split(updated).length !== 2) throw new Error("Upstream player handler changed; review the capture hook");
 const helper = fs.readFileSync(path.join(__dirname, "youtube.prewarm.client.js"), "utf8");
-fs.writeFileSync(file, `${begin}${helper}\n${end}${body}`);
+const responseOutput = `${begin}${helper}\n${end}${body}`;
 const initFile = path.join(__dirname, "youtube.init.response.js");
 let init = fs.readFileSync(initFile, "utf8");
 if (init.startsWith(begin)) {
@@ -24,4 +24,12 @@ if (init.startsWith(begin)) {
   if (index < 0) throw new Error("Malformed init prewarm bootstrap");
   init = init.slice(index + end.length);
 }
-fs.writeFileSync(initFile, `${begin}${helper}\n${end}${init}`);
+const initOutput = `${begin}${helper}\n${end}${init}`;
+if (process.argv.includes("--check")) {
+  if (fs.readFileSync(file, "utf8") !== responseOutput || fs.readFileSync(initFile, "utf8") !== initOutput) {
+    throw new Error("Prewarm bundles are stale; run build-prewarm.cjs");
+  }
+} else {
+  fs.writeFileSync(file, responseOutput);
+  fs.writeFileSync(initFile, initOutput);
+}

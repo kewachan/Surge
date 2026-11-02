@@ -23,6 +23,12 @@ const DENIED_URL_REWRITES = new Set([
   "^https?:\\/\\/s\\.youtube\\.com\\/api\\/stats\\/qoe(?:\\?.*)?$ - reject",
 ]);
 const DENIED_MITM_HOSTS = new Set(["s.youtube.com"]);
+const BROAD_AD_PATH_RULE = '"(?i)\\b\\/ad\\/" - reject';
+const PROTECTED_AD_PATH_RULE = '"(?i)^(?!https?://i2\\.bahamut\\.com\\.tw/JS/ad/(?:animeVideo2?|animeLogo)\\.js(?:[?#]|$)).*\\b\\/ad\\/" - reject';
+
+export function protectPlayerResources(rules) {
+  return uniqueInOrder(rules.map(rule => rule === BROAD_AD_PATH_RULE ? PROTECTED_AD_PATH_RULE : rule));
+}
 
 const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_TARGET = path.resolve(SCRIPT_DIRECTORY, "../../Rewrite/Advertising.sgmodule");
@@ -319,7 +325,7 @@ export function calculateChange(existingValues, proposedValues) {
 export function renderTargetModule({ mitmHosts, preamble, urlRewrite }) {
   return (
     `${preamble}\n\n[URL Rewrite]\n` +
-    `${urlRewrite.join("\n")}\n\n[MITM]\n` +
+    `${protectPlayerResources(urlRewrite).join("\n")}\n\n[MITM]\n` +
     `hostname = %APPEND% ${mitmHosts.join(",")}\n`
   );
 }
@@ -457,9 +463,9 @@ export async function run(argv = process.argv.slice(2)) {
   }
 
   const proposedRules = applyUpstreamDelta(
-    target.urlRewrite,
-    previousSnapshot.urlRewrite,
-    nextSnapshot.urlRewrite,
+    protectPlayerResources(target.urlRewrite),
+    protectPlayerResources(previousSnapshot.urlRewrite),
+    protectPlayerResources(nextSnapshot.urlRewrite),
     DENIED_URL_REWRITES,
   );
   const proposedHosts = applyUpstreamDelta(

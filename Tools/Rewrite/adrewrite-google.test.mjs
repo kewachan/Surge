@@ -1,66 +1,142 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import test from 'node:test';
-
+import {execFileSync} from 'node:child_process';
+import {test} from 'node:test';
 const moduleText = fs.readFileSync(new URL('../../Rewrite/Adrewrite.sgmodule', import.meta.url), 'utf8');
-const googleSection = moduleText.split('#Google\n')[1].split('\n\n')[0];
-const redirects = googleSection.split('\n').filter(line => line.endsWith(' 302')).map(line => {
-  const [pattern, replacement, type] = line.split(/\s+/);
-  assert.equal(type, '302');
-  return {pattern: new RegExp(pattern), replacement};
-});
-
-function rewrite(url) {
-  for (const rule of redirects) {
-    if (rule.pattern.test(url)) return url.replace(rule.pattern, rule.replacement);
-  }
-  return url;
+const rules = moduleText.split('\n').map(line => /^(\S+) (\S+) 302$/.exec(line))
+  .filter(match => match && match[1].includes('google'))
+  .map(match => ({pattern: new RegExp(match[1]), replacement: match[2]}));
+function redirect(url) {
+  const rule = rules.find(rule => rule.pattern.test(url));
+  return rule ? url.replace(rule.pattern, rule.replacement) : url;
 }
 
-test('Safari search retains existing region preferences and parameters after client', () => {
-  const input = 'https://www.google.com/search?q=hello%20world&client=safari&ie=UTF-8&oe=UTF-8&ei=opaque%2Bvalue';
-  const output = rewrite(input);
-  assert.equal(output, 'https://www.google.com/search?q=hello%20world&ie=UTF-8&oe=UTF-8&ei=opaque%2Bvalue&gl=hk&safe=off&udm=14');
-  assert.equal(rewrite(output), output, 'must not create a redirect loop');
-});
+function permutations(fields) {
+  if (fields.length === 0) return [[]];
+  return fields.flatMap((field, index) => permutations(fields.filter((_, i) => i !== index))
+    .map(rest => [field, ...rest]));
+}
 
-test('ordinary searches use Web even without a Safari client parameter or with reordered parameters', () => {
-  for (const query of ['q=hello', 'client=safari&q=hello&hl=zh-HK', 'hl=zh-HK&q=hello',
-    'q=%E6%BE%B3%E9%96%80%26udm%3D2', 'q=hello&x=tbm%3Disch', 'q=hello&start=10',
-    'q=hello&gl=tw&safe=active']) {
-    const input = 'https://www.google.com/search?' + query;
-    const output = rewrite(input);
-    assert.equal(output, 'https://www.google.com/search?udm=14&' + query);
-    assert.equal(rewrite(output), output);
+const searchUrl = 'https://www.google.com/search?';
+const orders = permutations(['client=safari', 'q=C%2B%2B+%E9%A6%99%E6%B8%AF%20%26%20Mac%2520Safari', 'hl=en', 'rls=en-US']);
+const queryTail = '&ie=UTF-8&oe=UTF-8&start=20&ei=keep%2Bvalue&oq=raw%2fSlash%2F&filter=0&filter=1';
+const fragment = '#results%20here?udm=50&client=keep';
+const orderedCases = orders.map(fields => {
+  const query = [...fields.slice(0, -1), ...queryTail.slice(1).split('&'), fields.at(-1)];
+  return {
+    input: searchUrl + query.join('&') + fragment,
+    expected: searchUrl + query.filter(field => field !== 'client=safari').join('&')
+      + '&gl=hk&safe=off&udm=14' + fragment
+  };
+});
+const reportedCases = [
+  { input: searchUrl + 'hl=en&client=safari&q=abc', expected: searchUrl + 'hl=en&q=abc&gl=hk&safe=off&udm=14' },
+  { input: searchUrl + 'hl=en&q=abc&client=safari', expected: searchUrl + 'hl=en&q=abc&gl=hk&safe=off&udm=14' }
+];
+const explicitCases = orders.flatMap(fields => ['udm=0', 'udm=2', 'udm=14', 'udm=50', 'tbm=isch', 'tbm=nws', 'tbm=vid']
+  .flatMap(mode => Array.from({ length: fields.length + 1 }, (_, index) => {
+    const query = [...fields.slice(0, index), mode, ...fields.slice(index)];
+    const input = searchUrl + [...query.slice(0, -1), ...queryTail.slice(1).split('&'), query.at(-1)].join('&') + fragment;
+    return { input, expected: input };
+  })));
+const boundaryCases = [
+  'https://www.google.com/search?hl=en&client=safari&q=',
+  'https://www.google.com/search?hl=en&q=&client=safari',
+  'https://www.google.com/search?hl=en&client=safari&rls=en#q=fragment-only',
+  'https://www.google.com/about?hl=en&client=safari&q=test',
+  'https://example.com/search?hl=en&client=safari&q=test',
+  'https://www.google.com.example.com/search?hl=en&client=safari&q=test'
+].map(input => ({ input, expected: input }));
+
+test('Safari client-first searches use Hong Kong and retain query data', () => {
+  for (const tail of ['q=Mac%20Safari', 'rls=en&q=C%2B%2B%20%26%20Mac&ie=UTF-8&oe=UTF-8&start=10']) {
+    const input = 'https://www.google.com/search?client=safari&' + tail + '#results';
+    const output = redirect(input), parsed = new URL(output), before = new URL(input);
+    assert.equal(parsed.searchParams.get('gl'), 'hk');
+    assert.equal(parsed.searchParams.get('safe'), 'off');
+    assert.equal(parsed.searchParams.get('udm'), '14');
+    assert.equal(parsed.searchParams.has('client'), false);
+    for (const [key, value] of before.searchParams) if (key !== 'client') assert.equal(parsed.searchParams.get(key), value);
+    assert.equal(parsed.hash, '#results');
+    assert.equal(redirect(output), output);
   }
 });
 
-test('explicit Web, AI, image, video, news and other search modes stay untouched', () => {
-  for (const mode of ['udm=14', 'udm=50', 'udm=2', 'udm=7', 'udm=28', 'tbm=isch', 'tbm=vid',
-    'tbm=nws', 'tbm=shop', 'tbm=bks', 'udm=', 'tbm=']) {
-    for (const query of [`q=hello&client=safari&${mode}`, `${mode}&q=hello&client=safari`,
-      `q=hello&${mode}&client=safari`]) {
-      const input = 'https://www.google.com/search?' + query;
-      assert.equal(rewrite(input), input);
+test('existing query-first searches retain the same redirect', () => {
+  const input = 'https://www.google.com/search?q=Mac%20Safari&client=safari&start=10&ei=keep#results';
+  assert.equal(redirect(input), 'https://www.google.com/search?q=Mac%20Safari&start=10&ei=keep&gl=hk&safe=off&udm=14#results');
+});
+
+test('explicit image, AI and other search modes are retained without redirects', () => {
+  for (const mode of ['udm=2', 'udm=14', 'udm=50', 'tbm=isch', 'tbm=nws']) {
+    for (const query of ['client=safari&rls=en&q=test&', 'q=test&client=safari&']) {
+      const input = 'https://www.google.com/search?' + query + mode;
+      assert.equal(redirect(input), input);
     }
   }
 });
 
-test('fragments and encoded values survive, and only the exact existing Google search host matches', () => {
-  const safari = 'https://www.google.com/search?q=hello%26client%3Dtest&client=safari&hl=en#section';
-  const fallback = 'https://www.google.com/search?q=hello%26client%3Dtest#section';
-  assert.equal(rewrite(safari), 'https://www.google.com/search?q=hello%26client%3Dtest&hl=en&gl=hk&safe=off&udm=14#section');
-  assert.equal(rewrite(fallback), 'https://www.google.com/search?udm=14&q=hello%26client%3Dtest#section');
-  for (const input of ['https://www.google.com/search?client=safari', 'https://www.google.com/search?q=',
-    'https://www.google.com/search?other=q=hello', 'https://www.google.com/searching?q=hello',
-    'https://www.google.com/ads/on-device/conversions?q=hello', 'https://www.google.com.evil.test/search?q=hello',
-    'https://accounts.google.com/search?q=hello', 'https://example.com/path/https://www.google.com/search?q=hello']) {
-    assert.equal(rewrite(input), input);
+test('the existing client-free fallback stays idempotent and preserves parameters', () => {
+  const input = 'https://www.google.com/search?ei=keep&q=test&start=10#results';
+  const output = redirect(input);
+  assert.equal(output, 'https://www.google.com/search?udm=14&ei=keep&q=test&start=10#results');
+  assert.equal(redirect(output), output);
+});
+
+test('non-search pages, missing queries and unrelated domains are untouched', () => {
+  for (const input of ['https://www.google.com/search?client=safari&q=',
+    'https://www.google.com/search?client=safari&rls=en',
+    'https://www.google.com/about?client=safari&q=test',
+    'https://example.com/search?client=safari&q=test']) assert.equal(redirect(input), input);
+});
+
+test('reported Safari middle-client and trailing-client searches receive all defaults', () => {
+  for (const { input, expected } of reportedCases) assert.equal(redirect(input), expected);
+});
+
+test('all 24 Safari parameter orders preserve raw query bytes, pagination, duplicates and fragments', () => {
+  assert.equal(orderedCases.length, 24);
+  for (const { input, expected } of orderedCases) {
+    const output = redirect(input);
+    assert.equal(output, expected);
+    assert.equal(redirect(output), output);
+    assert.deepEqual(new URL(output).searchParams.getAll('filter'), ['0', '1']);
   }
 });
 
-test('existing Google ad blocks and MITM coverage remain in place', () => {
-  const blocks = googleSection.split('\n').filter(line => line.endsWith(' - reject'));
-  assert.equal(blocks.length, 3);
+test('explicit search modes are untouched in all 840 parameter arrangements', () => {
+  assert.equal(explicitCases.length, 840);
+  for (const { input, expected } of explicitCases) assert.equal(redirect(input), expected);
+});
+
+test('middle-client handling retains the search scope and requires a nonempty query', () => {
+  for (const { input, expected } of boundaryCases) assert.equal(redirect(input), expected);
+  const input = searchUrl + 'hl=en&q=literal%26client%3Dsafari%26udm%3D50&notclient=safari#client=safari';
+  assert.equal(redirect(input), searchUrl + 'udm=14&' + input.slice(searchUrl.length));
+});
+
+test('native macOS ICU replacements match the expected redirects without a second redirect', {
+  skip: process.platform !== 'darwin'
+}, () => {
+  const data = rules.map(rule => ({ pattern: rule.pattern.source, replacement: rule.replacement }));
+  const cases = [...reportedCases, ...orderedCases, ...explicitCases, ...boundaryCases];
+  const source = 'ObjC.import("Foundation"); const data=' + JSON.stringify(data) + ', cases=' + JSON.stringify(cases)
+    + '; const compileFailures=[], compiled=data.map((rule,i)=>{const error=Ref(),re=$.NSRegularExpression.regularExpressionWithPatternOptionsError($(rule.pattern),0,error);'
+    + 'if(ObjC.unwrap(re)===undefined){compileFailures.push(i);return null;}return {re:re,replacement:rule.replacement};});'
+    + 'function redirect(input){for(const rule of compiled){if(!rule)continue;const range=$.NSMakeRange(0,input.length);'
+    + 'if(ObjC.unwrap(rule.re.firstMatchInStringOptionsRange($(input),0,range))!==undefined)'
+    + 'return ObjC.unwrap(rule.re.stringByReplacingMatchesInStringOptionsRangeWithTemplate($(input),0,range,$(rule.replacement)));}return input;}'
+    + 'let mismatchCount=0;const examples=[];cases.forEach((c,i)=>{const output=redirect(c.input),again=redirect(output);'
+    + 'if(output!==c.expected||again!==output){mismatchCount++;if(examples.length<3)examples.push({index:i,output:output,again:again});}});'
+    + 'JSON.stringify({compileFailures:compileFailures,mismatchCount:mismatchCount,examples:examples});';
+  const result = JSON.parse(execFileSync('/usr/bin/osascript', ['-l', 'JavaScript'], {
+    input: source, encoding: 'utf8', timeout: 15000
+  }));
+  assert.deepEqual(result, { compileFailures: [], mismatchCount: 0, examples: [] });
+});
+
+ test('existing Google ad blocks and MITM coverage remain in place', () => {
+  const section = moduleText.split('#Google\n')[1].split('\n\n')[0];
+  assert.equal(section.split('\n').filter(line => line.endsWith(' - reject')).length, 3);
   assert(moduleText.includes('google.com, *.google.com,'));
 });

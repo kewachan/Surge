@@ -1,13 +1,11 @@
 #!name=Adblock Rewrite & Redirect
 #!author=kewachan
 #!desc=For daily App advertisement blocking and redirect
-#!date=2026-10-23
+#!date=2026-11-02
 
 [URL Rewrite]
 ##### Macau #####
 #Macau Taxi
-(https:\/\/plus.maasplus.com\/prod-api\/app\/advert\/list\?bannerPosition=0&+)(type=1) 302
-(https:\/\/plus.maasplus.com\/prod-api\/app\/advert\/list\?bannerPosition=0&+)(type=3) 302
 ^https?:\/\/plus.maasplus.com\/prod-api\/app\/advert\/list\?adPage=travel - reject
 
 #CTMbuddy
@@ -31,7 +29,7 @@
 ^https?:\/\/api.tikbee.com\/v2\/wm\/ad\/getByKey\? - reject
 ^https?:\/\/api.tikbee.com\/v1\/advertis\/getAdByKey\? - reject
 ^https?:\/\/api.tikbee.com\/v1\/advertis\/getByKey\? - reject
-^http?:\/\/statistic.live.126.net\/statics\/report\/common\/form - reject
+^https?:\/\/statistic.live.126.net\/statics\/report\/common\/form - reject
 
 #MPay
 ^https?:\/\/pay.macaupass.com\/tdrmp\/adver\/ - reject
@@ -131,7 +129,8 @@
 (https?:\/\/zh.wikipedia.org\/)(zh)(\/.+) $1zh-hk$3 302
 
 #Google
-^(https?:\/\/www\.google\.com\/search\?)(?!(?:[^&#]*&)*(?:udm|tbm)=)(q=[^&#]+(?:&[^&#]*)*?)&client=[^&#]*(&[^#]*)?(#.*)?$ $1$2$3&gl=hk&safe=off&udm=14$4 302
+^(https?:\/\/www\.google\.com\/search\?)(?=(?:[^&#]*&)*q=[^&#]+)(?!(?:[^&#]*&)*(?:udm|tbm)=)client=[^&#]*&([^#]+)(#.*)?$ $1$2&gl=hk&safe=off&udm=14$3 302
+^(https?:\/\/www\.google\.com\/search\?)(?=(?:[^&#]*&)*q=[^&#]+)(?!(?:[^&#]*&)*(?:udm|tbm)=)([^#]+?)&client=[^&#]*(&[^#]*)?(#.*)?$ $1$2$3&gl=hk&safe=off&udm=14$4 302
 ^(https?:\/\/www\.google\.com\/search\?)(?=(?:[^&#]*&)*q=[^&#]+)(?!(?:[^&#]*&)*(?:udm|tbm)=)([^#]+)(#.*)?$ $1udm=14&$2$3 302
 ^https?:\/\/www\.google\.com\/ads\/on-device\/conversions - reject
 ^https?:\/\/play\.google\.com\/newsstand\/api\/v3\/people\/me\/analytics - reject
@@ -159,4 +158,4 @@
 ^https?:\/\/sf19-static\.i18n-pglstatp\.com\/obj\/ad-pattern-sg\/3p_monitor - reject
 
 [MITM]
-hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, *.macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, *.xiaohongshu.com, *.rnote.com, *.manhuashe.com, *.lihkg.com, a.line.me, gw.line.naver.jp, legy.line-apps.com, w.line.me, sch.line.me, static.line-scdn.net, web-mmap-pay.line-apps.com, scdn.line-apps.com, crs-event.line.me, cix.line-apps.com, api.whatsapp.net, dit.whatsapp.net, *.amap.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, *.shoalter.com, *.fanpiece.com, unwire.hk, *.idownloadblog.com, *.mobile01.com, *.yimg.com, *.alicdn.com, *.i18n-pglstatp.com
+hostname = %APPEND% wikipedia.org, *.wikipedia.org, google.com, *.google.com, *.ctm.net, plus.maasplus.com, macaumovie.com, *.macaumovie.com, *.namkwong.com.mo, *.mo.gov.mo, *.tikbee.com, *.macaupass.com, *.mfoodapp.com, *.xiaohongshu.com, *.rnote.com, *.manhuashe.com, *.lihkg.com, a.line.me, gw.line.naver.jp, legy.line-apps.com, w.line.me, sch.line.me, static.line-scdn.net, web-mmap-pay.line-apps.com, scdn.line-apps.com, crs-event.line.me, cix.line-apps.com, api.whatsapp.net, dit.whatsapp.net, *.amap.com, *.pinterest.com, *.4gamers.com.tw, *.ampproject.org, 3p.ampproject.net, d-*.ampproject.net, statistic.live.126.net, *.shoalter.com, *.fanpiece.com, unwire.hk, *.idownloadblog.com, *.mobile01.com, *.yimg.com, *.alicdn.com, *.i18n-pglstatp.com

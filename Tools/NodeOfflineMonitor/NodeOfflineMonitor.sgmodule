@@ -5,4 +5,4 @@
 #!arguments-desc=Check Every Min: Use 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30 minutes (default: 15). Other values skip automatic checks. Test URL: auto uses the profile test URL. Wake System: wake the system for scheduled checks.\n\nPause From / Pause Until: Optional maintenance times in HH:mm, using device time. Leave both empty to disable; overnight windows are supported.
 
 [Script]
-Node Offline Monitor = type=cron, cronexp="*/{{{Check Every Min}}} * * * *", wake-system={{{Wake System}}}, timeout=180, ability=http-client-policy, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.8.0, argument="test_url={{{Test URL}}}&maintenance_start={{{Pause From}}}&maintenance_end_time={{{Pause Until}}}"
+Node Offline Monitor = type=cron, cronexp="*/{{{Check Every Min}}} * * * *", wake-system={{{Wake System}}}, timeout=180, ability=http-client-policy, script-path=https://raw.githubusercontent.com/kewachan/Surge/main/Tools/NodeOfflineMonitor/node-offline-monitor.js?v=1.9.0, argument="version=2&maintenance_start={{{Pause From}}}&maintenance_end_time={{{Pause Until}}}&test_url={{{Test URL}}}"

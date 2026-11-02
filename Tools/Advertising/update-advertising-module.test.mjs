@@ -9,11 +9,27 @@ import {
   parseSourceDefinitions,
   parseTargetModule,
   parseUrlRewriteSection,
+  protectPlayerResources,
   renderTargetModule,
   setModuleUpdatedDate,
 } from "./update-advertising-module.mjs";
 
 const SOURCE = "https://raw.githubusercontent.com/example/repo/main/module.sgmodule";
+
+test("generic ad-path filtering preserves only the three Bahamut player scripts across upstream deltas", () => {
+  const broad = '"(?i)\\b\\/ad\\/" - reject';
+  const [protectedRule] = protectPlayerResources([broad]);
+  const pattern = protectedRule.match(/^"(.*)" - reject$/u)[1];
+  const regex = new RegExp(pattern.replace(/^\(\?i\)/u, ""), "i");
+  for (const name of ["animeVideo", "animeVideo2", "animeLogo"]) {
+    for (const suffix of ["", "?v=123", "#part"]) assert(!regex.test(`https://i2.bahamut.com.tw/JS/ad/${name}.js${suffix}`));
+  }
+  for (const url of ["https://example.test/ad/animeVideo.js", "https://i2.bahamut.com.tw/JS/ad/banner.js",
+    "https://i2.bahamut.com.tw/JS/ad/animeVideo.js.evil", "https://i2.bahamut.com.tw.evil/JS/ad/animeVideo.js"]) assert(regex.test(url));
+  assert.deepEqual(protectPlayerResources([protectedRule, broad]), [protectedRule]);
+  assert.deepEqual(applyUpstreamDelta([protectedRule], protectPlayerResources([broad]), [], new Set()), []);
+  assert.deepEqual(applyUpstreamDelta([], [], protectPlayerResources([broad]), new Set()), [protectedRule]);
+});
 
 test("parses source roles from the module header", () => {
   const definitions = parseSourceDefinitions(`

@@ -1,5 +1,5 @@
 /**
- * Node Offline Monitor for Surge — v1.8.0
+ * Node Offline Monitor for Surge — v1.9.0
  * Discovers custom proxy policies from the active profile and notifies once
  * when a node goes offline or resumes.
  */
@@ -8,6 +8,8 @@
   "use strict";
 
   const STORE_KEY = "node_offline_monitor_state_v1";
+  const LEASE_KEY = "node_offline_monitor_lease_v1";
+  const DEADLINE_MS = 170000;
   const FALLBACK_TEST_URL = "http://www.gstatic.com/generate_204";
   const PROBE_CONCURRENCY = 16;
   const PROBE_TIMEOUT = 8;
@@ -29,10 +31,20 @@
   let completed = false;
   let unsupportedResultLogged = false;
   let directFallbackUsed = false;
+  let deadlineTimer;
+  let leaseOwner = "";
+  const deadline = Date.now() + DEADLINE_MS;
 
   function finish() {
     if (!completed) {
       completed = true;
+      if (deadlineTimer && typeof clearTimeout === "function") clearTimeout(deadlineTimer);
+      if (leaseOwner) {
+        try {
+          const lease = JSON.parse($persistentStore.read(LEASE_KEY) || "null");
+          if (lease?.owner === leaseOwner) $persistentStore.write(null, LEASE_KEY);
+        } catch (_) {}
+      }
       $done();
     }
   }
@@ -53,13 +65,28 @@
 
   function parseArguments(raw) {
     const values = {};
+    const rawUrl = raw.startsWith("version=2&") ? /&test_url=([\s\S]*)$/.exec(raw) : null;
+    const legacy = /^test_url=([\s\S]*)&maintenance_start=([^&]*)&maintenance_end_time=([^&]*)$/.exec(raw);
+    let urlCaptured = false;
+    if (rawUrl) {
+      values.test_url = rawUrl[1].trim();
+      raw = raw.slice(0, rawUrl.index);
+      urlCaptured = true;
+    } else if (legacy) {
+      let endpoint = legacy[1];
+      if (/^https?%3a%2f%2f/i.test(endpoint)) { try { endpoint = decodeURIComponent(endpoint); } catch (_) {} }
+      values.test_url = endpoint;
+      raw = `maintenance_start=${legacy[2]}&maintenance_end_time=${legacy[3]}`;
+      urlCaptured = true;
+    }
+
     raw.split("&").forEach(part => {
       const index = part.indexOf("=");
       if (index < 1) return;
       const key = part.slice(0, index).trim();
       let value = part.slice(index + 1).trim();
       try { value = decodeURIComponent(value); } catch (_) {}
-      values[key] = value;
+      if (!urlCaptured || key !== "test_url") values[key] = value;
     });
     return {
       testUrl: values.test_url || "auto",
@@ -90,6 +117,15 @@
 
   function skipMaintenance() {
     if (completed) return true;
+    if (leaseOwner) {
+      let lease;
+      try { lease = JSON.parse($persistentStore.read(LEASE_KEY) || "null"); } catch (_) {}
+      if (lease?.owner !== leaseOwner) {
+        log("Node check lease changed; previous state preserved");
+        finish();
+        return true;
+      }
+    }
     const maintenance = maintenanceStatus(new Date());
     if (!maintenance.active) return false;
     log(`Maintenance window ${maintenance.label}: node checks skipped; previous state preserved`);
@@ -177,7 +213,7 @@
     return Object.keys(container).filter(key => {
       const value = container[key];
       if (["error", "message", "status", "time", "winner"].includes(key)) return false;
-      if (rejectGroups && GROUP_TYPES.has(itemType(value))) return false;
+      if (rejectGroups && (GROUP_TYPES.has(itemType(value)) || NON_PROXY_TYPES.has(itemType(value)))) return false;
       return value !== null && value !== undefined;
     });
   }
@@ -401,6 +437,7 @@
     }
 
     function settle(policy, error, response) {
+      if (completed) return;
       active--;
       settled++;
       const status = Number(response && response.status);
@@ -421,7 +458,7 @@
           $httpClient.head({
             url,
             policy,
-            timeout: PROBE_TIMEOUT,
+            timeout: Math.max(0.1, Math.min(PROBE_TIMEOUT, (deadline - Date.now()) / 1000)),
             "auto-redirect": true
           }, (error, response) => settle(policy, error, response));
         } catch (error) {
@@ -597,7 +634,27 @@
     finish();
   }
 
-  if (skipUnsupportedInterval()) return;
+  if (skipUnsupportedInterval() || skipMaintenance()) return;
+  let lease;
+  try { lease = JSON.parse($persistentStore.read(LEASE_KEY) || "null"); } catch (_) {}
+  try {
+    if (lease && lease.expiresAt > Date.now() && lease.expiresAt <= Date.now() + 180000) {
+      log("Node checks already running; previous state preserved");
+      finish();
+      return;
+    }
+    leaseOwner = `${Date.now()}:${Math.random()}`;
+    if (!$persistentStore.write(JSON.stringify({owner: leaseOwner, expiresAt: deadline}), LEASE_KEY)) throw new Error("Lease write failed");
+  } catch (_) {
+    leaseOwner = "";
+    log("Unable to reserve node checks; previous state preserved");
+    finish();
+    return;
+  }
+  deadlineTimer = setTimeout(() => {
+    log("Node check time budget exhausted; previous state preserved; no outage or recovery was confirmed");
+    finish();
+  }, DEADLINE_MS);
 
   api("GET", "v1/profiles/current", { sensitive: 0 }, (profileError, profileResult) => {
     if (profileError) {

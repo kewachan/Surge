@@ -71,10 +71,11 @@ async function execute(input = {}) {
           cb(null, {status: 204}, '');
         });
       }},
+      clearTimeout,
       setTimeout: (fn, delay) => {
-        assert.equal(delay, 5000, 'Keep the original confirmation delay');
-        if (input.beforeRetry) input.beforeRetry();
-        const timer = setTimeout(() => { try { fn(); } catch (error) { reject(error); } }, 1);
+        assert([5000, 170000].includes(delay), 'Keep the confirmation delay and bounded run deadline');
+        if (delay === 5000 && input.beforeRetry) input.beforeRetry();
+        const timer = setTimeout(() => { try { fn(); } catch (error) { reject(error); } }, delay === 5000 ? 1 : delay);
         timers.add(timer);
         return timer;
       },
@@ -85,7 +86,7 @@ async function execute(input = {}) {
     try { new vm.Script(script).runInNewContext(context, {timeout: 500}); } catch (error) { reject(error); }
   }).finally(() => { for (const timer of timers) clearTimeout(timer); });
   assert.equal(doneCount, 1);
-  return {store, calls, probes, writes, notifications, logs};
+  return {store, calls, probes, writes: writes.filter(([name]) => name !== 'node_offline_monitor_lease_v1'), notifications, logs};
 }
 
 test('module declares two optional maintenance times without malformed empty defaults', () => {
@@ -108,8 +109,8 @@ test('module declares two optional maintenance times without malformed empty def
   assert(!moduleText.includes('maintenance_enabled'));
   assert(!moduleText.includes('maintenance_utc_offset'));
   assert(moduleText.includes('ability=http-client-policy'));
-  assert(moduleText.includes('node-offline-monitor.js?v=1.8.0'));
-  assert(script.includes('Node Offline Monitor for Surge — v1.8.0'));
+  assert(moduleText.includes('node-offline-monitor.js?v=1.9.0'));
+  assert(script.includes('Node Offline Monitor for Surge — v1.9.0'));
 });
 
 test('maintenance skips all Surge APIs and probes and preserves stored state without notifications', async () => {

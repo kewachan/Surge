@@ -37,4 +37,7 @@ globalThis.YouTubeChinese = {
 };
 })();
 `;
-fs.writeFileSync(file, `${begin}${prefix}${end}${body}`);
+const output = `${begin}${prefix}${end}${body}`;
+if (process.argv.includes("--check")) {
+  if (fs.readFileSync(file, "utf8") !== output) throw new Error("Chinese conversion bundle is stale; run build-lyrics-chinese.cjs");
+} else fs.writeFileSync(file, output);

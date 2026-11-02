@@ -1,45 +1,18 @@
-let body = $response.body || "";
-const url = $request.url || "";
-
-if (!body || !/https?:\/\/comicapi\.manhuashe\.com\//i.test(url)) {
-  $done({ body });
-  return;
-}
-
-const setWelfareTabbar = (obj) => {
-  if (!obj || typeof obj !== "object") {
-    return false;
-  }
-
-  let changed = false;
-  if (obj.base && typeof obj.base === "object") {
-    if (obj.base.welfare_tabbar_show !== 0) {
-      obj.base.welfare_tabbar_show = 0;
-      changed = true;
-    }
-  }
-  return changed;
-};
-
-let changed = false;
-
-try {
-  const json = JSON.parse(body);
-  const target = json.response && typeof json.response === "object" ? json.response : json;
-  changed = setWelfareTabbar(target);
-  body = JSON.stringify(json);
-} catch (err) {
-  if (/"welfare_tabbar_show"\s*:\s*\d+/i.test(body)) {
-    body = body.replace(/("welfare_tabbar_show"\s*:\s*)\d+/gi, "$10");
-    changed = true;
-  } else if (/"base"\s*:\s*\{[^}]*\}/i.test(body)) {
-    body = body.replace(/("base"\s*:\s*\{)/i, "$1\"welfare_tabbar_show\":0,");
-    changed = true;
-  }
-}
-
-if (!changed) {
-  // keep raw body unchanged
-}
-
-$done({ body });
+(function () {
+  "use strict";
+  try {
+    if (Number($response.status ?? $response.statusCode ?? 200) !== 200 ||
+        !/^https?:\/\/comicapi\.manhuashe\.com\//i.test($request.url || "") ||
+        typeof $response.body !== "string") return $done({});
+    let unsafeNumber = false;
+    const json = JSON.parse($response.body, (_key, value) => {
+      if (typeof value === "number" && (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value)))) unsafeNumber = true;
+      return value;
+    });
+    if (!json || typeof json !== "object" || unsafeNumber) return $done({});
+    const target = json.response && typeof json.response === "object" ? json.response : json;
+    if (!target.base || typeof target.base !== "object" || Array.isArray(target.base) || target.base.welfare_tabbar_show === 0) return $done({});
+    target.base.welfare_tabbar_show = 0;
+    $done({body: JSON.stringify(json)});
+  } catch (_) { $done({}); }
+})();
