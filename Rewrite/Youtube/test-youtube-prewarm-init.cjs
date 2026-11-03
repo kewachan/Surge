@@ -5,6 +5,7 @@ const vm = require("node:vm");
 const crypto = require("node:crypto");
 const zlib = require("node:zlib");
 const {test, before} = require("node:test");
+const {run: runSurge} = require("../../Tools/Testing/surge-harness.cjs");
 let worker;
 const token = "a".repeat(64);
 const videoId = "abcdefghijk";
@@ -50,7 +51,7 @@ function hint(response) {
   return encoded ? JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) : null;
 }
 async function client(input, key, options = {}) {
-  const calls = [], store = new Map([["YouTubePlaybackKeys.v2.youtubeMusic", JSON.stringify({entries: [
+  const calls = [], store = options.store || new Map([["YouTubePlaybackKeys.v2.youtubeMusic", JSON.stringify({entries: [
     {clientKey: key.toString("base64"), expiresAt: Date.now() + 60000}]})]]);
   const logs = [], timers = new Set(); let count = 0, resolve, reject;
   const result = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -94,6 +95,135 @@ async function client(input, key, options = {}) {
     return {output, calls, store, logs};
   } finally { clearTimeout(guard); for (const timer of timers) clearTimeout(timer); }
 }
+
+const musicKeys = "YouTubePlaybackKeys.v2.youtubeMusic";
+function configFixture(key, ttl = 259200) {
+  return field(1, field(16, field(7, field(138536474, field(146311580,
+    Buffer.concat([field(1, key), field(2, Buffer.alloc(128, 9)), scalar(3, ttl)]))))));
+}
+async function captureConfig(store, key, options = {}) {
+  return runSurge("Rewrite/Youtube/youtube.response.js", {
+    store, now: options.now ?? Date.now(), argument: '{"prewarm":false}',
+    request: {url: "https://youtubei.googleapis.com/youtubei/v1/log_event", headers: {
+      "User-Agent": options.userAgent || "com.google.ios.youtubemusic/9.43.2"}},
+    response: {status: 200, headers: {"Content-Type": "application/x-protobuf"}, body: new Uint8Array(configFixture(key, options.ttl))},
+    globals: options.globals,
+  });
+}
+test("Music key rotation retains the key for an in-flight startup without replacing the current config", async () => {
+  const f = fixture(), nextKey = Buffer.alloc(32, 8), store = new Map(), now = Date.now();
+  await captureConfig(store, f.key, {now});
+  await captureConfig(store, nextKey, {now: now + 3000});
+  assert.equal(JSON.parse(store.get("YouTubeConfig")).youtubeMusic.clientKey, nextKey.toString("base64"));
+  const run = await client(f.input, f.key, {store, settings: {prewarm: false}});
+  assert(run.output.body, "the older in-flight metadata must still be filtered");
+  assert.equal(new URL(run.calls.find(call => call.url.includes("/transform?")).url).searchParams.get("ck"), f.key.toString("base64"));
+  assert.equal(Buffer.from(worker.__test.parseUmp(run.output.body).at(-1).data).toString(), "audio-unchanged");
+  assert(!run.logs.some(line => /failed|refresh requested/.test(line)));
+});
+test("Music key history expires, deduplicates and keeps at most eight recent keys", async () => {
+  const store = new Map(), now = Date.now();
+  for (let i = 1; i <= 10; i++) await captureConfig(store, Buffer.alloc(32, i), {now: now + i * 1000});
+  await captureConfig(store, Buffer.alloc(32, 10), {now: now + 11000});
+  let entries = JSON.parse(store.get(musicKeys)).entries;
+  assert.equal(entries.length, 8);
+  assert.equal(entries[0].clientKey, Buffer.alloc(32, 10).toString("base64"));
+  assert.equal(new Set(entries.map(entry => entry.clientKey)).size, 8);
+  assert.equal(entries[0].expiresAt, now + 611000, "history lasts at most ten minutes, despite a three-day server key");
+  await captureConfig(store, Buffer.alloc(32, 11), {now: now + 612000, ttl: 60});
+  entries = JSON.parse(store.get(musicKeys)).entries;
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].expiresAt, now + 672000, "a shorter upstream lifetime is respected");
+});
+test("Music key history handles malformed storage and cannot interrupt normal config capture", async () => {
+  const key = Buffer.alloc(32, 7);
+  for (const saved of ["{", "null", "[]", '{"entries":[null,{"expiresAt":"later"}]}']) {
+    const store = new Map([[musicKeys, saved]]), run = await captureConfig(store, key);
+    assert.equal(run.done.length, 1);
+    assert.equal(JSON.parse(store.get(musicKeys)).entries.length, 1);
+    assert.equal(JSON.parse(store.get("YouTubeConfig")).youtubeMusic.clientKey, key.toString("base64"));
+  }
+  const store = new Map(), run = await captureConfig(store, key, {globals: {$persistentStore: {
+    read: name => store.get(name) || null,
+    write(value, name) { if (name === musicKeys) throw new Error("Synthetic history write failure"); store.set(name, value); return true; },
+  }}});
+  assert.equal(run.done.length, 1);
+  assert.deepEqual(Object.keys(run.done[0]), [], "config responses remain untouched even if history storage fails");
+  assert.equal(JSON.parse(store.get("YouTubeConfig")).youtubeMusic.clientKey, key.toString("base64"));
+});
+test("Music key history ignores invalid keys, expired lifetimes and ordinary YouTube config", async () => {
+  for (const options of [{ttl: 0}, {userAgent: "com.google.ios.youtube/21"}]) {
+    const store = new Map(); await captureConfig(store, Buffer.alloc(32, 7), options);
+    assert(!store.has(musicKeys));
+  }
+  const store = new Map(); await captureConfig(store, Buffer.alloc(31, 7));
+  assert(!store.has(musicKeys));
+});
+test("an unknown Music key preserves playback and requests a later config refresh", async () => {
+  const f = fixture(), store = new Map();
+  await captureConfig(store, Buffer.alloc(32, 8));
+  const run = await client(f.input, f.key, {store, settings: {prewarm: false}});
+  assert.deepEqual(Object.keys(run.output), []);
+  assert.equal(run.calls.length, 0);
+  assert.equal(JSON.parse(store.get(musicKeys)).refreshNeeded, true);
+});
+test("private Music key-rotation HAR filters the previously missed first startup and preserves all media", {skip: !process.env.MUSIC_KEY_ROTATION_HAR_PATH}, async () => {
+  const entries = JSON.parse(fs.readFileSync(process.env.MUSIC_KEY_ROTATION_HAR_PATH, "utf8")).log.entries;
+  const endTime = entry => Date.parse(entry.startedDateTime) + entry.time;
+  const decode = body => Buffer.from(body.text, body.encoding === "base64" ? "base64" : "utf8");
+  const first = entries.filter(entry => {
+    const url = new URL(entry.request.url);
+    return url.hostname.endsWith(".googlevideo.com") && url.pathname === "/initplayback" &&
+      url.searchParams.get("c") === "IOS_MUSIC" && entry.request.method === "POST" && entry.response?.status === 200;
+  }).sort((a, b) => Date.parse(a.startedDateTime) - Date.parse(b.startedDateTime))[0];
+  assert(first, "capture must include a native Music startup");
+  const store = new Map(), versions = [];
+  for (const entry of entries.filter(entry => /\/youtubei\/v1\/(?:log_event|config)(?:\?|$)/.test(entry.request.url) &&
+    entry.response?.status === 200 && entry.response.content?.text && endTime(entry) < endTime(first)).sort((a, b) => endTime(a) - endTime(b))) {
+    await runSurge("Rewrite/Youtube/youtube.response.js", {store, now: Date.now(), argument: '{"prewarm":false}',
+      request: {url: entry.request.url, headers: Object.fromEntries(entry.request.headers.map(header => [header.name, header.value]))},
+      response: {status: 200, headers: {}, body: new Uint8Array(decode(entry.response.content))}});
+    const value = JSON.parse(store.get("YouTubeConfig") || "{}").youtubeMusic?.clientKey;
+    if (value && !versions.includes(value)) versions.push(value);
+  }
+  assert(versions.length >= 2, "two captured configs must finish before the initial startup returns");
+  const input = decode(first.response.content), before = worker.__test.parseUmp(input);
+  let encrypted = false, signatureFields;
+  for (const part of before) {
+    if (part.type === 10) encrypted = worker.__test.parseProto(part.data).find(field => field.no === 1 && field.wire === 0)?.value.value === 25;
+    else if (part.type === 11 && encrypted) { signatureFields = worker.__test.parseProto(part.data); break; }
+  }
+  assert(signatureFields);
+  const get = number => signatureFields.find(field => field.no === number && field.wire === 2)?.value;
+  const matches = value => crypto.timingSafeEqual(Buffer.from(get(2)), crypto.createHmac("sha256", Buffer.from(value, "base64").subarray(16))
+    .update(Buffer.concat([get(1), get(3)])).digest());
+  const current = JSON.parse(store.get("YouTubeConfig")).youtubeMusic.clientKey;
+  assert(!matches(current), "the singleton config reproduces the captured overwrite race");
+  const retained = versions.find(matches);
+  assert(retained, "a previously observed config must authenticate the missed response");
+  const key = Buffer.from(retained, "base64"), result = await client(input, key, {store, settings: {prewarm: false}});
+  assert(result.output.body, "the actual missed metadata must now be transformed");
+  assert.equal(new URL(result.calls.find(call => call.url.includes("/transform?")).url).searchParams.get("ck"), retained);
+  assert((await worker.__test.processUmpResponse(input, key)).removed > 0, "captured startup contains ad metadata");
+  assert.equal((await worker.__test.processUmpResponse(result.output.body, key)).removed, 0);
+  const after = worker.__test.parseUmp(result.output.body);
+  assert.equal(after.length, before.length);
+  encrypted = false; let changed = 0, mediaBytes = 0;
+  for (let index = 0; index < before.length; index++) {
+    const oldPart = before[index], newPart = after[index];
+    assert.equal(newPart.type, oldPart.type);
+    if (oldPart.type === 11 && encrypted) {
+      encrypted = false;
+      if (!Buffer.from(oldPart.data).equals(newPart.data)) changed++;
+      continue;
+    }
+    assert(Buffer.from(oldPart.data).equals(newPart.data), "all non-metadata frames stay byte-identical");
+    if (oldPart.type === 10) encrypted = worker.__test.parseProto(oldPart.data).find(field => field.no === 1 && field.wire === 0)?.value.value === 25;
+    if (oldPart.type === 21) mediaBytes += oldPart.data.length;
+  }
+  assert(changed > 0); assert(mediaBytes > 500000);
+  assert(!result.logs.some(line => /failed|refresh requested/.test(line)));
+});
 test("encrypted-only Music exposes authenticated current-player metadata only when requested", async () => {
   const f = fixture({captions: true, unicode: true});
   assert.equal(hint(await transform(f.metadata, f.key, false)), null);
