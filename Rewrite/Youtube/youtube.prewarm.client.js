@@ -1,8 +1,9 @@
 // Playback-time prewarm bootstrap. Embedded into both response scripts by the build helper.
-(() => {
+(function YouTubePrewarm(backgroundOptions) {
   const options = {captionLang: "off", captionToken: "", lyricsLang: "off", lyricsToken: "", prewarm: true, debug: false};
   try {
-    if (typeof $argument === "string" && !$argument.includes("{{{")) Object.assign(options, JSON.parse($argument));
+    if (backgroundOptions && typeof backgroundOptions === "object") Object.assign(options, backgroundOptions);
+    else if (typeof $argument === "string" && !$argument.includes("{{{")) Object.assign(options, JSON.parse($argument));
     else if (typeof $argument === "object" && $argument) Object.assign(options, $argument);
   } catch (_) {}
   const plans = [];
@@ -11,10 +12,11 @@
   const LEASE = "YouTubeTranslation.PrewarmLease.v1";
   const KICK = "YouTubeTranslation.PrewarmKick.v1";
   const PENDING_TTL_MS = 20 * 60 * 1000;
-  const background = typeof $request === "undefined";
+  const background = Boolean(backgroundOptions && typeof backgroundOptions === "object") || typeof $request === "undefined";
   const runId = `${Date.now()}:${Math.random()}`;
   const originalDone = $done;
   let finished = false;
+  function cancelTimer(timer) { if (typeof clearTimeout === "function") clearTimeout(timer); }
 
   function language(value) {
     const text = String(value || "").trim();
@@ -119,7 +121,7 @@
     const deadline = Date.now() + sourceMs;
     const finish = (lines) => {
       if (settled || finished) return;
-      settled = true; clearTimeout(timer);
+      settled = true; cancelTimer(timer);
       if (lines?.length && lines.length <= 384 && lines.every((line) => line.length <= 500) && lines.join("").length <= 19200) {
         plan.payload.sourceLines = lines;
         if (options.debug) console.log("YouTube lyrics prewarm: source: device");
@@ -221,7 +223,14 @@
       if (!force && Number.isFinite(last?.savedAt) && last.savedAt <= Date.now()
         && Date.now() - last.savedAt < 60000) return;
       if ($persistentStore.write(JSON.stringify({savedAt: Date.now()}), KICK) === false) return;
-      $httpAPI("POST", "v1/scripting/cron/evaluate", {script_name: "youtube.prewarm.background"}, () => {});
+      const settings = {};
+      for (const key of ["captionLang", "captionToken", "lyricsLang", "lyricsToken", "prewarm", "debug"]) settings[key] = options[key];
+      // Local one-shot evaluation has its own session and no automatic schedule.
+      // Settings exist only in this invocation; the pending queue stores no tokens.
+      $httpAPI("POST", "v1/scripting/evaluate", {
+        script_text: `(${YouTubePrewarm.toString()})(${JSON.stringify(settings)});`,
+        mock_type: "generic", timeout: 8
+      }, () => {});
     } catch (_) {}
   }
   function queuePlans(plans) {
@@ -312,7 +321,7 @@
     const trace = (plan, state) => { if (options.debug) console.log(`YouTube ${plan.kind} prewarm: ${state}`); };
     const finish = () => {
       if (finished) return;
-      finished = true; clearTimeout(timer);
+      finished = true; cancelTimer(timer);
       for (const plan of pending) if (plan.waiting) trace(plan, "submitted-unconfirmed");
       try {
         const lease = JSON.parse($persistentStore.read(LEASE) || "null");
@@ -376,12 +385,12 @@
         const sourceUrl = plan.payload.url.replace(/([?&])fmt=[^&#]*&?/g, "$1").replace(/[?&]$/, "") + "&fmt=srv3";
         $httpClient.get({url: sourceUrl, headers: sourceHeaders, timeout: 0.3}, (error, response, body) => {
           if (sourceSettled || finished) return;
-          sourceSettled = true; clearTimeout(sourceTimer);
+          sourceSettled = true; cancelTimer(sourceTimer);
           if (!error && Number(response?.status ?? response?.statusCode) === 200 && typeof body === "string"
             && body.length <= 350000 && /<timedtext\b/.test(body)) plan.payload.body = body;
           submit();
         });
-      } catch (_) { sourceSettled = true; clearTimeout(sourceTimer); submit(); }
+      } catch (_) { sourceSettled = true; cancelTimer(sourceTimer); submit(); }
     }
   };
   if (background) {

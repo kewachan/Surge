@@ -293,9 +293,14 @@ function bootstrap(options = {}) {
   context.$httpAPI = (method, endpoint, body, callback) => {
     apiCalls.push({method, endpoint, body});
     if (options.noKick) return;
-    const child = {...context, $request: undefined, $response: undefined,
-      $done: (output) => { backgroundOutputs.push(output); callback({}); }};
-    vm.runInNewContext(source, child);
+    const timers = new Set();
+    const child = {...context, $request: options.requestStub ? {headers: {}} : undefined, $response: undefined,
+      setTimeout(fn, delay) { const timer = setTimeout(fn, delay); timers.add(timer); return timer; },
+      clearTimeout(timer) { clearTimeout(timer); timers.delete(timer); },
+      $done: (output) => { for (const timer of timers) clearTimeout(timer); backgroundOutputs.push(output); callback({}); }};
+    delete child.$argument;
+    if (options.noClearTimeout) delete child.clearTimeout;
+    vm.runInNewContext(body.script_text, child);
   };
   vm.runInNewContext(source, context);
   return {store, calls, outputs, backgroundOutputs, apiCalls, logs, context};
@@ -334,10 +339,11 @@ function runBackground(store, options = {}) {
   return nativeRun("Rewrite/Youtube/youtube.prewarm.client.js", {store, now: Date.now(),
     globals: {$request: undefined}, argument: JSON.stringify(backgroundArgs), ...options});
 }
-test("a lost API kick leaves a credential-free durable job for cron, without delaying playback", async () => {
+test("one-shot background work retains credential-free jobs and accepts a delayed ACK without blocking playback", async () => {
   const boot = queuedLyrics();
-  assert.equal(boot.apiCalls.length, 1); assert.equal(boot.apiCalls[0].endpoint, "v1/scripting/cron/evaluate");
-  assert.equal(boot.apiCalls[0].body.script_name, "youtube.prewarm.background");
+  assert.equal(boot.apiCalls.length, 1); assert.equal(boot.apiCalls[0].endpoint, "v1/scripting/evaluate");
+  assert.equal(boot.apiCalls[0].body.mock_type, "generic"); assert.equal(boot.apiCalls[0].body.timeout, 8);
+  assert.equal(typeof boot.apiCalls[0].body.script_text, "string");
   assert(!boot.store.get(pendingKey).includes(token));
   const background = await runBackground(boot.store, {http: (_method, req) => {
     if (req.url.includes("/next?")) return {delay: 200, body: '{"browseEndpoint":{"browseId":"MPLYtest"}}'};
@@ -359,21 +365,39 @@ test("repeated playback packets deduplicate kicks while a new song and bounded r
     assert.equal(boot.outputs[0].body, "audio");
   }
   for (let i = 0; i < 50; i++) play("abcdefghijk");
-  assert.equal(calls, 1, "one pending song must not start 50 cron evaluations");
+  assert.equal(calls, 1, "one pending song must not start 50 background evaluations");
   play("abcdefghijl"); assert.equal(calls, 2, "new work bypasses retry cooldown");
   store.set("YouTubeTranslation.PrewarmKick.v1", JSON.stringify({savedAt: Date.now() - 60001}));
   play("abcdefghijl"); assert.equal(calls, 3, "a lost kick stays retryable after one minute");
   store.set("YouTubeTranslation.PrewarmKick.v1", "invalid JSON");
   play("abcdefghijm"); assert.equal(calls, 4, "damaged throttle metadata cannot disable a new song");
 });
-test("the 15-minute backup can recover retained work without returning to the playback wait", async () => {
+test("an idle response cannot run queued work and the module has no automatic prewarm schedule", () => {
   const boot = queuedLyrics();
-  const queuedAt = JSON.parse(boot.store.get(pendingKey))[0].queuedAt;
-  const late = await runBackground(boot.store, {now: queuedAt + 15 * 60000 + 1000,
-    http: (_method, req) => req.url.includes("workers.dev")
-      ? {status: 202, body: JSON.stringify({jobId: "b".repeat(64)})} : {body: "{}"}});
-  assert.equal(late.requests.length, 2); assert.equal(late.done.length, 1);
-  assert(!boot.store.has(pendingKey));
+  const idle = bootstrap({store: boot.store, settings: backgroundArgs});
+  idle.context.$done({body: "unrelated response"});
+  assert.equal(idle.apiCalls.length, 0); assert.equal(idle.calls.length, 0);
+  assert.equal(idle.outputs[0].body, "unrelated response"); assert(boot.store.has(pendingKey));
+  const module = fs.readFileSync(path.join(directory, "YouTube.Enhance.sgmodule"), "utf8");
+  assert(!/\b(?:cronexp|wake-system)=/.test(module));
+  assert(!module.includes("youtube.prewarm.background ="));
+});
+test("a later playback event retries a missed kick without a timer or persistent credentials", () => {
+  const boot = queuedLyrics();
+  boot.store.set("YouTubeTranslation.PrewarmKick.v1", JSON.stringify({savedAt: Date.now() - 60001}));
+  const again = bootstrap({store: boot.store, settings: backgroundArgs});
+  again.context.YouTubePrewarm.capture({videoId: "abcdefghijk"}, true); again.context.$done({body: "audio"});
+  assert.equal(again.apiCalls.length, 1); assert.equal(again.backgroundOutputs.length, 1);
+  assert.equal(again.outputs[0].body, "audio"); assert(!boot.store.has(pendingKey));
+  assert([...boot.store.values()].every(value => !String(value).includes(token)), "no token or generated script is persisted");
+});
+test("self-contained generic evaluation supports an empty request stub without clearTimeout or inherited arguments", () => {
+  const boot = bootstrap({noClearTimeout: true, requestStub: true, settings: {lyricsLang: "off"}});
+  boot.context.$httpClient.get = (_request, callback) => callback(null, {status: 200}, xml);
+  boot.context.YouTubePrewarm.capture({captions: {captionTracks: [{baseUrl: sourceUrl, languageCode: "en"}]}}, false);
+  boot.context.$done({body: "player"});
+  assert.equal(boot.outputs[0].body, "player"); assert.equal(boot.backgroundOutputs.length, 1);
+  assert.equal(boot.calls.length, 1); assert.equal(JSON.parse(boot.calls[0].body).body, xml);
 });
 test("background failures retain work, active leases prevent duplicates, and disabling prewarm clears pending work", async () => {
   const boot = queuedLyrics(), started = Date.now();
