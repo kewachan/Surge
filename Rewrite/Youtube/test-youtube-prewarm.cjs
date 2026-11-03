@@ -350,6 +350,31 @@ test("a lost API kick leaves a credential-free durable job for cron, without del
   assert.equal(JSON.parse(boot.store.get("YouTubeLyrics.Prewarm.v1.abcdefghijk.zh-Hant")).confirmed, true);
   assert(!boot.store.has(pendingKey)); assert(!boot.store.has(leaseKey));
 });
+test("repeated playback packets deduplicate kicks while a new song and bounded retry remain immediate", () => {
+  const store = new Map(); let calls = 0;
+  function play(videoId) {
+    const boot = bootstrap({noKick: true, store, settings: backgroundArgs});
+    boot.context.YouTubePrewarm.capture({videoId}, true); boot.context.$done({body: "audio"});
+    calls += boot.apiCalls.length;
+    assert.equal(boot.outputs[0].body, "audio");
+  }
+  for (let i = 0; i < 50; i++) play("abcdefghijk");
+  assert.equal(calls, 1, "one pending song must not start 50 cron evaluations");
+  play("abcdefghijl"); assert.equal(calls, 2, "new work bypasses retry cooldown");
+  store.set("YouTubeTranslation.PrewarmKick.v1", JSON.stringify({savedAt: Date.now() - 60001}));
+  play("abcdefghijl"); assert.equal(calls, 3, "a lost kick stays retryable after one minute");
+  store.set("YouTubeTranslation.PrewarmKick.v1", "invalid JSON");
+  play("abcdefghijm"); assert.equal(calls, 4, "damaged throttle metadata cannot disable a new song");
+});
+test("the 15-minute backup can recover retained work without returning to the playback wait", async () => {
+  const boot = queuedLyrics();
+  const queuedAt = JSON.parse(boot.store.get(pendingKey))[0].queuedAt;
+  const late = await runBackground(boot.store, {now: queuedAt + 15 * 60000 + 1000,
+    http: (_method, req) => req.url.includes("workers.dev")
+      ? {status: 202, body: JSON.stringify({jobId: "b".repeat(64)})} : {body: "{}"}});
+  assert.equal(late.requests.length, 2); assert.equal(late.done.length, 1);
+  assert(!boot.store.has(pendingKey));
+});
 test("background failures retain work, active leases prevent duplicates, and disabling prewarm clears pending work", async () => {
   const boot = queuedLyrics(), started = Date.now();
   boot.store.set(leaseKey, JSON.stringify({owner: "other", until: started + 7000}));
@@ -359,6 +384,7 @@ test("background failures retain work, active leases prevent duplicates, and dis
   const failure = await runBackground(boot.store, {http: (_method, req) => req.url.includes("workers.dev")
     ? {error: "timeout"} : {body: "{}"}});
   assert.equal(failure.requests.length, 2); assert(boot.store.has(pendingKey)); assert(!boot.store.has(leaseKey));
+  assert.equal(failure.apiCalls.length, 0, "failed snapshot jobs must not create an invocation loop");
   const disabled = await runBackground(boot.store, {argument: JSON.stringify({...backgroundArgs, prewarm: false})});
   assert.equal(disabled.requests.length, 0); assert(!boot.store.has(pendingKey));
   const empty = await runBackground(boot.store);
@@ -366,7 +392,7 @@ test("background failures retain work, active leases prevent duplicates, and dis
 });
 test("an accepted background job cannot delete newly queued work and storage errors cannot stall the player", async () => {
   const boot = queuedLyrics(); let newId;
-  await runBackground(boot.store, {http: (_method, req) => {
+  const running = await runBackground(boot.store, {http: (_method, req) => {
     if (!req.url.includes("workers.dev")) return {body: "{}"};
     const pending = JSON.parse(boot.store.get(pendingKey));
     const next = {...pending[0], id: "new-generation", key: "YouTubeLyrics.Prewarm.v1.abcdefghijl.ja",
@@ -375,6 +401,7 @@ test("an accepted background job cannot delete newly queued work and storage err
     return {status: 202, body: JSON.stringify({jobId: "b".repeat(64)})};
   }});
   assert.deepEqual(JSON.parse(boot.store.get(pendingKey)).map(plan => plan.id), [newId]);
+  assert.equal(running.apiCalls.length, 1, "new work arriving during an active lease gets a follow-up kick");
   const oldArguments = await runBackground(boot.store);
   assert.equal(oldArguments.requests.length, 0);
   assert.equal(JSON.parse(boot.store.get(pendingKey))[0].payload.target, "ja", "old arguments must not discard a newly selected language");
@@ -394,7 +421,7 @@ test("pending work is bounded and stale or malformed records cannot cause backgr
   assert(pending.every(item => !Object.hasOwn(item, "token")));
   const base = Date.now();
   store.set(pendingKey, JSON.stringify([
-    {...pending[0], queuedAt: base - 300001}, {...pending[0], queuedAt: base + 10000},
+    {...pending[0], queuedAt: base - 1200001}, {...pending[0], queuedAt: base + 10000},
     {...pending[0], kind: "unknown"}, {...pending[0], key: "private-setting"}]));
   const invalid = await runBackground(store, {now: base});
   assert.equal(invalid.requests.length, 0); assert(!store.has(pendingKey));

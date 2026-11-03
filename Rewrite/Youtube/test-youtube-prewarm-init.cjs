@@ -148,10 +148,13 @@ test("disabled prewarm, malformed hints and an exhausted playback deadline keep 
 test("module passes prewarm languages, tokens and the switch to the encrypted Music response handler", () => {
   const line = fs.readFileSync(path.join(__dirname, "YouTube.Enhance.sgmodule"), "utf8").split("\n").find((line) => line.startsWith("youtube.init_playback.response ="));
   for (const setting of ["captionLang", "captionToken", "lyricsLang", "lyricsToken", "prewarm"]) assert(line.includes(`"${setting}"`));
-  assert(line.includes("youtube.init.response.js?v=20261103-2"));
+  assert(line.includes("youtube.init.response.js?v=20261103-3"));
   const background = fs.readFileSync(path.join(__dirname, "YouTube.Enhance.sgmodule"), "utf8").split("\n")
     .find(line => line.startsWith("youtube.prewarm.background ="));
-  assert(background.includes('type=cron,cronexp="* * * * *",wake-system=false,timeout=8,engine=webview'));
+  assert(background.includes('type=cron,cronexp="*/15 * * * *",wake-system=false,timeout=8,engine=webview'));
+  const step = Number(/cronexp="\*\/(\d+) \* \* \* \*"/.exec(background)[1]);
+  const perHour = Array.from({length: 60}, (_, minute) => minute).filter(minute => minute % step === 0).length;
+  assert.equal(perHour, 4); assert(perHour <= 10, "fixed schedule must stay below Surge's documented warning threshold");
   for (const setting of ["captionLang", "captionToken", "lyricsLang", "lyricsToken", "prewarm"]) assert(background.includes(`"${setting}"`));
 });
 test("private HAR encrypted-only startup replay submits the missing jobs before the lyric/caption panels", {skip: !process.env.PREWARM_HAR_PATH}, async () => {

@@ -9,6 +9,8 @@
   const INDEX = "YouTubeTranslation.PrewarmIndex.v1";
   const PENDING = "YouTubeTranslation.PrewarmPending.v1";
   const LEASE = "YouTubeTranslation.PrewarmLease.v1";
+  const KICK = "YouTubeTranslation.PrewarmKick.v1";
+  const PENDING_TTL_MS = 20 * 60 * 1000;
   const background = typeof $request === "undefined";
   const runId = `${Date.now()}:${Math.random()}`;
   const originalDone = $done;
@@ -190,7 +192,7 @@
       if (!Array.isArray(saved)) return [];
       return saved.filter(plan => {
         if (!plan || typeof plan.id !== "string" || !Number.isFinite(plan.queuedAt)
-          || plan.queuedAt > Date.now() || Date.now() - plan.queuedAt >= 300000) return false;
+          || plan.queuedAt > Date.now() || Date.now() - plan.queuedAt >= PENDING_TTL_MS) return false;
         const target = language(checkOptions ? (plan.kind === "caption" ? options.captionLang : options.lyricsLang) : plan.payload?.target);
         if (!target || (checkOptions && (options.prewarm === false || options.prewarm === "false"))) return false;
         return plan.kind === "caption"
@@ -211,22 +213,39 @@
   function removePending(plan) {
     savePending(pendingPlans(false).filter(item => item.id !== plan.id));
   }
+  function kickBackground(force = false) {
+    if (typeof $httpAPI !== "function") return;
+    let last;
+    try { last = JSON.parse($persistentStore.read(KICK) || "null"); } catch (_) {}
+    try {
+      if (!force && Number.isFinite(last?.savedAt) && last.savedAt <= Date.now()
+        && Date.now() - last.savedAt < 60000) return;
+      if ($persistentStore.write(JSON.stringify({savedAt: Date.now()}), KICK) === false) return;
+      $httpAPI("POST", "v1/scripting/cron/evaluate", {script_name: "youtube.prewarm.background"}, () => {});
+    } catch (_) {}
+  }
   function queuePlans(plans) {
     if (!plans.length) return;
     const queued = pendingPlans(false);
+    let added = false;
     for (const plan of plans) {
       if (queued.some(item => item.key === plan.key)) continue;
       queued.push({id: `${runId}:${queued.length}`, queuedAt: Date.now(), key: plan.key, kind: plan.kind,
         payload: plan.kind === "caption" ? {url: plan.payload.url, target: plan.payload.target}
           : {videoId: plan.payload.videoId, target: plan.payload.target}});
+      added = true;
     }
-    if (!savePending(queued)) return;
-    if (options.debug) console.log(`YouTube prewarm: queued ${Math.min(8, queued.length)} background jobs`);
-    // Invocation has its own script session. A minute cron retries retained jobs
-    // if the API kick is unavailable; playback never waits for either one.
-    try {
-      if (typeof $httpAPI === "function") $httpAPI("POST", "v1/scripting/cron/evaluate", {script_name: "youtube.prewarm.background"}, () => {});
-    } catch (_) {}
+    if (added && !savePending(queued)) return;
+    if (added && options.debug) console.log(`YouTube prewarm: queued ${Math.min(8, queued.length)} background jobs`);
+    const retry = plans.some(plan => {
+      try {
+        const saved = JSON.parse($persistentStore.read(plan.key) || "null");
+        return Number.isFinite(saved?.savedAt) && saved.savedAt <= Date.now() && !recent(plan.key);
+      } catch (_) { return false; }
+    });
+    // New work and expired producer attempts retain immediate submission.
+    // Repeated packets before the producer starts retry its kick once a minute.
+    kickBackground(added || retry);
   }
   function detailsVideoId(fields) {
     const data = fields?.find((field) => field.no === 11 && field.wireType === 2)?.data;
@@ -299,6 +318,8 @@
         const lease = JSON.parse($persistentStore.read(LEASE) || "null");
         if (lease?.owner === runId) $persistentStore.write(null, LEASE);
       } catch (_) {}
+      const handled = new Set(pending.map(plan => plan.id));
+      if (pendingPlans(false).some(plan => !handled.has(plan.id) && !recent(plan.key, true))) kickBackground(true);
       originalDone(result);
     };
     const timer = setTimeout(finish, budget);
