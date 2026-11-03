@@ -2,3 +2,6 @@
 
 # Bilibili HTTPDNS
 URL-REGEX,^http://203\.119\.(?:206\.[89]|238\.194)/\d+/resolve\?host=(?:[^&]+\.)?(?:bilibili\.com|biliapi\.(?:com|net))(?:&|$)
+
+#Google
+DOMAIN-SUFFIX, imasdk.googleapis.com
