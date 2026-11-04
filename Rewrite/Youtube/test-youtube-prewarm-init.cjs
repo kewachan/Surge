@@ -57,6 +57,7 @@ async function client(input, key, options = {}) {
   const result = new Promise((yes, no) => { resolve = yes; reject = no; });
   const settings = {captionLang: "zh-Hant", lyricsLang: "zh-Hant", captionToken: token, lyricsToken: token, prewarm: true, ...options.settings};
   const context = {TextEncoder, TextDecoder, Uint8Array, ArrayBuffer, DataView, Int32Array,
+    Date: class extends Date { static now() { return options.now ?? Date.now(); } },
     console: {log: (text) => logs.push(text)}, $argument: JSON.stringify(settings),
     $request: {url: "https://rr1.googlevideo.com/initplayback?c=IOS_MUSIC&ack=1", headers: {
       "User-Agent": "com.google.ios.youtubemusic/9.43.2", Authorization: "private-account-header", Cookie: "private-cookie"}},
@@ -129,11 +130,47 @@ test("Music key history expires, deduplicates and keeps at most eight recent key
   assert.equal(entries.length, 8);
   assert.equal(entries[0].clientKey, Buffer.alloc(32, 10).toString("base64"));
   assert.equal(new Set(entries.map(entry => entry.clientKey)).size, 8);
-  assert.equal(entries[0].expiresAt, now + 611000, "history lasts at most ten minutes, despite a three-day server key");
-  await captureConfig(store, Buffer.alloc(32, 11), {now: now + 612000, ttl: 60});
+  assert.equal(entries[0].expiresAt, now + 259211000, "history follows the three-day lifetime returned by the server");
+  await captureConfig(store, Buffer.alloc(32, 11), {now: now + 259212000, ttl: 60});
   entries = JSON.parse(store.get(musicKeys)).entries;
   assert.equal(entries.length, 1);
-  assert.equal(entries[0].expiresAt, now + 672000, "a shorter upstream lifetime is respected");
+  assert.equal(entries[0].expiresAt, now + 259272000, "a shorter upstream lifetime is respected");
+});
+test("Music still filters a server-valid cached key after a long idle period", async () => {
+  const f = fixture(), nextKey = Buffer.alloc(32, 8), store = new Map(), now = Date.now();
+  await captureConfig(store, f.key, {now});
+  await captureConfig(store, nextKey, {now: now + 3000});
+  const later = now + 2 * 60 * 60 * 1000;
+  const result = await client(f.input, f.key, {store, now: later, settings: {prewarm: false}});
+  assert(result.output.body, "a still-valid key must survive more than ten minutes without the app");
+  assert.equal(new URL(result.calls.find(call => call.url.includes("/transform?")).url).searchParams.get("ck"), f.key.toString("base64"));
+  assert.equal(Buffer.from(worker.__test.parseUmp(result.output.body).at(-1).data).toString(), "audio-unchanged");
+  assert(!result.logs.some(line => /refresh requested|failed/.test(line)));
+});
+test("Music cold launch preserves the cached key before the first new config overwrites it", async () => {
+  const f = fixture(), nextKey = Buffer.alloc(32, 8), now = Date.now();
+  for (const history of [undefined, JSON.stringify({entries: [{clientKey: f.key.toString("base64"), expiresAt: now - 1000}]})]) {
+    const store = new Map([["YouTubeConfig", JSON.stringify({youtubeMusic: {
+      clientKey: f.key.toString("base64"), encryptKey: "legacy-cached-value"}})]]);
+    if (history) store.set(musicKeys, history);
+    await captureConfig(store, nextKey, {now});
+    assert.equal(JSON.parse(store.get("YouTubeConfig")).youtubeMusic.clientKey, nextKey.toString("base64"));
+    const old = JSON.parse(store.get(musicKeys)).entries.find(entry => entry.clientKey === f.key.toString("base64"));
+    assert(old, "legacy config must be retained even when its old ten-minute history expired");
+    assert.equal(old.expiresAt, now + 600000, "an unknown legacy lifetime receives only a short launch grace period");
+    const result = await client(f.input, f.key, {store, now: now + 3000, settings: {prewarm: false}});
+    assert(result.output.body, "the first startup must be filtered without waiting for another song");
+    assert.equal(result.calls.length, 1, "key recovery makes no additional network request");
+  }
+});
+test("Music cold launch does not revive a key whose recorded server lifetime expired", async () => {
+  const f = fixture(), now = Date.now(), current = f.key.toString("base64");
+  const store = new Map([["YouTubeConfig", JSON.stringify({youtubeMusic: {clientKey: current}})],
+    [musicKeys, JSON.stringify({entries: [{clientKey: current, expiresAt: now - 1, serverExpiry: true}]})]]);
+  await captureConfig(store, Buffer.alloc(32, 8), {now});
+  assert(!JSON.parse(store.get(musicKeys)).entries.some(entry => entry.clientKey === current));
+  const result = await client(f.input, f.key, {store, now: now + 3000, settings: {prewarm: false}});
+  assert.deepEqual(Object.keys(result.output), []); assert.equal(result.calls.length, 0);
 });
 test("Music key history handles malformed storage and cannot interrupt normal config capture", async () => {
   const key = Buffer.alloc(32, 7);
@@ -167,7 +204,7 @@ test("an unknown Music key preserves playback and requests a later config refres
   assert.equal(run.calls.length, 0);
   assert.equal(JSON.parse(store.get(musicKeys)).refreshNeeded, true);
 });
-test("private Music key-rotation HAR filters the previously missed first startup and preserves all media", {skip: !process.env.MUSIC_KEY_ROTATION_HAR_PATH}, async () => {
+test("private Music key-rotation HAR filters the missed first startup after long idle and preserves all media", {skip: !process.env.MUSIC_KEY_ROTATION_HAR_PATH}, async () => {
   const entries = JSON.parse(fs.readFileSync(process.env.MUSIC_KEY_ROTATION_HAR_PATH, "utf8")).log.entries;
   const endTime = entry => Date.parse(entry.startedDateTime) + entry.time;
   const decode = body => Buffer.from(body.text, body.encoding === "base64" ? "base64" : "utf8");
@@ -201,7 +238,8 @@ test("private Music key-rotation HAR filters the previously missed first startup
   assert(!matches(current), "the singleton config reproduces the captured overwrite race");
   const retained = versions.find(matches);
   assert(retained, "a previously observed config must authenticate the missed response");
-  const key = Buffer.from(retained, "base64"), result = await client(input, key, {store, settings: {prewarm: false}});
+  const key = Buffer.from(retained, "base64"), result = await client(input, key, {
+    store, now: Date.now() + 2 * 60 * 60 * 1000, settings: {prewarm: false}});
   assert(result.output.body, "the actual missed metadata must now be transformed");
   assert.equal(new URL(result.calls.find(call => call.url.includes("/transform?")).url).searchParams.get("ck"), retained);
   assert((await worker.__test.processUmpResponse(input, key)).removed > 0, "captured startup contains ad metadata");
