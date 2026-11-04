@@ -514,7 +514,7 @@ function rememberMusicPlaybackKey(platform, bytes, lifetime, previousKey) {
       // cached key briefly so the first startup can finish after config rotation.
       entries.unshift({clientKey: previousKey, expiresAt: now + 600000, serverExpiry: false});
     }
-    F.setJSON({...state, entries: [{clientKey, expiresAt, serverExpiry: true}, ...entries].slice(0, 8)}, name);
+    F.setJSON({...state, captureBuild: "20261104-2", lastConfigAt: now, entries: [{clientKey, expiresAt, serverExpiry: true}, ...entries].slice(0, 8)}, name);
   } catch (_) {}
 }
 function ti(l,{state:e,platformKey:t}){let n=l.responseContext?.globalConfigGroup?.hotConfigGroup?.mediaHotConfig?.onesieHotConfig;if(!n)return{bodyChanged:!1,stateChanged:!1};let i=n.clientKey,r=n.encryptKey;if(!i?.length||!r?.length)return console.log("\u5F02\u5E38\uFF1AhotConfig \u672A\u5305\u542B\u5B8C\u6574\u7684 onesie key"),{bodyChanged:!1,stateChanged:!1};let c=Q(i),o=Q(r),s=e.config[t];rememberMusicPlaybackKey(t,i,n.keyExpiresInSeconds,s?.clientKey);return s?.clientKey===c&&s?.encryptKey===o?{bodyChanged:!1,stateChanged:!1}:(e.config[t]={clientKey:c,encryptKey:o},{bodyChanged:!1,stateChanged:!0})}var ji=[{path:"browse",msgType:Jr,handler:Br},{path:"next",msgType:re,handler:Br},{path:"player",msgType:oe,handler:Fi},{path:"search",msgType:Xr,handler:Br},{path:"reel_watch_sequence",msgType:qr,handler:Li},{path:"guide",msgType:Yr,handler:Ai},{path:"get_setting",msgType:zr,handler:Di},{path:"get_watch",msgType:Zr,handler:$i},{path:"config",msgType:gr,handler:ti},{path:"log_event",msgType:gr,handler:ti}];

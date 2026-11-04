@@ -62,7 +62,10 @@ async function client(input, key, options = {}) {
     $request: {url: "https://rr1.googlevideo.com/initplayback?c=IOS_MUSIC&ack=1", headers: {
       "User-Agent": "com.google.ios.youtubemusic/9.43.2", Authorization: "private-account-header", Cookie: "private-cookie"}},
     $response: {status: 200, headers: {"Content-Type": "application/vnd.yt-ump"}, body: new Uint8Array(input)},
-    $persistentStore: {read: (name) => store.get(name), write: (value, name) => store.set(name, value)},
+    $persistentStore: {read: (name) => store.get(name), write: (value, name) => {
+      if (options.failDiagnostics && name === "YouTubeMusic.Diagnostics.v1") throw Error("Synthetic diagnostic storage failure");
+      return store.set(name, value);
+    }},
     setTimeout(fn, delay) { const timer = setTimeout(fn, delay); timers.add(timer); return timer; },
     clearTimeout(timer) { clearTimeout(timer); timers.delete(timer); },
     $httpClient: {
@@ -70,11 +73,12 @@ async function client(input, key, options = {}) {
       post(request, callback) {
         calls.push(request);
         if (request.url.includes("/transform?")) {
+          if (options.transformError) return callback("Synthetic transform failure", {}, "");
           transform(request.body, key, new URL(request.url).searchParams.get("prewarm") === "1", settings.captionLang).then(async (response) => {
             const headers = Object.fromEntries(response.headers);
             if (options.badHint) headers["x-youtube-player-prewarm"] = "not-valid-json";
             if (options.expired) context.YouTubePrewarm.deadline = Date.now() - 1;
-            callback(null, {status: response.status, headers}, new Uint8Array(await response.arrayBuffer()));
+            callback(null, {status: options.workerStatus ?? response.status, headers}, new Uint8Array(await response.arrayBuffer()));
           }).catch(reject);
         } else callback(null, {status: 202}, JSON.stringify({jobId: "b".repeat(64)}));
       }
@@ -204,6 +208,60 @@ test("an unknown Music key preserves playback and requests a later config refres
   assert.equal(run.calls.length, 0);
   assert.equal(JSON.parse(store.get(musicKeys)).refreshNeeded, true);
 });
+test("Music diagnostics retain failures after later successful songs and disclose no playback credentials", async () => {
+  const f = fixture(), store = new Map(); await captureConfig(store, f.key);
+  for (const fault of [{transformError: true}, {workerStatus: 503}]) {
+    const result = await client(f.input, f.key, {...fault, store, settings: {prewarm: false}});
+    assert.deepEqual(Object.keys(result.output), []);
+  }
+  for (let i = 0; i < 12; i++) assert((await client(f.input, f.key, {store, settings: {prewarm: false}})).output.body);
+  const raw = store.get("YouTubeMusic.Diagnostics.v1"), diagnostic = JSON.parse(raw);
+  assert.deepEqual(diagnostic.failures.map(item => item.result), ["transform-error", "invalid-transform"]);
+  assert.equal(diagnostic.failures[1].workerStatus, 503);
+  assert.equal(diagnostic.lastSuccess.result, "removed-1");
+  assert.equal(diagnostic.lastSuccess.configBuild, "20261104-2");
+  for (const secret of [token, f.key.toString("base64"), sourceUrl, videoId, "private-account-header", "private-cookie"]) assert(!raw.includes(secret));
+  const report = await runSurge("Rewrite/Youtube/youtube.music.diagnostics.js", {store});
+  assert.equal(report.done.length, 1); assert.equal(report.requests.length, 0); assert.equal(report.apiCalls.length, 0);
+  assert.equal(JSON.parse(report.logs[0]).failures.length, 2);
+});
+test("Music diagnostics bound retained missing-key incidents instead of recording ordinary audio requests", async () => {
+  const f = fixture(), store = new Map(), now = Date.now(); await captureConfig(store, Buffer.alloc(32, 8), {now});
+  for (let i = 0; i < 12; i++) await client(f.input, f.key, {store, now: now + i * 1000, settings: {prewarm: false}});
+  const state = JSON.parse(store.get("YouTubeMusic.Diagnostics.v1"));
+  assert.equal(state.failures.length, 8); assert.equal(state.failures[0].at, now + 4000);
+  assert(state.failures.every(item => item.result === "missing-key" && item.candidateCount === 1));
+  assert(store.get("YouTubeMusic.Diagnostics.v1").length < 3000);
+  const saved = store.get("YouTubeMusic.Diagnostics.v1");
+  await client(ump(21, Buffer.from("ordinary-audio")), f.key, {store, settings: {prewarm: false}});
+  assert.equal(store.get("YouTubeMusic.Diagnostics.v1"), saved, "audio-only SABR parts must not create diagnostic writes");
+  await client(Buffer.from([255]), f.key, {store, settings: {prewarm: false}});
+  assert.equal(JSON.parse(store.get("YouTubeMusic.Diagnostics.v1")).failures.at(-1).result, "unsupported-response");
+});
+test("diagnostic storage failure and malformed diagnostic state cannot change successful Music playback", async () => {
+  const f = fixture();
+  for (const saved of ["{", "null", "[]", '{"failures":false}']) {
+    const store = new Map([["YouTubeMusic.Diagnostics.v1", saved]]); await captureConfig(store, f.key);
+    assert((await client(f.input, f.key, {store, settings: {prewarm: false}})).output.body);
+    assert.equal(JSON.parse(store.get("YouTubeMusic.Diagnostics.v1")).lastSuccess.result, "removed-1");
+  }
+  const result = await client(f.input, f.key, {failDiagnostics: true, settings: {prewarm: false}});
+  assert(result.output.body); assert(!result.store.has("YouTubeMusic.Diagnostics.v1"));
+  const invalidKeys = await client(f.input, f.key, {store: new Map([[musicKeys, "null"]]), settings: {prewarm: false}});
+  assert.deepEqual(Object.keys(invalidKeys.output), []);
+  assert.equal(JSON.parse(invalidKeys.store.get("YouTubeMusic.Diagnostics.v1")).failures.at(-1).result, "unsupported-response");
+});
+test("manual Music diagnostics project safe fields and finish once even for corrupt data", async () => {
+  const store = new Map([["YouTubeMusic.Diagnostics.v1", JSON.stringify({failures: [{at: 1, result: "missing-key",
+    clientKey: "private-key", url: "private-url", captionToken: token}], lastSuccess: {at: 2, result: "removed-2", headers: {Authorization: "private-auth"}}})]]);
+  const report = await runSurge("Rewrite/Youtube/youtube.music.diagnostics.js", {store});
+  assert.deepEqual(JSON.parse(report.logs[0]).failures, [{at: 1, result: "missing-key"}]);
+  for (const secret of ["private-key", "private-url", "private-auth", token]) assert(!report.logs.join("\n").includes(secret));
+  for (const raw of ["{", "null", "[]"]) {
+    const result = await runSurge("Rewrite/Youtube/youtube.music.diagnostics.js", {store: new Map([["YouTubeMusic.Diagnostics.v1", raw]])});
+    assert.equal(result.done.length, 1); assert.equal(result.requests.length, 0);
+  }
+});
 test("private Music key-rotation HAR filters the missed first startup after long idle and preserves all media", {skip: !process.env.MUSIC_KEY_ROTATION_HAR_PATH}, async () => {
   const entries = JSON.parse(fs.readFileSync(process.env.MUSIC_KEY_ROTATION_HAR_PATH, "utf8")).log.entries;
   const endTime = entry => Date.parse(entry.startedDateTime) + entry.time;
@@ -317,7 +375,7 @@ test("disabled prewarm, malformed hints and an exhausted playback deadline keep 
 test("module passes prewarm languages, tokens and the switch to the encrypted Music response handler", () => {
   const line = fs.readFileSync(path.join(__dirname, "YouTube.Enhance.sgmodule"), "utf8").split("\n").find((line) => line.startsWith("youtube.init_playback.response ="));
   for (const setting of ["captionLang", "captionToken", "lyricsLang", "lyricsToken", "prewarm"]) assert(line.includes(`"${setting}"`));
-  assert(line.includes("youtube.init.response.js?v=20261103-4"));
+  assert(line.includes("youtube.init.response.js?v=20261104-2"));
   const module = fs.readFileSync(path.join(__dirname, "YouTube.Enhance.sgmodule"), "utf8");
   assert(!/\b(?:cronexp|wake-system)=/.test(module)); assert(!module.includes("youtube.prewarm.background ="));
 });

@@ -675,6 +675,30 @@
     catch (_) { return {}; }
   }
 
+  function recordMusicOutcome(result, candidates, workerStatus, workerResult) {
+    try {
+      const name = "YouTubeMusic.Diagnostics.v1", now = Date.now();
+      const raw = $persistentStore.read(name);
+      let state = {};
+      try { if (raw && raw.length < 12000) state = JSON.parse(raw); } catch (_) {}
+      if (!state || typeof state !== "object" || Array.isArray(state)) state = {};
+      const config = readState("youtubeMusic") || {};
+      const record = {at: now, scriptBuild: "20261104-2", result,
+        configBuild: /^\d{8}-\d+$/.test(config.captureBuild || "") ? config.captureBuild : "unknown"};
+      if (Number.isInteger(candidates) && candidates >= 0) record.candidateCount = candidates;
+      if (Number.isFinite(config.lastConfigAt) && config.lastConfigAt <= now)
+        record.configAgeSeconds = Math.floor((now - config.lastConfigAt) / 1000);
+      if (Number.isInteger(workerStatus) && workerStatus >= 100 && workerStatus <= 599) record.workerStatus = workerStatus;
+      if (/^(?:removed-\d{1,6}|bypass-error)$/.test(workerResult || "")) record.workerResult = workerResult;
+      const failures = (Array.isArray(state.failures) ? state.failures : []).filter(entry =>
+        entry && Number.isFinite(entry.at) && entry.at <= now && now - entry.at < 7 * 86400000 &&
+        /^(?:missing-key|transform-timeout|transform-error|invalid-transform|invalid-structure|unsupported-response)$/.test(entry.result));
+      if (/^removed-\d+$/.test(result)) state = {failures: failures.slice(-8), lastSuccess: record};
+      else state = {failures: [...failures, record].slice(-8), lastSuccess: state.lastSuccess};
+      $persistentStore.write(JSON.stringify(state), name);
+    } catch (_) {}
+  }
+
   function candidateKeys(platform) {
     const state = readState(platform), values = [];
     for (const entry of (Array.isArray(state.entries) ? state.entries : []).slice(0, 8)) {
@@ -742,9 +766,10 @@
     if (Number($response.status ?? $response.statusCode) !== 200 || !input?.length || input.length > MAX_BYTES ||
         !String(header($response.headers, "content-type")).toLowerCase().includes("application/vnd.yt-ump")) return finish({});
     const platform = String(header($request.headers, "user-agent")).toLowerCase().includes("music") ? "youtubeMusic" : "youtube";
-    const parts = parseUmp(input), key = authenticatedKey(parts, candidateKeys(platform));
+    const parts = parseUmp(input), candidates = candidateKeys(platform), key = authenticatedKey(parts, candidates);
     if (key === undefined) return finish({});
     if (!key) {
+      recordMusicOutcome("missing-key", candidates.length);
       const state = readState(platform);
       state.refreshNeeded = true;
       $persistentStore.write(JSON.stringify(state), KEY_RING_PREFIX + platform);
@@ -768,6 +793,7 @@
     const metadata = concatBytes(...selected.map(part => part.raw));
     if (globalThis.YouTubePrewarm) globalThis.YouTubePrewarm.deadline = Date.now() + 8000;
     deadline = setTimeout(() => {
+      recordMusicOutcome("transform-timeout", candidates.length);
       console.log("YouTube initplayback: transform timeout; original response kept");
       finish({});
     }, 8000);
@@ -778,13 +804,16 @@
       const output = toBytes(response.bodyBytes);
       const result = String(header(response.headers, "x-youtube-adblock"));
       if (response.statusCode !== 200 || !output?.length || output.length > MAX_BYTES || !/^removed-\d+$/.test(result)) {
+        recordMusicOutcome("invalid-transform", candidates.length, response.statusCode, result);
         console.log("YouTube initplayback: invalid transform response; original response kept");
         return finish({});
       }
       const transformed = parseUmp(output);
       if (transformed.length !== selected.length || transformed.some((part, index) => part.type !== selected[index].type ||
           (part.type === 11 ? !validEncryptedRewrite(selected[index].data, part.data, key)
-            : !equalBytes(part.data, selected[index].data)))) throw new Error("UMP structure changed");
+            : !equalBytes(part.data, selected[index].data)))) {
+        throw new Error("UMP structure changed");
+      }
       try {
         const hint = String(header(response.headers, "x-youtube-player-prewarm"));
         if (hint && hint.length <= 20000 && globalThis.YouTubePrewarm) {
@@ -793,16 +822,20 @@
         }
       } catch (_) {}
       if (options.debug) console.log("YouTube initplayback: " + result);
+      recordMusicOutcome(result, candidates.length, response.statusCode);
       if (equalBytes(metadata, output)) return finish({});
       const chunks = parts.map(part => part.raw);
       slots.forEach((index, slot) => { chunks[index] = transformed[slot * 2 + 1].raw; });
       const rewritten = concatBytes(...chunks);
       finish({ body: rewritten });
-    }).catch(() => {
+    }).catch(error => {
+      if (completed) return;
+      recordMusicOutcome(error?.message === "UMP structure changed" ? "invalid-structure" : "transform-error", candidates.length);
       console.log("YouTube initplayback: transform failed; original response kept");
       finish({});
     });
   } catch (_) {
+    recordMusicOutcome("unsupported-response");
     console.log("YouTube initplayback: unsupported response; original response kept");
     finish({});
   }
