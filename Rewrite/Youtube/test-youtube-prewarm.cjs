@@ -372,6 +372,30 @@ test("repeated playback packets deduplicate kicks while a new song and bounded r
   store.set("YouTubeTranslation.PrewarmKick.v1", "invalid JSON");
   play("abcdefghijm"); assert.equal(calls, 4, "damaged throttle metadata cannot disable a new song");
 });
+test("expired failed producer attempts retry once across repeated playback packets", () => {
+  const store = new Map(), kickKey = "YouTubeTranslation.PrewarmKick.v1";
+  function play(videoId = "abcdefghijk") {
+    const run = bootstrap({store, noKick: true, settings: backgroundArgs});
+    run.context.YouTubePrewarm.capture({videoId}, true); run.context.$done({body: "audio"});
+    assert.equal(run.outputs[0].body, "audio");
+    assert.equal(run.calls.length, 0, "foreground playback must not submit translation requests");
+    return run.apiCalls.length;
+  }
+  assert.equal(play(), 1);
+  const key = "YouTubeLyrics.Prewarm.v1.abcdefghijk.zh-Hant";
+  store.set(key, JSON.stringify({savedAt: Date.now() - 20000, confirmed: false}));
+  let retries = 0;
+  for (let i = 0; i < 50; i++) retries += play();
+  assert.equal(retries, 1, "one expired failed attempt must not force fifty evaluations");
+  store.set(key, JSON.stringify({savedAt: Date.now() - 16000, confirmed: false}));
+  assert.equal(play(), 1, "a distinct expired producer attempt remains immediately retryable");
+  assert.equal(play(), 0);
+  const kick = JSON.parse(store.get(kickKey));
+  store.set(kickKey, JSON.stringify({...kick, savedAt: Date.now() - 60001}));
+  assert.equal(play(), 1, "a missed recovery launch remains retryable after the cooldown");
+  assert.equal(play("abcdefghijl"), 1, "new songs still bypass the cooldown");
+  assert([...store.values()].every(value => !String(value).includes(token)));
+});
 test("an idle response cannot run queued work and the module has no automatic prewarm schedule", () => {
   const boot = queuedLyrics();
   const idle = bootstrap({store: boot.store, settings: backgroundArgs});

@@ -215,14 +215,14 @@
   function removePending(plan) {
     savePending(pendingPlans(false).filter(item => item.id !== plan.id));
   }
-  function kickBackground(force = false) {
+  function kickBackground(force = false, retryId = "") {
     if (typeof $httpAPI !== "function") return;
     let last;
     try { last = JSON.parse($persistentStore.read(KICK) || "null"); } catch (_) {}
     try {
       if (!force && Number.isFinite(last?.savedAt) && last.savedAt <= Date.now()
-        && Date.now() - last.savedAt < 60000) return;
-      if ($persistentStore.write(JSON.stringify({savedAt: Date.now()}), KICK) === false) return;
+        && Date.now() - last.savedAt < 60000 && (!retryId || last.retryId === retryId)) return;
+      if ($persistentStore.write(JSON.stringify({savedAt: Date.now(), retryId}), KICK) === false) return;
       const settings = {};
       for (const key of ["captionLang", "captionToken", "lyricsLang", "lyricsToken", "prewarm", "debug"]) settings[key] = options[key];
       // Local one-shot evaluation has its own session and no automatic schedule.
@@ -246,15 +246,16 @@
     }
     if (added && !savePending(queued)) return;
     if (added && options.debug) console.log(`YouTube prewarm: queued ${Math.min(8, queued.length)} background jobs`);
-    const retry = plans.some(plan => {
+    const retry = plans.flatMap(plan => {
       try {
         const saved = JSON.parse($persistentStore.read(plan.key) || "null");
-        return Number.isFinite(saved?.savedAt) && saved.savedAt <= Date.now() && !recent(plan.key);
-      } catch (_) { return false; }
+        return Number.isFinite(saved?.savedAt) && saved.savedAt <= Date.now() && !recent(plan.key)
+          ? [[plan.key, saved.savedAt]] : [];
+      } catch (_) { return []; }
     });
     // New work and expired producer attempts retain immediate submission.
     // Repeated packets before the producer starts retry its kick once a minute.
-    kickBackground(added || retry);
+    kickBackground(added, retry.length ? fingerprint(JSON.stringify(retry)) : "");
   }
   function detailsVideoId(fields) {
     const data = fields?.find((field) => field.no === 11 && field.wireType === 2)?.data;

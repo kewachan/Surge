@@ -375,7 +375,7 @@ test("disabled prewarm, malformed hints and an exhausted playback deadline keep 
 test("module passes prewarm languages, tokens and the switch to the encrypted Music response handler", () => {
   const line = fs.readFileSync(path.join(__dirname, "YouTube.Enhance.sgmodule"), "utf8").split("\n").find((line) => line.startsWith("youtube.init_playback.response ="));
   for (const setting of ["captionLang", "captionToken", "lyricsLang", "lyricsToken", "prewarm"]) assert(line.includes(`"${setting}"`));
-  assert(line.includes("youtube.init.response.js?v=20261104-2"));
+  assert(line.includes("youtube.init.response.js?v=20261104-3"));
   const module = fs.readFileSync(path.join(__dirname, "YouTube.Enhance.sgmodule"), "utf8");
   assert(!/\b(?:cronexp|wake-system)=/.test(module)); assert(!module.includes("youtube.prewarm.background ="));
 });
