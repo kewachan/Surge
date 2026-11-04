@@ -102,19 +102,72 @@ async function client(input, key, options = {}) {
 }
 
 const musicKeys = "YouTubePlaybackKeys.v2.youtubeMusic";
-function configFixture(key, ttl = 259200) {
-  return field(1, field(16, field(7, field(138536474, field(146311580,
-    Buffer.concat([field(1, key), field(2, Buffer.alloc(128, 9)), scalar(3, ttl)]))))));
+function configFixture(key, ttl = 259200, coldConfig, hotFirst = false) {
+  const hot = field(7, field(138536474, field(146311580,
+    Buffer.concat([field(1, key), field(2, Buffer.alloc(128, 9)), scalar(3, ttl)]))));
+  return field(1, field(16, coldConfig === undefined ? hot : Buffer.concat(
+    hotFirst ? [hot, field(6, coldConfig)] : [field(6, coldConfig), hot])));
 }
 async function captureConfig(store, key, options = {}) {
   return runSurge("Rewrite/Youtube/youtube.response.js", {
     store, now: options.now ?? Date.now(), argument: '{"prewarm":false}',
-    request: {url: "https://youtubei.googleapis.com/youtubei/v1/log_event", headers: {
+    request: {url: `https://youtubei.googleapis.com/youtubei/v1/${options.endpoint || "log_event"}`, headers: {
       "User-Agent": options.userAgent || "com.google.ios.youtubemusic/9.43.2"}},
-    response: {status: 200, headers: {"Content-Type": "application/x-protobuf"}, body: new Uint8Array(configFixture(key, options.ttl))},
+    response: {status: 200, headers: {"Content-Type": "application/x-protobuf"}, body: new Uint8Array(
+      options.body ?? configFixture(key, options.ttl, options.coldConfig, options.hotFirst))},
     globals: options.globals,
   });
 }
+test("Music full configs skip opaque cold fields before or after the playback key", async () => {
+  const f = fixture(), oldKey = Buffer.alloc(32, 8), decoy = Buffer.alloc(32, 9);
+  const fakeHot = field(7, field(138536474, field(146311580,
+    Buffer.concat([field(1, decoy), field(2, Buffer.alloc(53, 1)), scalar(3, 259200)]))));
+  const coldConfig = Buffer.concat([field(1, "cold-settings"), scalar(3, 1),
+    field(4, Buffer.from([0xff, 0x80, 0x00])), fakeHot,
+    Buffer.concat([vi(23 * 8 + 1), Buffer.alloc(8, 255)]),
+    Buffer.concat([vi(24 * 8 + 5), Buffer.alloc(4, 255)])]);
+  for (const endpoint of ["log_event", "config"]) for (const hotFirst of [false, true]) {
+    const store = new Map(); await captureConfig(store, oldKey);
+    const run = await captureConfig(store, f.key, {endpoint, coldConfig, hotFirst});
+    assert.equal(JSON.parse(store.get("YouTubeConfig")).youtubeMusic.clientKey, f.key.toString("base64"));
+    const keys = JSON.parse(store.get(musicKeys)).entries.map(entry => entry.clientKey);
+    assert(keys.includes(oldKey.toString("base64")), "existing server-valid history is retained");
+    assert(!keys.includes(decoy.toString("base64")), "cold fields cannot become hot playback keys");
+    assert.equal(run.done.length, 1); assert.deepEqual(Object.keys(run.done[0]), []);
+    assert.equal(run.requests.length, 0); assert.equal(run.apiCalls.length, 0);
+    const result = await client(f.input, f.key, {store, settings: {prewarm: false}});
+    assert(result.output.body, "the first startup uses the key from the full config");
+    assert.equal((await worker.__test.processUmpResponse(result.output.body, f.key)).removed, 0);
+  }
+});
+test("cold-only configs cannot replace the playback key with a nested lookalike", async () => {
+  const key = Buffer.alloc(32, 7), store = new Map(); await captureConfig(store, key);
+  const before = new Map(store), decoy = Buffer.alloc(32, 9);
+  const fakeHot = field(7, field(138536474, field(146311580,
+    Buffer.concat([field(1, decoy), field(2, Buffer.alloc(53, 1)), scalar(3, 259200)]))));
+  const run = await captureConfig(store, key, {body: field(1, field(16, field(6, fakeHot)))});
+  assert.deepEqual(store, before); assert.equal(run.done.length, 1);
+  assert.deepEqual(Object.keys(run.done[0]), []);
+});
+test("malformed full configs preserve cached keys and the original response", async () => {
+  const key = Buffer.alloc(32, 7), next = Buffer.alloc(32, 8);
+  const invalidCold = [Buffer.from([0x22, 0xff, 0xff, 0xff, 0x7f]),
+    Buffer.from([0x0e]), Buffer.alloc(12, 0x80), Buffer.from([0])];
+  const bodies = invalidCold.map(cold => configFixture(next, 259200, cold));
+  bodies.push(field(1, field(16, Buffer.concat([field(4, Buffer.from([0xff])),
+    field(7, field(138536474, field(146311580, Buffer.concat([field(1, next),
+      field(2, Buffer.alloc(53, 1)), scalar(3, 259200)]))))]))));
+  bodies.push(configFixture(next).subarray(0, 15));
+  for (const body of bodies) {
+    const store = new Map(); await captureConfig(store, key); const before = new Map(store);
+    const run = await captureConfig(store, next, {body});
+    assert.deepEqual(store, before); assert.equal(run.done.length, 1);
+    assert.deepEqual(Object.keys(run.done[0]), []);
+    assert.equal(run.requests.length, 0); assert.equal(run.apiCalls.length, 0);
+  }
+  const store = new Map(); await captureConfig(store, key, {coldConfig: Buffer.alloc(0)});
+  assert.equal(JSON.parse(store.get("YouTubeConfig")).youtubeMusic.clientKey, key.toString("base64"));
+});
 test("Music key rotation retains the key for an in-flight startup without replacing the current config", async () => {
   const f = fixture(), nextKey = Buffer.alloc(32, 8), store = new Map(), now = Date.now();
   await captureConfig(store, f.key, {now});
@@ -219,7 +272,7 @@ test("Music diagnostics retain failures after later successful songs and disclos
   assert.deepEqual(diagnostic.failures.map(item => item.result), ["transform-error", "invalid-transform"]);
   assert.equal(diagnostic.failures[1].workerStatus, 503);
   assert.equal(diagnostic.lastSuccess.result, "removed-1");
-  assert.equal(diagnostic.lastSuccess.configBuild, "20261104-2");
+  assert.equal(diagnostic.lastSuccess.configBuild, "20261104-4");
   for (const secret of [token, f.key.toString("base64"), sourceUrl, videoId, "private-account-header", "private-cookie"]) assert(!raw.includes(secret));
   const report = await runSurge("Rewrite/Youtube/youtube.music.diagnostics.js", {store});
   assert.equal(report.done.length, 1); assert.equal(report.requests.length, 0); assert.equal(report.apiCalls.length, 0);
@@ -319,6 +372,66 @@ test("private Music key-rotation HAR filters the missed first startup after long
   }
   assert(changed > 0); assert(mediaBytes > 500000);
   assert(!result.logs.some(line => /failed|refresh requested/.test(line)));
+});
+test("private full-config HAR filters every captured Music startup without changing media", {skip: !process.env.MUSIC_CONFIG_HAR_PATH}, async () => {
+  const entries = JSON.parse(fs.readFileSync(process.env.MUSIC_CONFIG_HAR_PATH, "utf8")).log.entries;
+  const endTime = entry => Date.parse(entry.startedDateTime) + entry.time;
+  const decode = entry => Buffer.from(entry.response.content.text,
+    entry.response.content.encoding === "base64" ? "base64" : "utf8");
+  const configs = entries.filter(entry => /\/youtubei\/v1\/(?:log_event|config)(?:\?|$)/.test(entry.request.url) &&
+    entry.response?.status === 200 && entry.response.content?.text).sort((a, b) => endTime(a) - endTime(b));
+  const startups = entries.filter(entry => {
+    const url = new URL(entry.request.url);
+    return url.hostname.endsWith(".googlevideo.com") && url.pathname === "/initplayback" &&
+      url.searchParams.get("c") === "IOS_MUSIC" && entry.request.method === "POST" && entry.response?.status === 200;
+  }).sort((a, b) => endTime(a) - endTime(b));
+  assert(startups.length >= 4, "capture must include the four failed startups");
+  const store = new Map(); let cursor = 0, fullConfigs = 0;
+  for (const startup of startups) {
+    while (cursor < configs.length && endTime(configs[cursor]) < endTime(startup)) {
+      const entry = configs[cursor++], body = decode(entry);
+      let nested = body;
+      for (const number of [1, 16]) nested = worker.__test.parseProto(nested)
+        .find(item => item.no === number && item.wire === 2)?.value || new Uint8Array();
+      if (worker.__test.parseProto(nested).some(item => item.no === 6 && item.wire === 2 && item.value.length > 0)) fullConfigs++;
+      const run = await runSurge("Rewrite/Youtube/youtube.response.js", {store, now: endTime(entry), argument: '{"prewarm":false}',
+        request: {url: entry.request.url, headers: Object.fromEntries(entry.request.headers.map(header => [header.name, header.value]))},
+        response: {status: 200, headers: {}, body: new Uint8Array(body)}});
+      assert.equal(run.done.length, 1); assert.deepEqual(Object.keys(run.done[0]), []);
+      assert.equal(run.requests.length, 0);
+    }
+    const encodedKey = JSON.parse(store.get("YouTubeConfig") || "{}").youtubeMusic?.clientKey;
+    assert(encodedKey, "the full config must capture a key before the first startup");
+    const key = Buffer.from(encodedKey, "base64"), input = decode(startup);
+    assert.equal((await worker.__test.processUmpResponse(input, key)).removed, 2,
+      "the captured metadata must contain the two removable ad fields");
+    const result = await client(input, key, {store, now: endTime(startup), settings: {prewarm: false}});
+    assert(result.output.body, "captured startup must use the existing metadata-only transform");
+    assert.equal(result.calls.length, 1); assert.equal(new URL(result.calls[0].url).pathname, "/transform");
+    assert.equal((await worker.__test.processUmpResponse(result.output.body, key)).removed, 0);
+    const before = worker.__test.parseUmp(input), after = worker.__test.parseUmp(result.output.body);
+    assert.equal(after.length, before.length); let encrypted = false, changed = 0, mediaBytes = 0, authenticated = 0;
+    for (let i = 0; i < before.length; i++) {
+      assert.equal(after[i].type, before[i].type);
+      if (before[i].type === 11 && encrypted) {
+        const signature = worker.__test.parseProto(before[i].data);
+        const get = number => signature.find(item => item.no === number && item.wire === 2)?.value;
+        assert(crypto.timingSafeEqual(Buffer.from(get(2)), crypto.createHmac("sha256", key.subarray(16))
+          .update(Buffer.concat([get(1), get(3)])).digest()), "every encrypted metadata part must authenticate");
+        authenticated++;
+        encrypted = false; if (!Buffer.from(before[i].data).equals(after[i].data)) changed++;
+      } else {
+        assert(Buffer.from(before[i].data).equals(after[i].data), "audio and control frames must stay byte-identical");
+        if (before[i].type === 10) encrypted = worker.__test.parseProto(before[i].data)
+          .find(item => item.no === 1 && item.wire === 0)?.value.value === 25;
+        if (before[i].type === 21) mediaBytes += before[i].data.length;
+      }
+    }
+    assert.equal(authenticated, 2); assert(changed > 0, "ad-bearing metadata must change");
+    assert(mediaBytes > 0, "capture must include native media");
+    assert(!result.logs.some(line => /failed|refresh requested/.test(line)));
+  }
+  assert(fullConfigs > 0, "replay must exercise the previously skipped cold-config payload");
 });
 test("encrypted-only Music exposes authenticated current-player metadata only when requested", async () => {
   const f = fixture({captions: true, unicode: true});
