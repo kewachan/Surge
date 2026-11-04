@@ -11,7 +11,7 @@ DOMAIN, ess.apple.com
 DOMAIN-KEYWORD, player-api-prod
 
 #Youtube subtitle service
-URL-REGEX,^https:\/\/www.youtube.com\/api\/timedtext+
+URL-REGEX, ^https:\/\/www.youtube.com\/api\/timedtext+
 
 #Lrclib
 DOMAIN-KEYWORD, lrclib
@@ -35,4 +35,4 @@ DOMAIN, freco.synology.me
 DOMAIN, kenichi-mac.asuscomm.com
 DOMAIN, kenichi-tyo1.duckdns.org
 DOMAIN, kenichi-tyo2.duckdns.org
-AND,((DOMAIN,radiquo-stream.duckdns.org), (DEST-PORT,22))
+AND, ((DOMAIN, radiquo-stream.duckdns.org), (DEST-PORT, 22))
