@@ -17,12 +17,14 @@ const promoField = (number, bytes) => Buffer.concat([promoVarint(number * 8 + 2)
 const promoScalar = (number, value) => Buffer.concat([promoVarint(number * 8), promoVarint(value)]);
 const promoText = text => promoField(1, promoField(1, text));
 function musicPromoFixture(options = {}) {
-  const button = promoField(65153809, Buffer.concat([promoField(5, promoText('Get Music Premium')),
-    promoField(9, promoField(48687626, promoField(2, 'SPunlimited')))]));
+  const makeButton = (endpoint, label) => promoField(65153809, Buffer.concat([promoField(5, promoText(label)),
+    promoField(9, promoField(48687626, promoField(2, endpoint)))]));
+  const button = makeButton('SPunlimited', 'Get Music Premium');
+  const legacy = options.legacyButton ?? makeButton(options.legacyEndpoint || 'SPunlimited', options.legacyLabel || 'Get Music Premium');
   const renderer = Buffer.concat([promoField(1, button), promoField(2,
     promoText(options.description || 'Enjoy ad-free music, listen in audio mode, and play music offline.'))]);
   const promo = options.promo ?? promoField(options.renderer ?? 104347096, renderer);
-  const metadata = options.metadata ?? Buffer.concat([promoField(3, button), promoScalar(4, 0),
+  const metadata = options.metadata ?? Buffer.concat([promoField(3, legacy), promoScalar(4, 0),
     promoField(7, Buffer.from([255, 0, 128])), ...(options.absent ? [] : [promoField(8, promo)]),
     promoField(9, 'first-unknown'), promoField(9, 'second-unknown'), promoScalar(24, 1)]);
   const envelope = options.envelope ?? Buffer.concat([promoField(123, 'envelope-sibling'), promoField(100625508, metadata)]);
@@ -35,13 +37,16 @@ function promoNode(bytes, numbers) {
   return bytes;
 }
 function assertPromoSiblings(before, after) {
-  for (const [numbers, changed] of [[[], 15], [[15], 100625508], [[15, 100625508], 8]]) {
-    const original = promoProto(promoNode(before, numbers)).filter(field => field.no !== changed);
-    const actual = promoProto(promoNode(after, numbers)).filter(field => field.no !== changed);
+  for (const [numbers, changed] of [[[], [15]], [[15], [100625508]], [[15, 100625508], [3, 8]]]) {
+    const original = promoProto(promoNode(before, numbers)).filter(field => !changed.includes(field.no));
+    const actual = promoProto(promoNode(after, numbers)).filter(field => !changed.includes(field.no));
     assert(original.length === actual.length && original.every((field, i) => Buffer.from(field.raw).equals(actual[i].raw)),
       'all unrelated fields, including repeated fields, must stay byte-identical');
   }
-  assert(!promoProto(promoNode(after, [15, 100625508])).some(field => field.no === 8), 'only the side-panel promo is removed');
+}
+function assertNoAccountPromos(bytes) {
+  assert(!promoProto(promoNode(bytes, [15, 100625508])).some(field => [3, 8].includes(field.no)),
+    'both the known side-panel promo and its identified Premium button source must be removed');
 }
 function assertPromoUnchanged(result, input) {
   assert.equal(result.done.length, 1);
@@ -61,6 +66,17 @@ async function musicPromoRun(body, options = {}) {
     response: {status: options.status ?? 200, headers: {'Content-Type': 'application/x-protobuf'}, body: new Uint8Array(body)},
   });
 }
+async function musicPromoBaseline(input) {
+  const file = path.join(__dirname, 'youtube.response.js'), read = fs.readFileSync;
+  const source = read(file, 'utf8'), marker = 'const promoBody = removeMusicSidePanelPromo(bodyBytes || l.bodyBytes);';
+  assert(source.includes(marker));
+  try {
+    fs.readFileSync = function (name, ...args) {
+      return path.resolve(String(name)) === file ? source.replace(marker, 'const promoBody = null;') : read.call(this, name, ...args);
+    };
+    return await musicPromoRun(input);
+  } finally { fs.readFileSync = read; }
+}
 
 test('Music Account promo removal preserves account metadata and works in different languages', async () => {
   for (const description of ['Enjoy ad-free music, listen in audio mode, and play music offline.', 'Profitez de votre musique sans publicite.']) {
@@ -69,8 +85,9 @@ test('Music Account promo removal preserves account metadata and works in differ
     assert.equal(result.done.length, 1); assert(result.done[0].body, 'the known optional promo must be removed');
     const output = Buffer.from(result.done[0].body);
     assertPromoSiblings(input, output);
+    assertNoAccountPromos(output);
     assert(!output.includes(Buffer.from(description)));
-    assert(output.includes(Buffer.from('Get Music Premium')), 'the separate Premium settings entry remains available');
+    assert(!output.includes(Buffer.from('Get Music Premium')));
     assert.equal(store.get('YouTubePlaybackKeys.v2.youtubeMusic'), 'existing-keys');
     assert.equal(result.requests.length, 0); assert.equal(result.apiCalls.length, 0);
     const repeat = await musicPromoRun(output, {store});
@@ -90,9 +107,10 @@ test('Music Account promo removal is restricted to Music browse responses', asyn
 });
 
 test('Music Account promo removal preserves absent, unknown and malformed optional metadata', async () => {
-  const inputs = [musicPromoFixture({absent: true}), musicPromoFixture({renderer: 104347097}),
-    musicPromoFixture({promo: promoField(104347096, Buffer.alloc(0))}),
-    musicPromoFixture({promo: Buffer.from([0x0a, 0xff])}),
+  const noLegacy = {legacyButton: Buffer.alloc(0)};
+  const inputs = [musicPromoFixture({...noLegacy, absent: true}), musicPromoFixture({...noLegacy, renderer: 104347097}),
+    musicPromoFixture({...noLegacy, promo: promoField(104347096, Buffer.alloc(0))}),
+    musicPromoFixture({...noLegacy, promo: Buffer.from([0x0a, 0xff])}),
     musicPromoFixture({metadata: promoScalar(8, 1)}),
     musicPromoFixture({envelope: Buffer.from([0x0a, 0xff])}),
     musicPromoFixture({rootField: promoScalar(15, 1)})];
@@ -100,6 +118,32 @@ test('Music Account promo removal preserves absent, unknown and malformed option
     const result = await musicPromoRun(input);
     assertPromoUnchanged(result, input);
     assert.equal(result.requests.length, 0); assert.equal(result.apiCalls.length, 0);
+  }
+});
+
+test('Music Account promo removal handles a Premium button without a side-panel object', async () => {
+  const input = musicPromoFixture({absent: true}), result = await musicPromoRun(input);
+  assert(result.done[0].body); const output = Buffer.from(result.done[0].body);
+  assertPromoSiblings(input, output); assertNoAccountPromos(output);
+  const repeat = await musicPromoRun(output); assertPromoUnchanged(repeat, output);
+  const malformed = musicPromoFixture({promo: Buffer.from([0x0a, 0xff])});
+  const partial = Buffer.from((await musicPromoRun(malformed)).done[0].body);
+  assertPromoSiblings(malformed, partial);
+  const before = promoProto(promoNode(malformed, [15, 100625508])), after = promoProto(promoNode(partial, [15, 100625508]));
+  assert(!after.some(field => field.no === 3));
+  assert(Buffer.from(before.find(field => field.no === 8).raw).equals(after.find(field => field.no === 8).raw),
+    'a malformed unknown side-panel value must remain intact while the known button is removed');
+});
+
+test('Music Account promo removal keeps unrelated and malformed metadata buttons', async () => {
+  for (const options of [{legacyEndpoint: 'FEsettings', legacyLabel: 'Settings'}, {legacyButton: Buffer.from([0x0a, 0xff])},
+    {legacyButton: promoField(65153810, 'unknown-button')}]) {
+    const input = musicPromoFixture(options), result = await musicPromoRun(input), output = Buffer.from(result.done[0].body);
+    assertPromoSiblings(input, output);
+    const before = promoProto(promoNode(input, [15, 100625508])), after = promoProto(promoNode(output, [15, 100625508]));
+    assert(!after.some(field => field.no === 8));
+    assert(Buffer.from(before.find(field => field.no === 3).raw).equals(after.find(field => field.no === 3).raw),
+      'only a button with the exact SPunlimited browse target may be removed');
   }
 });
 
@@ -116,20 +160,34 @@ test('private Music home HAR removes the exact Account footer and preserves exis
     const input = decode(entry.response.content), result = await musicPromoRun(input);
     assert.equal(result.done.length, 1); assert(result.done[0].body);
     const output = Buffer.from(result.done[0].body);
-    assert(!output.includes(Buffer.from(description))); assert(output.includes(Buffer.from('Get Music Premium')));
-    const file = path.join(__dirname, 'youtube.response.js'), read = fs.readFileSync;
-    const source = read(file, 'utf8'), marker = 'const promoBody = removeMusicSidePanelPromo(bodyBytes || l.bodyBytes);';
-    assert(source.includes(marker));
-    let baseline;
-    try {
-      fs.readFileSync = function (name, ...args) {
-        return path.resolve(String(name)) === file ? source.replace(marker, 'const promoBody = null;') : read.call(this, name, ...args);
-      };
-      baseline = await musicPromoRun(input);
-    } finally { fs.readFileSync = read; }
+    assert(!output.includes(Buffer.from(description))); assertNoAccountPromos(output);
+    const baseline = await musicPromoBaseline(input);
     assertPromoSiblings(baseline.done[0].body || input, output);
     assert.equal(result.requests.length, 0); assert.equal(result.apiCalls.length, 0);
   }
+});
+
+test('private Music fallback HAR removes the surviving Premium button after side-panel removal', {
+  skip: !process.env.MUSIC_PROMO_FALLBACK_HAR_PATH,
+}, async () => {
+  const entries = JSON.parse(fs.readFileSync(process.env.MUSIC_PROMO_FALLBACK_HAR_PATH, 'utf8')).log.entries;
+  let checked = 0;
+  await musicPromoRun(Buffer.alloc(0));
+  for (const entry of entries) {
+    if (new URL(entry.request.url).pathname !== '/youtubei/v1/browse' || !entry.response?.content?.text) continue;
+    const content = entry.response.content, input = Buffer.from(content.text, content.encoding === 'base64' ? 'base64' : 'utf8');
+    const container = promoProto(input).find(field => field.no === 15 && field.wire === 2);
+    if (!container) continue;
+    const metadata = promoNode(container.value, [100625508]), fields = promoProto(metadata);
+    if (!fields.some(field => field.no === 3)) continue;
+    assert(!fields.some(field => field.no === 8), 'capture must reproduce the incomplete v5 removal');
+    const result = await musicPromoRun(input), baseline = await musicPromoBaseline(input);
+    assert.equal(result.done.length, 1); assert(result.done[0].body);
+    const output = Buffer.from(result.done[0].body);
+    assertNoAccountPromos(output); assertPromoSiblings(baseline.done[0].body || input, output);
+    assert.equal(result.requests.length, 0); assert.equal(result.apiCalls.length, 0); checked++;
+  }
+  assert(checked >= 2, 'both captured metadata responses must exercise the surviving Premium button');
 });
 
 test('initplayback requires an exact ack query key in any position', () => {

@@ -486,13 +486,24 @@ function Wi(l){let e=l?.playabilityStatus;if(!e)return;e.pictureInPictureRender=
 function ce(l,e,t){let n=l!=null&&typeof l=="object"?[l]:[];for(;n.length;){let i=n.pop();for(let r of Object.keys(i)){if(r===e&&t(i))return;i[r]!=null&&typeof i[r]=="object"&&n.push(i[r])}}}var Ni={de:"Deutsch",ru:"\u0420\u0443\u0441\u0441\u043A\u0438\u0439",fr:"Fran\xE7ais",fil:"Filipino",ko:"\uD55C\uAD6D\uC5B4",ja:"\u65E5\u672C\u8A9E",en:"English",vi:"Ti\u1EBFng Vi\u1EC7t","zh-Hant":"\u4E2D\u6587\uFF08\u7E41\u9AD4\uFF09","zh-Hans":"\u4E2D\u6587\uFF08\u7B80\u4F53\uFF09",und:"@VirgilClyne"};
 function Si(l,e){e!=="off"&&ce(l,"captionTracks",t=>{let n=t.captionTracks,i=t.audioTracks;if(Array.isArray(n)&&n.length){let r={[e]:2,en:1},c=-1,o=0;for(let s=0;s<n.length;s++){let a=n[s],u=r[a.languageCode];u&&u>c&&(c=u,o=s),a.isTranslatable=!0}let s=c===2?o:-1;if(s<0&&typeof n[o]?.baseUrl==="string"){let a=be.create({baseUrl:n[o].baseUrl+`&tlang=${e}`,name:{runs:[{text:`Enhance (${e})`}]},vssId:`.${e}`,languageCode:e});n.push(a),s=n.length-1}if(Array.isArray(i)&&s>=0){for(let a of i)Array.isArray(a.captionTrackIndices)||(a.captionTrackIndices=[]),a.captionTrackIndices.includes(s)||a.captionTrackIndices.push(s),delete a.defaultCaptionTrackIndex,delete a.forcedCaptionTrackIndex,a.hasDefaultTrack=!1,a.hasForcedTrack=!1,a.captionsInitialState=2;delete t.defaultCaptionTrackIndex}}return t.translationLanguages=Object.entries(Ni).map(([r,c])=>ke.create({languageCode:r,languageName:{runs:[{text:c}]}})),!0})}
 function Rr(l,e){globalThis.YouTubePrewarm?.capture(l,Vi(),d.list(l));xi(l),Wi(l),Si(l,e)}function ei(l){if(l.length<1e3)return!1;let e=[112,97,103,101,97,100],t=l.length,n=e.length,i=new Int32Array(256).fill(n+1);for(let c=0;c<n;c++)i[e[c]]=n-c;let r=0;for(;r<=t-n;){if(l[r]===e[0]&&l[r+1]===e[1]&&l[r+2]===e[2]&&l[r+3]===e[3]&&l[r+4]===e[4]&&l[r+5]===e[5])return!0;r+=i[l[r+n]]||n+1}return!1}function Oi(l){return l?d.list(l)?.some(t=>ei(t.data))??!1:!1}function Pi(l,e){let t=l.no;if(e.whiteNo.includes(t))return!1;if(e.blackNo.includes(t))return!0;let n=ei(l.data);return n?e.blackNo.push(t):e.whiteNo.push(t),e.dirty=!0,n}function Ui(l,e){let t=!1;return ce(l,"renderInfo",n=>{let i=n.renderInfo?.layoutRender?.eml?.split("|")?.[0]??"";if(e.whiteEml.includes(i))t=!1;else if(e.blackEml.includes(i)||/shorts(?!_pivot_item)/.test(i))t=!0;else{let r=n?.videoInfo?.videoContext?.videoContent;r&&(t=Oi(r),t?e.blackEml.push(i):e.whiteEml.push(i),e.dirty=!0)}return!0}),t}function Ei(l,e){let t=d.list(l)[0];return t?Pi(t,e):Ui(l,e)}function wr(l,e){let t=!1;return ce(l,"richItemContents",n=>{let i=n.richItemContents;if(!Array.isArray(i))return!1;for(let r=i.length-1;r>=0;r--)Ei(i[r],e)&&(i.splice(r,1),t=!0)}),t}
-// Music Account footer: remove only [15, 100625508, 8] with the known promo renderer.
+// Music Account footer: remove the known side-panel promo and its Premium button source.
 // Keep the existing ad-filter output and every unrelated protobuf field opaque.
 const musicPromoOpaque = new g("youtube.response.browse.MusicPromoEnvelope", []);
 function musicPromoBytes(field) {
   if (field.wireType !== f.LengthDelimited) return null;
   const reader = Er().readerFactory(field.data), bytes = reader.bytes();
   if (reader.pos !== field.data.length) throw new Error("Invalid Music promotion field");
+  return bytes;
+}
+function musicPromoPath(field, numbers) {
+  let bytes = musicPromoBytes(field);
+  for (const number of numbers) {
+    if (!bytes) return null;
+    const message = musicPromoOpaque.fromBinary(bytes);
+    const nested = d.list(message, number).find(value => value.wireType === f.LengthDelimited);
+    if (!nested) return null;
+    bytes = musicPromoBytes(nested);
+  }
   return bytes;
 }
 function removeMusicSidePanelPromo(body) {
@@ -511,12 +522,18 @@ function removeMusicSidePanelPromo(body) {
           const metadata = musicPromoOpaque.fromBinary(metadataBytes), fields = d.list(metadata);
           let removed = false;
           for (let index = fields.length - 1; index >= 0; index--) {
-            if (fields[index].no !== 8) continue;
-            const promoBytes = musicPromoBytes(fields[index]);
-            if (!promoBytes) continue;
-            const promo = musicPromoOpaque.fromBinary(promoBytes);
-            if (!d.list(promo, 104347096).some(renderer => musicPromoBytes(renderer)?.length > 0)) continue;
-            fields.splice(index, 1); removed = true;
+            try {
+              if (fields[index].no === 3) {
+                const target = musicPromoPath(fields[index], [65153809, 9, 48687626, 2]);
+                if (!target || target.length !== 11 || !target.every((byte, offset) => byte === "SPunlimited".charCodeAt(offset))) continue;
+              } else if (fields[index].no === 8) {
+                const promoBytes = musicPromoBytes(fields[index]);
+                if (!promoBytes) continue;
+                const promo = musicPromoOpaque.fromBinary(promoBytes);
+                if (!d.list(promo, 104347096).some(renderer => musicPromoBytes(renderer)?.length > 0)) continue;
+              } else continue;
+              fields.splice(index, 1); removed = true;
+            } catch (_) { /* Keep an unrecognized button/promo without hiding the other known source. */ }
           }
           if (removed) {
             item.data = new He().bytes(musicPromoOpaque.toBinary(metadata)).finish();
