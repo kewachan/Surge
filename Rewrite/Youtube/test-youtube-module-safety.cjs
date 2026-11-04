@@ -7,6 +7,131 @@ const {run} = require('../../Tools/Testing/surge-harness.cjs');
 const {loadClient} = require('./test-youtube-lyrics-order.cjs');
 const moduleText = fs.readFileSync(path.join(__dirname, 'YouTube.Enhance.sgmodule'), 'utf8');
 
+let promoProto;
+function promoVarint(value) {
+  const bytes = [];
+  do { const byte = value % 128; value = Math.floor(value / 128); bytes.push(byte | (value ? 128 : 0)); } while (value);
+  return Buffer.from(bytes);
+}
+const promoField = (number, bytes) => Buffer.concat([promoVarint(number * 8 + 2), promoVarint(Buffer.byteLength(bytes)), Buffer.from(bytes)]);
+const promoScalar = (number, value) => Buffer.concat([promoVarint(number * 8), promoVarint(value)]);
+const promoText = text => promoField(1, promoField(1, text));
+function musicPromoFixture(options = {}) {
+  const button = promoField(65153809, Buffer.concat([promoField(5, promoText('Get Music Premium')),
+    promoField(9, promoField(48687626, promoField(2, 'SPunlimited')))]));
+  const renderer = Buffer.concat([promoField(1, button), promoField(2,
+    promoText(options.description || 'Enjoy ad-free music, listen in audio mode, and play music offline.'))]);
+  const promo = options.promo ?? promoField(options.renderer ?? 104347096, renderer);
+  const metadata = options.metadata ?? Buffer.concat([promoField(3, button), promoScalar(4, 0),
+    promoField(7, Buffer.from([255, 0, 128])), ...(options.absent ? [] : [promoField(8, promo)]),
+    promoField(9, 'first-unknown'), promoField(9, 'second-unknown'), promoScalar(24, 1)]);
+  const envelope = options.envelope ?? Buffer.concat([promoField(123, 'envelope-sibling'), promoField(100625508, metadata)]);
+  return Buffer.concat([promoField(9, promoField(199000001, 'ordinary-results')),
+    options.rootField ?? promoField(15, envelope), promoScalar(34, 1), promoField(777, Buffer.from([255, 0]))]);
+}
+function promoNode(bytes, numbers) {
+  for (const number of numbers) bytes = promoProto(bytes).find(field => field.no === number && field.wire === 2)?.value;
+  assert(bytes, 'expected metadata path must exist');
+  return bytes;
+}
+function assertPromoSiblings(before, after) {
+  for (const [numbers, changed] of [[[], 15], [[15], 100625508], [[15, 100625508], 8]]) {
+    const original = promoProto(promoNode(before, numbers)).filter(field => field.no !== changed);
+    const actual = promoProto(promoNode(after, numbers)).filter(field => field.no !== changed);
+    assert(original.length === actual.length && original.every((field, i) => Buffer.from(field.raw).equals(actual[i].raw)),
+      'all unrelated fields, including repeated fields, must stay byte-identical');
+  }
+  assert(!promoProto(promoNode(after, [15, 100625508])).some(field => field.no === 8), 'only the side-panel promo is removed');
+}
+function assertPromoUnchanged(result, input) {
+  assert.equal(result.done.length, 1);
+  const output = result.done[0].body;
+  if (output) assert(Buffer.from(output).equals(input), 'the existing browse pass-through must keep the original bytes');
+  else assert.deepEqual(Object.keys(result.done[0]), []);
+}
+async function musicPromoRun(body, options = {}) {
+  if (!promoProto) {
+    const source = fs.readFileSync(path.join(__dirname, 'youtube.worker.js'), 'utf8');
+    promoProto = (await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))).__test.parseProto;
+  }
+  return run('Rewrite/Youtube/youtube.response.js', {
+    store: options.store, argument: '{"captionLang":"off","lyricsLang":"off","prewarm":false}',
+    request: {url: `https://youtubei.googleapis.com/youtubei/v1/${options.endpoint || 'browse'}`,
+      headers: {[options.headerName || 'User-Agent']: options.userAgent ?? 'com.google.ios.youtubemusic/9.43.2'}},
+    response: {status: options.status ?? 200, headers: {'Content-Type': 'application/x-protobuf'}, body: new Uint8Array(body)},
+  });
+}
+
+test('Music Account promo removal preserves account metadata and works in different languages', async () => {
+  for (const description of ['Enjoy ad-free music, listen in audio mode, and play music offline.', 'Profitez de votre musique sans publicite.']) {
+    const input = musicPromoFixture({description}), store = new Map([['YouTubePlaybackKeys.v2.youtubeMusic', 'existing-keys']]);
+    const result = await musicPromoRun(input, {store, headerName: 'user-agent'});
+    assert.equal(result.done.length, 1); assert(result.done[0].body, 'the known optional promo must be removed');
+    const output = Buffer.from(result.done[0].body);
+    assertPromoSiblings(input, output);
+    assert(!output.includes(Buffer.from(description)));
+    assert(output.includes(Buffer.from('Get Music Premium')), 'the separate Premium settings entry remains available');
+    assert.equal(store.get('YouTubePlaybackKeys.v2.youtubeMusic'), 'existing-keys');
+    assert.equal(result.requests.length, 0); assert.equal(result.apiCalls.length, 0);
+    const repeat = await musicPromoRun(output, {store});
+    assertPromoUnchanged(repeat, output);
+  }
+});
+
+test('Music Account promo removal is restricted to Music browse responses', async () => {
+  const input = musicPromoFixture();
+  for (const options of [{userAgent: 'com.google.ios.youtube/21.43.3'}, {userAgent: ''},
+    {endpoint: 'next'}, {endpoint: 'search'}, {endpoint: 'guide'}, {endpoint: 'next?ref=browse'},
+    {status: 403}, {status: 500}]) {
+    const result = await musicPromoRun(input, options);
+    assertPromoUnchanged(result, input);
+    assert.equal(result.requests.length, 0); assert.equal(result.apiCalls.length, 0);
+  }
+});
+
+test('Music Account promo removal preserves absent, unknown and malformed optional metadata', async () => {
+  const inputs = [musicPromoFixture({absent: true}), musicPromoFixture({renderer: 104347097}),
+    musicPromoFixture({promo: promoField(104347096, Buffer.alloc(0))}),
+    musicPromoFixture({promo: Buffer.from([0x0a, 0xff])}),
+    musicPromoFixture({metadata: promoScalar(8, 1)}),
+    musicPromoFixture({envelope: Buffer.from([0x0a, 0xff])}),
+    musicPromoFixture({rootField: promoScalar(15, 1)})];
+  for (const input of inputs) {
+    const result = await musicPromoRun(input);
+    assertPromoUnchanged(result, input);
+    assert.equal(result.requests.length, 0); assert.equal(result.apiCalls.length, 0);
+  }
+});
+
+test('private Music home HAR removes the exact Account footer and preserves existing ad filtering', {
+  skip: !process.env.MUSIC_PROMO_HAR_PATH,
+}, async () => {
+  const entries = JSON.parse(fs.readFileSync(process.env.MUSIC_PROMO_HAR_PATH, 'utf8')).log.entries;
+  const description = 'Enjoy ad-free music, listen in audio mode, and play music offline.';
+  const decode = content => Buffer.from(content?.text || '', content?.encoding === 'base64' ? 'base64' : 'utf8');
+  const captured = entries.filter(entry => new URL(entry.request.url).pathname === '/youtubei/v1/browse' &&
+    decode(entry.response?.content).includes(Buffer.from(description)));
+  assert(captured.length > 0, 'capture must contain the exact requested footer');
+  for (const entry of captured) {
+    const input = decode(entry.response.content), result = await musicPromoRun(input);
+    assert.equal(result.done.length, 1); assert(result.done[0].body);
+    const output = Buffer.from(result.done[0].body);
+    assert(!output.includes(Buffer.from(description))); assert(output.includes(Buffer.from('Get Music Premium')));
+    const file = path.join(__dirname, 'youtube.response.js'), read = fs.readFileSync;
+    const source = read(file, 'utf8'), marker = 'const promoBody = removeMusicSidePanelPromo(bodyBytes || l.bodyBytes);';
+    assert(source.includes(marker));
+    let baseline;
+    try {
+      fs.readFileSync = function (name, ...args) {
+        return path.resolve(String(name)) === file ? source.replace(marker, 'const promoBody = null;') : read.call(this, name, ...args);
+      };
+      baseline = await musicPromoRun(input);
+    } finally { fs.readFileSync = read; }
+    assertPromoSiblings(baseline.done[0].body || input, output);
+    assert.equal(result.requests.length, 0); assert.equal(result.apiCalls.length, 0);
+  }
+});
+
 test('initplayback requires an exact ack query key in any position', () => {
   const line = moduleText.split('\n').find(line => line.startsWith('youtube.init_playback.request'));
   const regex = new RegExp(/pattern=(.*?),requires-body=/.exec(line)[1]);
