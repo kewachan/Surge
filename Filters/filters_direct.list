@@ -35,3 +35,4 @@ DOMAIN, freco.synology.me
 DOMAIN, kenichi-mac.asuscomm.com
 DOMAIN, kenichi-tyo1.duckdns.org
 DOMAIN, kenichi-tyo2.duckdns.org
+AND,((DOMAIN,radiquo-stream.duckdns.org), (DEST-PORT,22))
