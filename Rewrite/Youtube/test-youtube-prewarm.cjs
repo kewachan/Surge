@@ -4,6 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const {test} = require("node:test");
 const {run: nativeRun} = require("../../Tools/Testing/surge-harness.cjs");
+require("./test-youtube-lyrics-model.cjs");
 const directory = __dirname;
 const token = "a".repeat(64);
 const authorization = {Authorization: `Bearer ${token}`};
@@ -238,7 +239,7 @@ test("a transient empty Music lookup recovers on redelivery and ignores legacy n
   const {lyrics} = await ready, messages = [];
   const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: new Namespace(lyrics.LyricsPrewarm),
     LYRICS_QUEUE: {send: async (body) => messages.push(body)}};
-  const oldId = await shared.identifier({version: 1, videoId: "abcdefghijk", target: "zh-TW", model: "@cf/qwen/qwen3-30b-a3b-fp8"});
+  const oldId = await shared.identifier({version: 1, videoId: "abcdefghijk", target: "zh-TW", model: "@cf/aisingapore/gemma-sea-lion-v4-27b-it"});
   await shared.jobCall(env.LYRICS_PREWARM, oldId, "prepare", {work: {kind: "source"}});
   await shared.jobCall(env.LYRICS_PREWARM, oldId, "complete", {result: {available: false}});
   const oldFetch = global.fetch; let empty = true;
@@ -767,7 +768,7 @@ async function seededSong(lyrics, count = 34) {
   const namespace = new Namespace(lyrics.LyricsPrewarm), target = "zh-TW";
   const texts = Array.from({length: count}, (_, i) => `Whole song line ${i}`);
   const translations = texts.map((_, i) => `整首譯文${i}`);
-  const id = await shared.identifier({version: 2, videoId: "abcdefghijk", target, model: "@cf/qwen/qwen3-30b-a3b-fp8"});
+  const id = await shared.identifier({version: 2, videoId: "abcdefghijk", target, model: "@cf/aisingapore/gemma-sea-lion-v4-27b-it"});
   const ids = [];
   for (let i = 0; i < count; i += 12) {
     const key = await lyrics.__test.cacheRequest(texts.slice(i, i + 12), "auto", target), child = `batch:${key.identifier}`;
@@ -925,13 +926,15 @@ test("non-thinking prompts retain exact target/script guards and include full co
   const env = {AI: {run: async (_, params) => { requests.push(params); return {response: '{"translations":["你是希望","原有繁體標點！"]}'}; }}};
   await lyrics.__test.translateLyrics(texts, "auto", "zh-TW", env);
   let prompt = requests[0].messages[1].content;
-  assert(prompt.endsWith("/no_think")); assert(prompt.includes("Traditional Chinese")); assert(prompt.includes("你或你的") || prompt.includes("你 or 你的"));
+  assert.equal(requests[0].chat_template_kwargs, undefined);
+  assert(prompt.includes("Traditional Chinese")); assert(prompt.includes("你或你的") || prompt.includes("你 or 你的"));
   assert(prompt.includes("byte-for-byte")); assert(!prompt.includes("Full lyric context JSON:"));
   assert.equal(prompt.split(JSON.stringify(texts)).length - 1, 1);
   assert.equal(requests[0].response_format.type, "json_schema"); assert.equal(requests[0].max_tokens, 1024);
   await lyrics.__test.translateLyrics(texts, "auto", "zh-TW", env, [...texts, "Other context"]);
   prompt = requests[1].messages[1].content;
-  assert(prompt.includes("Full lyric context JSON:")); assert(prompt.endsWith("/no_think"));
+  assert(prompt.includes("Full lyric context JSON:"));
+  assert.equal(requests[1].chat_template_kwargs, undefined);
   const neutral = await lyrics.__test.translateLyrics(["เธอคือความหวัง"], "auto", "zh-TW", {
     AI: {run: async () => ({response: '{"translations":["妳是希望"]}'})},
   });
