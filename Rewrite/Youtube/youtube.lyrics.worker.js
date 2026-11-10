@@ -3,7 +3,7 @@ import {chineseConversionEnabled, chineseLyricLine} from "./youtube.chinese.js";
 export {PrewarmJob as LyricsPrewarm};
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/aisingapore/gemma-sea-lion-v4-27b-it";
-const WORKER_BUILD = "lyrics-translate-v24-sealion";
+const WORKER_BUILD = "lyrics-translate-v25-thai-guard";
 // Do not reuse source lookups that older builds cached after one empty response.
 const PREWARM_SOURCE_VERSION = 2;
 const MAX_REQUEST_BYTES = 48 * 1024;
@@ -119,6 +119,17 @@ function hasTargetScriptMismatch(translations, target) {
     && translations.some((translation) => SIMPLIFIED_CHINESE_MARKERS.test(translation));
 }
 
+function hasCopiedThaiLine(texts, translations, target) {
+  return /^zh(?:-|$)/i.test(target)
+    && texts.some((text, index) => /[\u0e00-\u0e7f]/.test(text) && translations[index] === text.trim());
+}
+
+function reusableTranslations(texts, value, target) {
+  const translations = validatedTranslations(value, texts.length);
+  return translations && !hasTargetScriptMismatch(translations, target)
+    && !hasCopiedThaiLine(texts, translations, target) ? translations : null;
+}
+
 function targetDescription(target) {
   if (target === "zh-TW") {
     return "natural Traditional Chinese (繁體中文) suitable for Hong Kong and Macau; never use Simplified Chinese";
@@ -172,8 +183,7 @@ async function translateLyrics(texts, source, target, env, contextTexts = texts,
     error.code = AI_INVALID_TRANSLATION_CODE;
     throw error;
   }
-  if (/^zh(?:-|$)/i.test(target) && texts.some((text) => /[\u0e00-\u0e7f]/.test(text))
-    && translations.every((text, index) => text === texts[index].trim())) {
+  if (hasCopiedThaiLine(texts, translations, target)) {
     throw Object.assign(new Error("Workers AI returned untranslated Thai lyrics"), {code: "AI_UNTRANSLATED"});
   }
   if (target === "zh-TW") texts.forEach((text, index) => {
@@ -261,15 +271,15 @@ async function cacheRequest(texts, source, target) {
   };
 }
 
-async function readCache(request, expectedCount, target) {
+async function readCache(request, texts, target) {
   const cache = globalThis.caches?.default;
   if (!cache) return null;
   try {
     const cachedResponse = await cache.match(request);
     if (!cachedResponse) return null;
     const body = await cachedResponse.json();
-    const translations = validatedTranslations(body?.translations, expectedCount);
-    if (body?.provider !== "cloudflare-ai" || !translations || hasTargetScriptMismatch(translations, target)) return null;
+    const translations = reusableTranslations(texts, body?.translations, target);
+    if (body?.provider !== "cloudflare-ai" || !translations) return null;
     return { translations, provider: "cloudflare-ai" };
   } catch (error) {
     console.error("YouTube lyric cache read failed:", error?.message || String(error));
@@ -277,8 +287,8 @@ async function readCache(request, expectedCount, target) {
   }
 }
 
-async function writeCache(request, result) {
-  if (result?.provider !== "cloudflare-ai") return false;
+async function writeCache(request, result, texts, target) {
+  if (result?.provider !== "cloudflare-ai" || !reusableTranslations(texts, result.translations, target)) return false;
   const cache = globalThis.caches?.default;
   if (!cache) return false;
   try {
@@ -298,10 +308,10 @@ async function writeCache(request, result) {
 
 async function translateCached(texts, source, target, env, context, prewarmVideoId) {
   const key = await cacheRequest(texts, source, target);
-  const cached = await readCache(key.request, texts.length, target);
+  const cached = await readCache(key.request, texts, target);
   if (cached) return { ...cached, cacheStatus: "HIT" };
   const warmed = await prewarmedSongBatch(prewarmVideoId, texts, target, env, context);
-  if (warmed) { await writeCache(key.request, warmed); return warmed; }
+  if (warmed) { await writeCache(key.request, warmed, texts, target); return warmed; }
 
   let work = IN_FLIGHT_TRANSLATIONS.get(key.identifier);
   if (!work) {
@@ -319,9 +329,9 @@ async function translateCached(texts, source, target, env, context, prewarmVideo
             do {
               const state = await jobCall(namespace, id, "state");
               if (state.status === "complete") {
-                if (state.result?.provider !== "cloudflare-ai" || !validatedTranslations(state.result.translations, texts.length)
-                  || hasTargetScriptMismatch(state.result.translations, target)) throw new Error("Invalid AI cache");
-                return {...state.result, cacheStatus: "HIT"};
+                const translations = reusableTranslations(texts, state.result?.translations, target);
+                if (state.result?.provider !== "cloudflare-ai" || !translations) throw new Error("Invalid AI cache");
+                return {...state.result, translations, cacheStatus: "HIT"};
               }
               if (state.status === "failed" || state.status === "missing") throw new Error("AI prewarm unavailable");
               await new Promise((resolve) => setTimeout(resolve, 250));
@@ -339,7 +349,7 @@ async function translateCached(texts, source, target, env, context, prewarmVideo
       try {
         const runAI = createRequestLimiter(MAX_AI_CONCURRENCY);
         const result = await translateLyricsAdaptive(texts, source, target, env, texts, true, runAI);
-        await writeCache(key.request, result);
+        await writeCache(key.request, result, texts, target);
         if (ownsJob) {
           const persistence = jobCall(namespace, id, "complete", {result: {...result, sourceTexts: texts}}).catch(() => {});
           if (typeof context?.waitUntil === "function") context.waitUntil(persistence);
@@ -443,22 +453,21 @@ async function prewarmedSongBatch(videoId, texts, target, env, context, allowPar
     const byOriginal = new Map();
     let bundle;
     try { bundle = JSON.parse(song.result.body || "null"); } catch (_) {}
-    const bundleTranslations = Array.isArray(bundle?.texts) ? validatedTranslations(bundle.translations, bundle.texts.length) : null;
+    const validBundleTexts = Array.isArray(bundle?.texts) && bundle.texts.length <= 384
+      && bundle.texts.every((line) => typeof line === "string" && line.trim() && line.length <= MAX_LINE_CHARS);
+    const bundleTranslations = validBundleTexts ? reusableTranslations(bundle.texts, bundle.translations, target) : null;
     if (bundle?.version === 1 && bundle.target === target && bundle.provider === "cloudflare-ai"
-      && Array.isArray(bundle.texts) && bundle.texts.length <= 384
-      && bundle.texts.every((line) => typeof line === "string" && line.trim() && line.length <= MAX_LINE_CHARS)
-      && bundleTranslations && !hasTargetScriptMismatch(bundleTranslations, target)) {
+      && bundleTranslations) {
       bundle.texts.forEach((line, index) => byOriginal.set(line, bundleTranslations[index]));
     } else {
       const batches = await Promise.all(ids.map((id) => jobCall(env.LYRICS_PREWARM, id, "state")));
       let completed = 0;
       for (const batch of batches) {
         const result = batch.result;
-        const translations = Array.isArray(result?.sourceTexts) ? validatedTranslations(result.translations, result.sourceTexts.length) : null;
-        if (batch.status !== "complete" || result?.provider !== "cloudflare-ai"
-          || !Array.isArray(result.sourceTexts) || result.sourceTexts.length > MAX_ITEMS
-          || !result.sourceTexts.every((line) => typeof line === "string" && line.trim() && line.length <= MAX_LINE_CHARS)
-          || !translations || hasTargetScriptMismatch(translations, target)) continue;
+        const validSourceTexts = Array.isArray(result?.sourceTexts) && result.sourceTexts.length <= MAX_ITEMS
+          && result.sourceTexts.every((line) => typeof line === "string" && line.trim() && line.length <= MAX_LINE_CHARS);
+        const translations = validSourceTexts ? reusableTranslations(result.sourceTexts, result.translations, target) : null;
+        if (batch.status !== "complete" || result?.provider !== "cloudflare-ai" || !translations) continue;
         completed++;
         result.sourceTexts.forEach((line, index) => byOriginal.set(line, translations[index]));
       }
@@ -488,11 +497,11 @@ async function songCacheResult(request, env, context) {
     return response("Invalid song cache request", 400);
   if (texts.join("").length > MAX_TOTAL_CHARS * 32) return response("Song cache request too large", 413);
   const key = await cacheRequest(texts, "auto", target);
-  const cached = await readCache(key.request, texts.length, target);
+  const cached = await readCache(key.request, texts, target);
   const result = cached ? {...cached, status: "complete", cacheStatus: "HIT"}
     : await prewarmedSongBatch(payload.videoId, texts, target, env, context, true);
   if (!result) return response({status: "pending", target});
-  if (result.status === "complete") await writeCache(key.request, result);
+  if (result.status === "complete") await writeCache(key.request, result, texts, target);
   return response({...result, target});
 }
 
@@ -503,11 +512,11 @@ async function handleLyricsQueue(batch, env, context) {
       if (work.kind === "batch") {
         // The consumer owns the lease. Do not join a foreground promise waiting on that lease.
         const key = await cacheRequest(work.texts, work.source, work.target);
-        const cached = await readCache(key.request, work.texts.length, work.target);
+        const cached = await readCache(key.request, work.texts, work.target);
         if (cached) { if (work.videoId) song = work; return {...cached, sourceTexts: work.texts}; }
         const result = await translateLyricsAdaptive(work.texts, work.source, work.target, env, work.texts, true,
           createRequestLimiter(MAX_AI_CONCURRENCY));
-        await writeCache(key.request, result);
+        await writeCache(key.request, result, work.texts, work.target);
         if (work.videoId) song = work;
         return {...result, sourceTexts: work.texts};
       }

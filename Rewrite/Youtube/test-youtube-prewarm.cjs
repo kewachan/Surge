@@ -173,6 +173,97 @@ test("Music source prewarm populates the exact existing AI batch cache; foregrou
     assert.equal(runs, 1, "native/web batch boundaries must not force another AI translation");
   } finally { global.fetch = oldFetch; global.caches = oldCaches; }
 });
+test("legacy edge and durable lyric caches cannot return a partly copied Thai batch", async () => {
+  const {lyrics} = await ready, oldCaches = global.caches;
+  const texts = ["ฉันยิ้มให้เธอ ทั้งที่ในใจยังร้องไห้", "ฉันยอมเป็นคนแพ้ ดีกว่าทำให้เธอเสียใจ"];
+  const partial = {provider: "cloudflare-ai", translations: ["我對你微笑。", texts[1]]};
+  const translations = ["我對你微笑。", "我寧願當輸家，也不願讓你傷心。"];
+  try {
+    for (const mode of ["edge", "durable"]) {
+      const entries = new Map(), namespace = new Namespace(lyrics.LyricsPrewarm);
+      const key = await lyrics.__test.cacheRequest(texts, "auto", "zh-TW");
+      const untouched = "https://worker.test/valid-unrelated-cache";
+      entries.set(untouched, Response.json({translations: ["既有正確譯文"]}));
+      if (mode === "edge") entries.set(key.request.url, Response.json(partial, {headers: {"Cache-Control": "public, max-age=1209600"}}));
+      else {
+        const id = `batch:${key.identifier}`;
+        await shared.jobCall(namespace, id, "prepare", {work: {kind: "batch", texts, source: "auto", target: "zh-TW"}});
+        await shared.jobCall(namespace, id, "complete", {result: {...partial, sourceTexts: texts}});
+      }
+      let calls = 0;
+      global.caches = {default: {match: async (req) => entries.get(req.url)?.clone(), put: async (req, res) => entries.set(req.url, res.clone())}};
+      const result = await lyrics.__test.translateCached(texts, "auto", "zh-TW", {
+        ...(mode === "durable" ? {LYRICS_PREWARM: namespace, LYRICS_QUEUE: {send: async () => {}}} : {}),
+        AI: {run: async () => { calls++; return {response: JSON.stringify({translations})}; }},
+      });
+      assert.deepEqual(result.translations, translations, mode); assert.equal(result.cacheStatus, "MISS", mode); assert.equal(calls, 1, mode);
+      assert.equal(entries.get(key.request.url).headers.get("cache-control"), "public, max-age=1209600");
+      assert.deepEqual(await entries.get(untouched).clone().json(), {translations: ["既有正確譯文"]});
+      assert.equal(entries.size, 2);
+    }
+  } finally { global.caches = oldCaches; }
+});
+
+test("partial Thai prewarm failures never become reusable results and retain the bounded Queue retry", async () => {
+  const {lyrics} = await ready, oldCaches = global.caches, messages = [];
+  const texts = ["ฉันยิ้มให้เธอ ทั้งที่ในใจยังร้องไห้", "ฉันยอมเป็นคนแพ้ ดีกว่าทำให้เธอเสียใจ"];
+  let calls = 0, writes = 0;
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: new Namespace(lyrics.LyricsPrewarm),
+    LYRICS_QUEUE: {send: async (body) => messages.push(body)}, AI: {run: async () => {
+      calls++; return {response: JSON.stringify({translations: ["我對你微笑。", texts[1]]})};
+    }}};
+  global.caches = {default: {match: async () => null, put: async () => { writes++; }}};
+  try {
+    await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId: "abcdefghijk", target: "zh-TW", sourceLines: texts}), env, {});
+    await lyrics.default.queue({messages: [message(messages[0])]}, env, {});
+    const body = messages.find((item) => item.jobId.startsWith("batch:"));
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const delivery = message(body, attempt); await lyrics.default.queue({messages: [delivery]}, env, {});
+      assert.equal(calls, attempt); assert.equal(writes, 0);
+      assert.equal(Boolean(delivery.acked), attempt === 5); assert.equal(Boolean(delivery.retried), attempt < 5);
+      assert.equal((await shared.jobCall(env.LYRICS_PREWARM, body.jobId, "state")).status, attempt < 5 ? "queued" : "failed");
+    }
+    const duplicate = message(body, 6); await lyrics.default.queue({messages: [duplicate]}, env, {});
+    assert(duplicate.acked); assert.equal(calls, 5); assert.equal(writes, 0);
+    assert.equal((await shared.jobCall(env.LYRICS_PREWARM, body.jobId, "state")).status, "failed");
+    const response = await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId: "abcdefghijk", target: "zh-TW", texts}), env, {});
+    assert.equal((await response.json()).status, "pending"); assert.equal(calls, 5, "cache-only lookups never start AI");
+  } finally { global.caches = oldCaches; }
+});
+
+test("legacy Thai prewarm children and materialized song bundles skip bad batches while keeping valid siblings", async () => {
+  const {lyrics} = await ready, oldCaches = global.caches;
+  const badTexts = ["ฉันยิ้มให้เธอ ทั้งที่ในใจยังร้องไห้", "ฉันยอมเป็นคนแพ้ ดีกว่าทำให้เธอเสียใจ"];
+  const goodTexts = ["แม้ฝนจะตก ฉันก็ยังรอเธอ"], good = ["即使下雨，我仍會等你。"];
+  try {
+    for (const mode of ["children", "bundle", "edge", "valid-bundle", "valid-edge"]) {
+      const namespace = new Namespace(lyrics.LyricsPrewarm), ids = [];
+      const valid = mode.startsWith("valid-");
+      const allTexts = [...badTexts, ...goodTexts], bad = ["我對你微笑。", valid ? "我寧願當輸家，也不願讓你傷心。" : badTexts[1]], allTranslations = [...bad, ...good];
+      for (const [texts, translations] of [[badTexts, bad], [goodTexts, good]]) {
+        const key = await lyrics.__test.cacheRequest(texts, "auto", "zh-TW"), id = `batch:${key.identifier}`; ids.push(id);
+        await shared.jobCall(namespace, id, "prepare", {work: {kind: "batch", texts, source: "auto", target: "zh-TW"}});
+        await shared.jobCall(namespace, id, "complete", {result: {provider: "cloudflare-ai", translations, sourceTexts: texts}});
+      }
+      const sourceId = await shared.identifier({version: 2, videoId: "abcdefghijk", target: "zh-TW", model: "@cf/aisingapore/gemma-sea-lion-v4-27b-it"});
+      await shared.jobCall(namespace, sourceId, "prepare", {work: {kind: "source", videoId: "abcdefghijk", target: "zh-TW"}});
+      await shared.jobCall(namespace, sourceId, "complete", {result: {available: true, batchJobIds: ids,
+        ...(mode.endsWith("bundle") ? {body: JSON.stringify({version: 1, target: "zh-TW", provider: "cloudflare-ai", texts: allTexts, translations: allTranslations})} : {}),
+      }});
+      let writes = 0;
+      const key = await lyrics.__test.cacheRequest(allTexts, "auto", "zh-TW");
+      global.caches = {default: {match: async (req) => mode.endsWith("edge") && req.url === key.request.url
+        ? Response.json({provider: "cloudflare-ai", translations: allTranslations}) : null, put: async () => { writes++; }}};
+      const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: namespace, AI: {run() { throw new Error("Cache-only route must not run AI"); }}};
+      const response = await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId: "abcdefghijk", target: "zh-TW", texts: allTexts}), env, {});
+      const result = await response.json();
+      assert.equal(result.status, valid ? "complete" : "partial", mode);
+      assert.deepEqual(result.translations, valid ? allTranslations : [null, null, ...good]);
+      assert.equal(writes, valid ? 1 : 0); assert.equal((await shared.jobCall(namespace, ids[1], "state")).status, "complete");
+    }
+  } finally { global.caches = oldCaches; }
+});
+
 test("device lyric source skips the state preflight and acknowledges only a durable Queue submission", async () => {
   const {lyrics} = await ready, actions = [], messages = [], held = [];
   const namespace = new Namespace(lyrics.LyricsPrewarm), originalGet = namespace.get.bind(namespace);
