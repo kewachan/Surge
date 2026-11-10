@@ -1,4 +1,4 @@
-/* CTM Usage Info v1.0.7 — account data stays between Surge and CTM. */
+/* CTM Usage Info v1.0.8 — account data stays between Surge and CTM. */
 (function () {
   'use strict';
 
@@ -91,6 +91,18 @@
     return `${(bytes / UNITS[unit]).toFixed(1)} ${unit}`;
   }
 
+  function combined(first, second) {
+    const known = (first || 0) + (second || 0);
+    const unit = known < UNITS.GB ? 'MB' : known >= UNITS.TB ? 'TB' : 'GB';
+    const decimals = unit === 'MB' ? 0 : 1;
+    const scale = 10 ** decimals;
+    const values = [first, second].map(value => value === undefined ? undefined
+      : Math.round(value / UNITS[unit] * scale));
+    const display = value => value === undefined ? '--' : (value / scale).toFixed(decimals);
+    const total = values.includes(undefined) ? undefined : values[0] + values[1];
+    return `${display(values[0])} + ${display(values[1])} = ${display(total)} ${unit}`;
+  }
+
   function updatedAt() {
     const date = new Date(Date.now() + 8 * 60 * 60 * 1000);
     const pad = value => String(value).padStart(2, '0');
@@ -107,21 +119,31 @@
       const available = amount(usage.availableBalance, multiplier);
       // Remaining balance comes directly from CTM: unlimited traffic can exceed
       // the full-speed cap, so do not derive it from total minus used traffic.
-      return {title: `Remaining: ${format(available)}`,
-        content: `Used: ${format(used)}\nUpdated: ${updatedAt()}`, icon: ICON, 'icon-color': ICON_COLOR};
+      return {used, available};
     } catch (error) {
-      return errorPanel(error.kind);
+      return {error: error.kind || 'response'};
     }
   }
 
   async function run() {
     const config = options();
     const [first, second] = await Promise.all(config.tokens.map(token => readPlan(token, config.timeout)));
-    if (second) {
-      first.content += `\n\nPlan 2\n${second.style ? '' : second.title + '\n'}${second.content}`;
-      if (!first.style || !second.style) delete first.style;
-      else if (second.style === 'error') first.style = 'error';
+    if (!second) {
+      if (first.error) return errorPanel(first.error);
+      return {title: `Remaining: ${format(first.available)}`,
+        content: `Used: ${format(first.used)}\nUpdated: ${updatedAt()}`, icon: ICON, 'icon-color': ICON_COLOR};
     }
-    return first;
+    const errors = [];
+    if (first.error) errors.push(`Token: ${errorPanel(first.error).content}`);
+    if (second.error) errors.push(`Token 2: ${errorPanel(second.error).content}`);
+    if (first.error && second.error) {
+      const panel = errorPanel(first.error);
+      panel.content = errors.join('\n');
+      if (second.error !== 'missing') panel.style = 'error';
+      return panel;
+    }
+    return {title: `Remaining: ${combined(first.available, second.available)}`,
+      content: [`Used: ${combined(first.used, second.used)}`, `Updated: ${updatedAt()}`, ...errors].join('\n'),
+      icon: ICON, 'icon-color': ICON_COLOR};
   }
 })();

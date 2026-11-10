@@ -63,7 +63,7 @@ async function run(options = {}) {
   await Promise.resolve();
   assert.equal(doneCount, 1);
   assert.equal(logs.length, 0, 'never log a token, raw account response or network error');
-  assert.match(output.title, /^Remaining: (?:-- MB|\d+ MB|\d+\.\d (?:GB|TB))$/);
+  assert.match(output.title, /^Remaining: (?:--|\d+(?:\.\d)?)(?: \+ (?:--|\d+(?:\.\d)?) = (?:--|\d+(?:\.\d)?))? (?:MB|GB|TB)$/);
   assert.match(output.content, /^[\x20-\x7E\n]+$/, 'all visible content must be English text without emoji');
   assert.equal(output.icon, 'simcard');
   assert.equal(output['icon-color'], '#6699FF', 'all panel states use Network Info blue');
@@ -150,7 +150,7 @@ test('tokens accept Bearer prefixes and encoding; missing, invalid or injected v
   }
 });
 
-test('an optional second token shows a separate plan without changing the first plan', async () => {
+test('two valid tokens show compact remaining and used equations with one update time', async () => {
   const {output, requests} = await run({
     argument: configuredArgument({Token: 'first-token', 'Token 2': 'Bearer second-token'}),
     respond(request, callback) {
@@ -161,8 +161,9 @@ test('an optional second token shows a separate plan without changing the first 
   });
   assert.equal(requests.length, 2);
   assert.deepEqual(requests.map(request => request.headers.Authorization), ['Bearer first-token', 'Bearer second-token']);
-  assert.equal(output.title, 'Remaining: 512 MB');
-  assert.match(output.content, /^Used: 1\.5 GB\nUpdated: [\d/: ]+\n\nPlan 2\nRemaining: 2\.0 GB\nUsed: 4\.0 GB\nUpdated: [\d/: ]+$/);
+  assert.equal(output.title, 'Remaining: 0.5 + 2.0 = 2.5 GB');
+  assert.match(output.content, /^Used: 1\.5 \+ 4\.0 = 5\.5 GB\nUpdated: \d{2}\/\d{2} \d{2}:\d{2}$/);
+  assert(!output.content.includes('Plan 2'));
   for (const request of requests) {
     assert.equal(request.url, endpoint);
     assert.equal(request.timeout, 8);
@@ -172,6 +173,44 @@ test('an optional second token shows a separate plan without changing the first 
   }
   assert(!JSON.stringify(output).includes('first-token'));
   assert(!JSON.stringify(output).includes('second-token'));
+});
+
+test('the requested two-plan example uses units only at the end of each equation', async () => {
+  const {output} = await run({
+    argument: 'token=first-token&token2=second-token',
+    respond(request, callback) {
+      const usage = request.headers.Authorization === 'Bearer first-token'
+        ? {...sample, dataUnit: 'GB', usedBalance: '16', availableBalance: '44'}
+        : {...sample, dataUnit: 'GB', usedBalance: '22.7', availableBalance: '17.3'};
+      callback(null, {status: 200}, payload(usage));
+    }
+  });
+  assert.equal(output.title, 'Remaining: 44.0 + 17.3 = 61.3 GB');
+  assert.equal(output.content.split('\n')[0], 'Used: 16.0 + 22.7 = 38.7 GB');
+  assert.equal(output.content.split('\n').length, 2);
+});
+
+test('combined amounts use a common unit and sum the displayed precision consistently', async () => {
+  for (const [leftUnit, left, rightUnit, right, expected] of [
+    ['MB', '256', 'MB', '512', '256 + 512 = 768 MB'],
+    ['MB', '512', 'GB', '1', '0.5 + 1.0 = 1.5 GB'],
+    ['GB', '0', 'GB', '0', '0 + 0 = 0 MB'],
+    ['GB', '1.04', 'GB', '1.04', '1.0 + 1.0 = 2.0 GB'],
+    ['TB', '1', 'GB', '512', '1.0 + 0.5 = 1.5 TB']
+  ]) {
+    const {output} = await run({
+      argument: 'token=first-token&token2=second-token',
+      respond(request, callback) {
+        const first = request.headers.Authorization === 'Bearer first-token';
+        callback(null, {status: 200}, payload({...sample,
+          dataUnit: first ? leftUnit : rightUnit,
+          usedBalance: first ? left : right,
+          availableBalance: first ? left : right}));
+      }
+    });
+    assert.equal(output.title, 'Remaining: ' + expected);
+    assert.equal(output.content.split('\n')[0], 'Used: ' + expected);
+  }
 });
 
 test('an empty or disabled second token makes no extra request or visible plan', async () => {
@@ -198,8 +237,8 @@ test('both plans start concurrently and preserve their order when the second com
   });
   assert.equal(requests.length, 2, 'the second request starts before the first completes');
   assert(requests.every(request => request.timeout === 15));
-  assert.equal(output.title, 'Remaining: 512 MB');
-  assert(output.content.includes('Plan 2\nRemaining: 4.0 GB'));
+  assert.equal(output.title, 'Remaining: 0.5 + 4.0 = 4.5 GB');
+  assert(!output.content.includes('Plan 2'));
 });
 
 test('an invalid second token cannot block the first plan or reach CTM', async () => {
@@ -207,9 +246,10 @@ test('an invalid second token cannot block the first plan or reach CTM', async (
     const {output, requests} = await run({argument: 'token=first-token&token2=' + second});
     assert.equal(requests.length, 1);
     assert.equal(requests[0].headers.Authorization, 'Bearer first-token');
-    assert.equal(output.title, 'Remaining: 512 MB');
-    assert(output.content.startsWith('Used: 1.5 GB\nUpdated: '));
-    assert.match(output.content, /\n\nPlan 2\n(?:Invalid token format|Set your CTM token)/);
+    assert.equal(output.title, 'Remaining: 512 + -- = -- MB');
+    assert(output.content.startsWith('Used: 1.5 + -- = -- GB\nUpdated: '));
+    assert.match(output.content, /\nToken 2: (?:Invalid token format|Set your CTM token)/);
+    assert(!output.content.includes('Plan 2'));
     assert(!/Injected|paste-token-here|bad token/.test(output.content));
   }
 });
@@ -229,9 +269,9 @@ test('second-plan network, auth, redirect and usage errors preserve the successf
       }
     });
     assert.equal(requests.length, 2, 'each configured plan is queried at most once');
-    assert.equal(output.title, 'Remaining: 512 MB');
-    assert(output.content.startsWith('Used: 1.5 GB\nUpdated: '));
-    const second = output.content.split('\n\nPlan 2\n')[1];
+    assert.equal(output.title, 'Remaining: 512 + -- = -- MB');
+    assert(output.content.startsWith('Used: 1.5 + -- = -- GB\nUpdated: '));
+    const second = output.content.split('\nToken 2: ')[1];
     assert(second, 'the failed plan has its own error');
     assert(!/Used:|Remaining: 0 MB|Updated:|private-second-token/.test(second));
   }
@@ -247,8 +287,10 @@ test('missing, invalid or unauthorized first-plan credentials still allow the se
       }
     });
     assert.equal(requests.length, first === 'expired-token' ? 2 : 1);
-    assert.equal(output.title, 'Remaining: -- MB');
-    assert(output.content.includes('\n\nPlan 2\nRemaining: 3.0 GB\nUsed: 1.5 GB\nUpdated: '));
+    assert.equal(output.title, 'Remaining: -- + 3.0 = -- GB');
+    assert(output.content.startsWith('Used: -- + 1.5 = -- GB\nUpdated: '));
+    assert(output.content.includes('\nToken: '));
+    assert(!output.content.includes('Plan 2'));
     assert(!/Injected|expired-token|second-token/.test(output.content));
   }
 });
@@ -259,7 +301,8 @@ test('two failed plans finish once, expose separate errors and never claim zero 
   assert.equal(output.title, 'Remaining: -- MB');
   assert.equal(output.style, 'error');
   assert.equal(output.content.split('Token expired or unauthorized.').length - 1, 2);
-  assert(output.content.includes('\n\nPlan 2\n'));
+  assert(output.content.includes('\nToken 2: '));
+  assert(!output.content.includes('Plan 2'));
   assert(!/Used:|Remaining: 0 MB|Updated:/.test(output.content));
 });
 
@@ -305,7 +348,7 @@ test('timeout is bounded and native panel interval defaults to fifteen minutes w
   assert(moduleText.includes('type=generic,timeout=20'));
   assert(moduleText.includes('#!name=CTM Usage Info\n'));
   assert(moduleText.includes('script-name=CTM Usage Info,'));
-  assert(moduleText.includes('ctm-usage.js?v=1.0.7'));
+  assert(moduleText.includes('ctm-usage.js?v=1.0.8'));
   assert(moduleText.includes('title="Remaining: -- MB"'));
   assert(!moduleText.includes('[MITM]'));
   assert(!moduleText.includes('type=cron'));
