@@ -1,4 +1,4 @@
-/* CTM Usage Info v1.0.5 — account data stays between Surge and CTM. */
+/* CTM Usage Info v1.0.6 — account data stays between Surge and CTM. */
 (function () {
   'use strict';
 
@@ -7,7 +7,9 @@
   const ICON = 'simcard';
   const ICON_COLOR = '#6699FF';
 
-  run().then($done).catch(error => {
+  run().then($done).catch(error => $done(errorPanel(error.kind)));
+
+  function errorPanel(kind) {
     // Never log request headers, the token, raw server responses or errors.
     const messages = {
       missing: 'Set your CTM token in the module parameters, then refresh.',
@@ -17,25 +19,32 @@
       redirect: 'CTM redirected the request. Stopped without forwarding your token.',
       response: 'CTM returned invalid usage data. Please try again or update your token.'
     };
-    $done({title: 'Remaining: -- MB', content: messages[error.kind] || messages.response,
-      style: error.kind === 'missing' ? 'info' : 'error', icon: ICON, 'icon-color': ICON_COLOR});
-  });
+    return {title: 'Remaining: -- MB', content: messages[kind] || messages.response,
+      style: kind === 'missing' ? 'info' : 'error', icon: ICON, 'icon-color': ICON_COLOR};
+  }
 
   function fail(kind) { const error = new Error(kind); error.kind = kind; throw error; }
 
   function options() {
-    const values = {};
+    const values = Object.create(null);
     for (const part of String(typeof $argument === 'string' ? $argument : '').split('&')) {
       const at = part.indexOf('=');
       if (at < 1) continue;
       try { values[part.slice(0, at)] = decodeURIComponent(part.slice(at + 1)); }
-      catch (_) { fail('token'); }
+      catch (_) { values[part.slice(0, at)] = null; }
     }
-    const token = String(values.token || '').replace(/^\s*Bearer(?:\s+|$)/i, '').trim();
+    const tokens = [values.token];
+    if (values.token2 === null || String(values.token2 || '').trim()) tokens.push(values.token2);
+    const timeout = Number(values.timeout);
+    return {tokens, timeout: Number.isFinite(timeout) && timeout >= 1 ? Math.min(15, timeout) : 8};
+  }
+
+  function normalizeToken(value) {
+    if (value === null) fail('token');
+    const token = String(value || '').replace(/^\s*Bearer(?:\s+|$)/i, '').trim();
     if (!token || token === 'paste-token-here') fail('missing');
     if (token.length > 8192 || !/^[A-Za-z0-9._~+/-]+=*$/.test(token)) fail('token');
-    const timeout = Number(values.timeout);
-    return {token, timeout: Number.isFinite(timeout) && timeout >= 1 ? Math.min(15, timeout) : 8};
+    return token;
   }
 
   function fetchUsage(config) {
@@ -87,19 +96,31 @@
     return `${pad(date.getUTCMonth() + 1)}/${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
   }
 
+  async function readPlan(value, timeout) {
+    try {
+      const usage = await fetchUsage({token: normalizeToken(value), timeout});
+      if (!usage || typeof usage !== 'object' || Array.isArray(usage)) fail('response');
+      const multiplier = UNITS[String(usage.dataUnit || '').toUpperCase()];
+      if (!multiplier) fail('response');
+      const used = amount(usage.usedBalance, multiplier);
+      const available = amount(usage.availableBalance, multiplier);
+      // Remaining balance comes directly from CTM: unlimited traffic can exceed
+      // the full-speed cap, so do not derive it from total minus used traffic.
+      return {title: `Remaining: ${format(available)}`,
+        content: `Used: ${format(used)}\nUpdated: ${updatedAt()}`, icon: ICON, 'icon-color': ICON_COLOR};
+    } catch (error) {
+      return errorPanel(error.kind);
+    }
+  }
+
   async function run() {
-    const usage = await fetchUsage(options());
-    if (!usage || typeof usage !== 'object' || Array.isArray(usage)) fail('response');
-    const multiplier = UNITS[String(usage.dataUnit || '').toUpperCase()];
-    if (!multiplier) fail('response');
-    const used = amount(usage.usedBalance, multiplier);
-    const available = amount(usage.availableBalance, multiplier);
-    // Remaining balance comes directly from CTM: unlimited traffic can exceed
-    // the full-speed cap, so do not derive it from total minus used traffic.
-    const lines = [
-      `Used: ${format(used)}`,
-      `Updated: ${updatedAt()}`
-    ];
-    return {title: `Remaining: ${format(available)}`, content: lines.join('\n'), icon: ICON, 'icon-color': ICON_COLOR};
+    const config = options();
+    const [first, second] = await Promise.all(config.tokens.map(token => readPlan(token, config.timeout)));
+    if (second) {
+      first.content += `\n\nPlan 2\n${second.style ? '' : second.title + '\n'}${second.content}`;
+      if (!first.style || !second.style) delete first.style;
+      else if (second.style === 'error') first.style = 'error';
+    }
+    return first;
   }
 })();

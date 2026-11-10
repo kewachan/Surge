@@ -44,6 +44,7 @@ async function run(options = {}) {
   const requests = [], logs = [];
   let doneCount = 0;
   const output = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(Error('Panel did not complete')), 2000);
     const context = {
       $argument: options.argument ?? 'token=test-token&timeout=8',
       $trigger: options.trigger || 'auto-interval',
@@ -54,10 +55,10 @@ async function run(options = {}) {
         callback(options.error ?? null, {status: options.status ?? 200}, options.body ?? payload(sample));
       }},
       $persistentStore: {read() { throw Error('Must not persist credentials or usage'); }, write() { throw Error('Must not persist credentials or usage'); }},
-      $done(result) { doneCount++; resolve(result); },
+      $done(result) { doneCount++; clearTimeout(timer); resolve(result); },
       console: {log(...values) { logs.push(values.join(' ')); }}
     };
-    try { vm.runInNewContext(source, context, {timeout: 1000}); } catch (error) { reject(error); }
+    try { vm.runInNewContext(source, context, {timeout: 1000}); } catch (error) { clearTimeout(timer); reject(error); }
   });
   await Promise.resolve();
   assert.equal(doneCount, 1);
@@ -149,6 +150,126 @@ test('tokens accept Bearer prefixes and encoding; missing, invalid or injected v
   }
 });
 
+test('an optional second token shows a separate plan without changing the first plan', async () => {
+  const {output, requests} = await run({
+    argument: configuredArgument({Token: 'first-token', 'Token 2': 'Bearer second-token'}),
+    respond(request, callback) {
+      const usage = request.headers.Authorization === 'Bearer first-token' ? sample
+        : {...sample, usedBalance: '4096', availableBalance: '2048'};
+      callback(null, {status: 200}, payload(usage));
+    }
+  });
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests.map(request => request.headers.Authorization), ['Bearer first-token', 'Bearer second-token']);
+  assert.equal(output.title, 'Remaining: 512 MB');
+  assert.match(output.content, /^Used: 1\.5 GB\nUpdated: [\d/: ]+\n\nPlan 2\nRemaining: 2\.0 GB\nUsed: 4\.0 GB\nUpdated: [\d/: ]+$/);
+  for (const request of requests) {
+    assert.equal(request.url, endpoint);
+    assert.equal(request.timeout, 8);
+    assert.equal(request['auto-redirect'], false);
+    assert.equal(request['auto-cookie'], false);
+    assert.deepEqual(Object.keys(request.headers).sort(), ['Accept', 'Authorization']);
+  }
+  assert(!JSON.stringify(output).includes('first-token'));
+  assert(!JSON.stringify(output).includes('second-token'));
+});
+
+test('an empty second token makes no extra request or visible plan', async () => {
+  for (const second of ['', ' ', '%20']) {
+    const {output, requests} = await run({argument: 'token=first-token&token2=' + second + '&timeout=8'});
+    assert.equal(requests.length, 1);
+    assert.equal(output.title, 'Remaining: 512 MB');
+    assert.equal(output.content.split('\n').length, 2);
+    assert(!output.content.includes('Plan 2'));
+  }
+});
+
+test('both plans start concurrently and preserve their order when the second completes first', async () => {
+  const pending = [];
+  const {output, requests} = await run({
+    argument: 'token=first-token&token2=second-token&timeout=15',
+    respond(request, callback) {
+      pending.push(callback);
+      if (pending.length === 2) {
+        pending[1](null, {status: 200}, payload({...sample, availableBalance: '4096'}));
+        pending[0](null, {status: 200}, payload(sample));
+      }
+    }
+  });
+  assert.equal(requests.length, 2, 'the second request starts before the first completes');
+  assert(requests.every(request => request.timeout === 15));
+  assert.equal(output.title, 'Remaining: 512 MB');
+  assert(output.content.includes('Plan 2\nRemaining: 4.0 GB'));
+});
+
+test('an invalid second token cannot block the first plan or reach CTM', async () => {
+  for (const second of ['bad%0D%0AInjected%3Avalue', '%ZZ', 'bad token', 'paste-token-here', 'Bearer%20']) {
+    const {output, requests} = await run({argument: 'token=first-token&token2=' + second});
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].headers.Authorization, 'Bearer first-token');
+    assert.equal(output.title, 'Remaining: 512 MB');
+    assert(output.content.startsWith('Used: 1.5 GB\nUpdated: '));
+    assert.match(output.content, /\n\nPlan 2\n(?:Invalid token format|Set your CTM token)/);
+    assert(!/Injected|paste-token-here|bad token/.test(output.content));
+  }
+});
+
+test('second-plan network, auth, redirect and usage errors preserve the successful first plan', async () => {
+  for (const failure of [
+    {error: 'private-second-token'}, {status: 401}, {status: 403}, {status: 302},
+    {status: 500}, {body: 'private-second-token invalid JSON'},
+    {body: payload({...sample, availableBalance: null})},
+    {body: '{"code":"expired","message":"private-second-token"}'}
+  ]) {
+    const {output, requests} = await run({
+      argument: 'token=first-token&token2=second-token',
+      respond(request, callback) {
+        if (request.headers.Authorization === 'Bearer first-token') callback(null, {status: 200}, payload(sample));
+        else callback(failure.error ?? null, {status: failure.status ?? 200}, failure.body ?? payload(sample));
+      }
+    });
+    assert.equal(requests.length, 2, 'each configured plan is queried at most once');
+    assert.equal(output.title, 'Remaining: 512 MB');
+    assert(output.content.startsWith('Used: 1.5 GB\nUpdated: '));
+    const second = output.content.split('\n\nPlan 2\n')[1];
+    assert(second, 'the failed plan has its own error');
+    assert(!/Used:|Remaining: 0 MB|Updated:|private-second-token/.test(second));
+  }
+});
+
+test('missing, invalid or unauthorized first-plan credentials still allow the second plan', async () => {
+  for (const first of ['', '%ZZ', 'bad%0D%0AInjected%3Avalue', 'expired-token']) {
+    const {output, requests} = await run({
+      argument: 'token=' + first + '&token2=Bearer%20second-token',
+      respond(request, callback) {
+        if (request.headers.Authorization === 'Bearer expired-token') callback(null, {status: 401}, '');
+        else callback(null, {status: 200}, payload({...sample, availableBalance: '3072'}));
+      }
+    });
+    assert.equal(requests.length, first === 'expired-token' ? 2 : 1);
+    assert.equal(output.title, 'Remaining: -- MB');
+    assert(output.content.includes('\n\nPlan 2\nRemaining: 3.0 GB\nUsed: 1.5 GB\nUpdated: '));
+    assert(!/Injected|expired-token|second-token/.test(output.content));
+  }
+});
+
+test('two failed plans finish once, expose separate errors and never claim zero balances', async () => {
+  const {output, requests} = await run({argument: 'token=first-token&token2=second-token', status: 401});
+  assert.equal(requests.length, 2);
+  assert.equal(output.title, 'Remaining: -- MB');
+  assert.equal(output.style, 'error');
+  assert.equal(output.content.split('Token expired or unauthorized.').length - 1, 2);
+  assert(output.content.includes('\n\nPlan 2\n'));
+  assert(!/Used:|Remaining: 0 MB|Updated:/.test(output.content));
+});
+
+test('automatic and repeated manual refresh query both plans without storing their credentials', async () => {
+  for (const trigger of ['auto-interval', 'button', 'button']) {
+    const {requests} = await run({trigger, argument: 'token=first-token&token2=second-token'});
+    assert.equal(requests.length, 2);
+  }
+});
+
 test('network, authentication, redirects and broken responses do not masquerade as zero usage', async () => {
   for (const options of [{error: 'private-token reflected by network'}, {status: 401}, {status: 403}, {status: 302},
     {status: 500}, {body: 'private-token not JSON'}, {body: 'null'}, {body: '{"code":"expired","message":"private-token"}'},
@@ -178,13 +299,13 @@ test('timeout is bounded and native panel interval defaults to fifteen minutes w
   for (const [value, expected] of [['1000', 15], ['-1', 8], ['invalid', 8], ['3', 3]]) {
     assert.equal((await run({argument: 'token=test-token&timeout=' + value})).requests[0].timeout, expected);
   }
-  assert(moduleText.includes('#!arguments=Token:paste-token-here,Refresh Interval:900,Timeout:8'));
+  assert(moduleText.includes('#!arguments=Token:paste-token-here,Token 2,Refresh Interval:900,Timeout:8'));
   assert.match(configuredPanel(), /script-name=CTM Usage Info,update-interval=900$/);
   assert(!moduleText.includes('update_interval'), 'a saved legacy one-second option cannot override the new default');
   assert(moduleText.includes('type=generic,timeout=20'));
   assert(moduleText.includes('#!name=CTM Usage Info\n'));
   assert(moduleText.includes('script-name=CTM Usage Info,'));
-  assert(moduleText.includes('ctm-usage.js?v=1.0.5'));
+  assert(moduleText.includes('ctm-usage.js?v=1.0.6'));
   assert(moduleText.includes('title="Remaining: -- MB"'));
   assert(!moduleText.includes('[MITM]'));
   assert(!moduleText.includes('type=cron'));
@@ -194,7 +315,7 @@ test('timeout is bounded and native panel interval defaults to fifteen minutes w
 test('refresh interval is configurable in seconds without reusing the old one-second setting', () => {
   for (const seconds of ['300', '900', '1800', '3600']) {
     assert(configuredPanel({'Refresh Interval': seconds}).endsWith('update-interval=' + seconds));
-    assert.equal(configuredArgument({Token: 'test-token', 'Refresh Interval': seconds}), 'token=test-token&timeout=8');
+    assert.equal(configuredArgument({Token: 'test-token', 'Refresh Interval': seconds}), 'token=test-token&token2=&timeout=8');
   }
   assert(configuredPanel({update_interval: '1'}).endsWith('update-interval=900'));
   assert(configuredPanel({update_interval: '1', 'Refresh Interval': '1800'}).endsWith('update-interval=1800'));
@@ -215,7 +336,7 @@ test('manual refresh always queries CTM, including repeated taps inside the auto
 test('module defaults are valid, descriptions are English, and a placeholder never reaches CTM', async () => {
   assert.throws(() => moduleDefaults('token:,update_interval:1'), /empty colon default/);
   assert.deepEqual(moduleDefaults(moduleText.match(/^#!arguments=(.*)$/m)[1]),
-    {Token: 'paste-token-here', 'Refresh Interval': '900', Timeout: '8'});
+    {Token: 'paste-token-here', 'Token 2': '', 'Refresh Interval': '900', Timeout: '8'});
   assert(!/\p{Script=Han}/u.test(moduleText), 'all module descriptions and setup instructions are English');
   for (const overrides of [{}, {Token: ''}, {Token: 'Bearer paste-token-here'}]) {
     const {output, requests} = await run({argument: configuredArgument(overrides)});
