@@ -174,8 +174,8 @@ test('an optional second token shows a separate plan without changing the first 
   assert(!JSON.stringify(output).includes('second-token'));
 });
 
-test('an empty second token makes no extra request or visible plan', async () => {
-  for (const second of ['', ' ', '%20']) {
+test('an empty or disabled second token makes no extra request or visible plan', async () => {
+  for (const second of ['', ' ', '%20', 'none', 'None', '%20none%20']) {
     const {output, requests} = await run({argument: 'token=first-token&token2=' + second + '&timeout=8'});
     assert.equal(requests.length, 1);
     assert.equal(output.title, 'Remaining: 512 MB');
@@ -299,13 +299,13 @@ test('timeout is bounded and native panel interval defaults to fifteen minutes w
   for (const [value, expected] of [['1000', 15], ['-1', 8], ['invalid', 8], ['3', 3]]) {
     assert.equal((await run({argument: 'token=test-token&timeout=' + value})).requests[0].timeout, expected);
   }
-  assert(moduleText.includes('#!arguments=Token:paste-token-here,Token 2,Refresh Interval:900,Timeout:8'));
+  assert(moduleText.includes('#!arguments=Token:paste-token-here,Token 2:none,Refresh Interval:900,Timeout:8'));
   assert.match(configuredPanel(), /script-name=CTM Usage Info,update-interval=900$/);
   assert(!moduleText.includes('update_interval'), 'a saved legacy one-second option cannot override the new default');
   assert(moduleText.includes('type=generic,timeout=20'));
   assert(moduleText.includes('#!name=CTM Usage Info\n'));
   assert(moduleText.includes('script-name=CTM Usage Info,'));
-  assert(moduleText.includes('ctm-usage.js?v=1.0.6'));
+  assert(moduleText.includes('ctm-usage.js?v=1.0.7'));
   assert(moduleText.includes('title="Remaining: -- MB"'));
   assert(!moduleText.includes('[MITM]'));
   assert(!moduleText.includes('type=cron'));
@@ -315,7 +315,7 @@ test('timeout is bounded and native panel interval defaults to fifteen minutes w
 test('refresh interval is configurable in seconds without reusing the old one-second setting', () => {
   for (const seconds of ['300', '900', '1800', '3600']) {
     assert(configuredPanel({'Refresh Interval': seconds}).endsWith('update-interval=' + seconds));
-    assert.equal(configuredArgument({Token: 'test-token', 'Refresh Interval': seconds}), 'token=test-token&token2=&timeout=8');
+    assert.equal(configuredArgument({Token: 'test-token', 'Refresh Interval': seconds}), 'token=test-token&token2=none&timeout=8');
   }
   assert(configuredPanel({update_interval: '1'}).endsWith('update-interval=900'));
   assert(configuredPanel({update_interval: '1', 'Refresh Interval': '1800'}).endsWith('update-interval=1800'));
@@ -336,7 +336,7 @@ test('manual refresh always queries CTM, including repeated taps inside the auto
 test('module defaults are valid, descriptions are English, and a placeholder never reaches CTM', async () => {
   assert.throws(() => moduleDefaults('token:,update_interval:1'), /empty colon default/);
   assert.deepEqual(moduleDefaults(moduleText.match(/^#!arguments=(.*)$/m)[1]),
-    {Token: 'paste-token-here', 'Token 2': '', 'Refresh Interval': '900', Timeout: '8'});
+    {Token: 'paste-token-here', 'Token 2': 'none', 'Refresh Interval': '900', Timeout: '8'});
   assert(!/\p{Script=Han}/u.test(moduleText), 'all module descriptions and setup instructions are English');
   for (const overrides of [{}, {Token: ''}, {Token: 'Bearer paste-token-here'}]) {
     const {output, requests} = await run({argument: configuredArgument(overrides)});
@@ -350,6 +350,20 @@ test('module defaults are valid, descriptions are English, and a placeholder nev
     assert.equal(requests[0].headers.Authorization, 'Bearer test-token');
     assert.equal(requests[0].timeout, 8);
   }
+});
+
+test('the optional second plan has a nonempty module default and a single-token install keeps the original panel', async () => {
+  const defaults = moduleDefaults(moduleText.match(/^#!arguments=(.*)$/m)[1]);
+  assert.equal(defaults['Token 2'], 'none', 'an unset module parameter must not suppress the panel during native module application');
+  const argument = configuredArgument({Token: 'first-token'});
+  assert.equal(argument, 'token=first-token&token2=none&timeout=8');
+  const {output, requests} = await run({argument});
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].headers.Authorization, 'Bearer first-token');
+  assert.equal(output.title, 'Remaining: 512 MB');
+  assert.match(output.content, /^Used: 1\.5 GB\nUpdated: \d{2}\/\d{2} \d{2}:\d{2}$/);
+  assert(!output.content.includes('Plan 2'));
+  assert.match(configuredPanel(), /^CTM Usage Info = title="Remaining: -- MB",content="[^"]+",script-name=CTM Usage Info,update-interval=900$/);
 });
 
 test('private HAR replay matches the screenshot without putting account data into fixtures', {skip: !process.env.CTM_HAR_PATH}, async () => {

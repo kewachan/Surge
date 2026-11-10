@@ -1,4 +1,4 @@
-/* CTM Usage Info v1.0.6 — account data stays between Surge and CTM. */
+/* CTM Usage Info v1.0.7 — account data stays between Surge and CTM. */
 (function () {
   'use strict';
 
@@ -34,7 +34,8 @@
       catch (_) { values[part.slice(0, at)] = null; }
     }
     const tokens = [values.token];
-    if (values.token2 === null || String(values.token2 || '').trim()) tokens.push(values.token2);
+    const second = String(values.token2 || '').trim();
+    if (values.token2 === null || (second && second.toLowerCase() !== 'none')) tokens.push(values.token2);
     const timeout = Number(values.timeout);
     return {tokens, timeout: Number.isFinite(timeout) && timeout >= 1 ? Math.min(15, timeout) : 8};
   }
