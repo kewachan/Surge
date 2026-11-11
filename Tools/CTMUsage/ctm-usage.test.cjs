@@ -63,8 +63,8 @@ async function run(options = {}) {
   await Promise.resolve();
   assert.equal(doneCount, 1);
   assert.equal(logs.length, 0, 'never log a token, raw account response or network error');
-  assert.match(output.title, /^Remaining: (?:--|\d+(?:\.\d)?)(?: \+ (?:--|\d+(?:\.\d)?) = (?:--|\d+(?:\.\d)?))? (?:MB|GB|TB)$/);
-  assert.match(output.content, /^[\x20-\x7E\n]+$/, 'all visible content must be English text without emoji');
+  assert.match(output.title, /^Remaining: (?:--|\d+(?:\.\d)?)(?: \+ (?:--|\d+(?:\.\d)?) [=≈] (?:--|\d+(?:\.\d)?))? (?:MB|GB|TB)$/);
+  assert.match(output.content, /^[\x20-\x7E\n≈]+$/, 'visible content is English text with the approximation symbol and no emoji');
   assert.equal(output.icon, 'simcard');
   assert.equal(output['icon-color'], '#6699FF', 'all panel states use Network Info blue');
   return {output, requests};
@@ -190,12 +190,22 @@ test('the requested two-plan example uses units only at the end of each equation
   assert.equal(output.content.split('\n').length, 2);
 });
 
-test('combined amounts use a common unit and sum the displayed precision consistently', async () => {
+test('combined amounts round the original sum once across units and GB or TB boundaries', async () => {
   for (const [leftUnit, left, rightUnit, right, expected] of [
     ['MB', '256', 'MB', '512', '256 + 512 = 768 MB'],
     ['MB', '512', 'GB', '1', '0.5 + 1.0 = 1.5 GB'],
     ['GB', '0', 'GB', '0', '0 + 0 = 0 MB'],
-    ['GB', '1.04', 'GB', '1.04', '1.0 + 1.0 = 2.0 GB'],
+    ['GB', '1.04', 'GB', '1.04', '1.0 + 1.0 ≈ 2.1 GB'],
+    ['GB', '1.06', 'GB', '1.06', '1.1 + 1.1 ≈ 2.1 GB'],
+    ['MB', '511.6', 'MB', '511.6', '512 + 512 ≈ 1023 MB'],
+    ['MB', '512', 'MB', '512', '0.5 + 0.5 = 1.0 GB'],
+    ['GB', '0.526', 'GB', '0.526', '0.5 + 0.5 ≈ 1.1 GB'],
+    ['GB', '511.96', 'GB', '511.96', '512.0 + 512.0 ≈ 1023.9 GB'],
+    ['GB', '512', 'GB', '512', '0.5 + 0.5 = 1.0 TB'],
+    ['TB', '0.526', 'TB', '0.526', '0.5 + 0.5 ≈ 1.1 TB'],
+    ['TB', '1.04', 'TB', '1.04', '1.0 + 1.0 ≈ 2.1 TB'],
+    ['MB', '600', 'GB', '0.456', '0.6 + 0.5 ≈ 1.0 GB'],
+    ['MB', '0.49', 'MB', '0.49', '0 + 0 ≈ 1 MB'],
     ['TB', '1', 'GB', '512', '1.0 + 0.5 = 1.5 TB']
   ]) {
     const {output} = await run({
@@ -211,6 +221,19 @@ test('combined amounts use a common unit and sum the displayed precision consist
     assert.equal(output.title, 'Remaining: ' + expected);
     assert.equal(output.content.split('\n')[0], 'Used: ' + expected);
   }
+});
+
+test('only the equation with a rounding difference uses the approximation symbol', async () => {
+  const {output} = await run({
+    argument: 'token=first-token&token2=second-token',
+    respond(request, callback) {
+      callback(null, {status: 200}, payload({...sample, dataUnit: 'GB', availableBalance: '1.04',
+        usedBalance: request.headers.Authorization === 'Bearer first-token' ? '16' : '22.7'}));
+    }
+  });
+  assert.equal(output.title, 'Remaining: 1.0 + 1.0 ≈ 2.1 GB');
+  assert.equal(output.content.split('\n')[0], 'Used: 16.0 + 22.7 = 38.7 GB');
+  assert.equal(output.content.split('\n').length, 2);
 });
 
 test('an empty or disabled second token makes no extra request or visible plan', async () => {
@@ -248,7 +271,7 @@ test('an invalid second token cannot block the first plan or reach CTM', async (
     assert.equal(requests[0].headers.Authorization, 'Bearer first-token');
     assert.equal(output.title, 'Remaining: 512 + -- = -- MB');
     assert(output.content.startsWith('Used: 1.5 + -- = -- GB\nUpdated: '));
-    assert.match(output.content, /\nToken 2: (?:Invalid token format|Set your CTM token)/);
+    assert.match(output.content, /\nTotal unavailable\. Token 2: (?:Invalid token format|Set your CTM token)/);
     assert(!output.content.includes('Plan 2'));
     assert(!/Injected|paste-token-here|bad token/.test(output.content));
   }
@@ -271,7 +294,7 @@ test('second-plan network, auth, redirect and usage errors preserve the successf
     assert.equal(requests.length, 2, 'each configured plan is queried at most once');
     assert.equal(output.title, 'Remaining: 512 + -- = -- MB');
     assert(output.content.startsWith('Used: 1.5 + -- = -- GB\nUpdated: '));
-    const second = output.content.split('\nToken 2: ')[1];
+    const second = output.content.split('\nTotal unavailable. Token 2: ')[1];
     assert(second, 'the failed plan has its own error');
     assert(!/Used:|Remaining: 0 MB|Updated:|private-second-token/.test(second));
   }
@@ -289,10 +312,25 @@ test('missing, invalid or unauthorized first-plan credentials still allow the se
     assert.equal(requests.length, first === 'expired-token' ? 2 : 1);
     assert.equal(output.title, 'Remaining: -- + 3.0 = -- GB');
     assert(output.content.startsWith('Used: -- + 1.5 = -- GB\nUpdated: '));
-    assert(output.content.includes('\nToken: '));
+    assert(output.content.includes('\nTotal unavailable. Token: '));
     assert(!output.content.includes('Plan 2'));
     assert(!/Injected|expired-token|second-token/.test(output.content));
   }
+});
+
+test('a valid zero balance plus a failed plan leaves the combined total unknown', async () => {
+  const {output} = await run({
+    argument: 'token=first-token&token2=second-token',
+    respond(request, callback) {
+      if (request.headers.Authorization === 'Bearer first-token') {
+        callback(null, {status: 200}, payload({...sample, usedBalance: '0', availableBalance: '0'}));
+      } else callback(null, {status: 401}, '');
+    }
+  });
+  assert.equal(output.title, 'Remaining: 0 + -- = -- MB');
+  assert(output.content.startsWith('Used: 0 + -- = -- MB\nUpdated: '));
+  assert(output.content.includes('\nTotal unavailable. Token 2: Token expired or unauthorized.'));
+  assert(!output.content.includes('≈'));
 });
 
 test('two failed plans finish once, expose separate errors and never claim zero balances', async () => {
@@ -348,7 +386,7 @@ test('timeout is bounded and native panel interval defaults to fifteen minutes w
   assert(moduleText.includes('type=generic,timeout=20'));
   assert(moduleText.includes('#!name=CTM Usage Info\n'));
   assert(moduleText.includes('script-name=CTM Usage Info,'));
-  assert(moduleText.includes('ctm-usage.js?v=1.0.8'));
+  assert(moduleText.includes('ctm-usage.js?v=1.0.9'));
   assert(moduleText.includes('title="Remaining: -- MB"'));
   assert(!moduleText.includes('[MITM]'));
   assert(!moduleText.includes('type=cron'));

@@ -1,4 +1,4 @@
-/* CTM Usage Info v1.0.8 — account data stays between Surge and CTM. */
+/* CTM Usage Info v1.0.9 — account data stays between Surge and CTM. */
 (function () {
   'use strict';
 
@@ -99,8 +99,9 @@
     const values = [first, second].map(value => value === undefined ? undefined
       : Math.round(value / UNITS[unit] * scale));
     const display = value => value === undefined ? '--' : (value / scale).toFixed(decimals);
-    const total = values.includes(undefined) ? undefined : values[0] + values[1];
-    return `${display(values[0])} + ${display(values[1])} = ${display(total)} ${unit}`;
+    const total = values.includes(undefined) ? undefined : Math.round(known / UNITS[unit] * scale);
+    const sign = total !== undefined && total !== values[0] + values[1] ? '≈' : '=';
+    return `${display(values[0])} + ${display(values[1])} ${sign} ${display(total)} ${unit}`;
   }
 
   function updatedAt() {
@@ -143,7 +144,8 @@
       return panel;
     }
     return {title: `Remaining: ${combined(first.available, second.available)}`,
-      content: [`Used: ${combined(first.used, second.used)}`, `Updated: ${updatedAt()}`, ...errors].join('\n'),
+      content: [`Used: ${combined(first.used, second.used)}`, `Updated: ${updatedAt()}`,
+        ...errors.map(message => `Total unavailable. ${message}`)].join('\n'),
       icon: ICON, 'icon-color': ICON_COLOR};
   }
 })();
