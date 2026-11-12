@@ -12,6 +12,10 @@ const promo = `<div jscontroller="weWVtc" class="new-layout footer-card" data-ur
 const organic = '<div id="search"><h3>Ask and explore anything with the Google app</h3><a href="https://example.com/">Organic result</a></div>';
 const footer = '<div id="footer"><span>Hong Kong</span><a href="/preferences">Settings</a></div>';
 const hiddenStyle = ' style="display:none!important"';
+const sponsored = '<div id="tads"><a href="/aclk?ad=example">Sponsored</a></div>';
+const insertionEncodings = ['hex', 'unicode', 'literal', 'encoded-end'];
+const htmlEncodings = ['plain', ...insertionEncodings];
+const legacyClassOrders = ['B2VR9 CJHX3e', 'CJHX3e B2VR9'];
 
 function rewrite(body, options = {}) {
   let result;
@@ -28,6 +32,24 @@ function rewrite(body, options = {}) {
   assert.notEqual(result, undefined);
   assert.deepEqual(headers['Set-Cookie'], ['first=one', 'second=two']);
   return { result, body: result.body ?? body, context };
+}
+
+function expectPassthrough(input, options) {
+  const output = rewrite(input, options);
+  assert.equal(output.body, input);
+  assert.deepEqual(Object.keys(output.result), []);
+}
+
+function inserted(html, encoding) {
+  let literal = JSON.stringify(html);
+  if (encoding === 'hex' || encoding === 'encoded-end') literal = literal.replaceAll('<', '\\x3c');
+  if (encoding === 'unicode') literal = literal.replaceAll('<', '\\u003c');
+  if (encoding === 'encoded-end') literal = literal.replaceAll('>', '\\x3e');
+  return `<script>jsl.dh("footer",${literal});</script>`;
+}
+
+function arcResponse(frames) {
+  return ")]}'\n" + frames.map(frame => frame.length.toString(16) + ';' + frame).join('');
 }
 
 function browserPayload(html) {
@@ -59,7 +81,7 @@ test('the installed Google rule matches search and pagination responses with a r
   for (const url of [searchUrl, 'https://www.google.com/search?asearch=arc', 'https://www.google.com/search?async=arc_id%3Aexample']) {
     assert.ok(new RegExp(pattern).test(url));
   }
-  assert.ok(line.endsWith('/google-adblock.js?v=1.0.21'));
+  assert.ok(line.endsWith('/google-adblock.js?v=1.0.22'));
   assert.ok(moduleText.includes('www.google.com'));
 });
 
@@ -73,13 +95,9 @@ test('new footer layout hides only the Google app card and preserves results and
   assert.match(output, /data-url="[^\"]+" role="button" style="display:none!important"/);
 });
 
-for (const encoding of ['hex', 'unicode', 'literal', 'encoded-end']) {
+for (const encoding of insertionEncodings) {
   test(`JavaScript-inserted footer stays valid with ${encoding} HTML encoding`, () => {
-    let literal = JSON.stringify(promo + footer);
-    if (encoding === 'hex' || encoding === 'encoded-end') literal = literal.replaceAll('<', '\\x3c');
-    if (encoding === 'unicode') literal = literal.replaceAll('<', '\\u003c');
-    if (encoding === 'encoded-end') literal = literal.replaceAll('>', '\\x3e');
-    const input = `<html>${organic}<script>jsl.dh("footer",${literal});</script></html>`;
+    const input = `<html>${organic}${inserted(promo + footer, encoding)}</html>`;
     const output = rewrite(input).body;
     const before = browserPayload(input);
     const after = browserPayload(output);
@@ -133,13 +151,14 @@ test('ordinary app mentions, unrelated targets, malformed URLs and similar domai
   }
 });
 
-test('legacy app cards and sponsored results keep their original filtering', () => {
-  const legacy = '<div class="B2VR9 CJHX3e">Ask and explore anything with the Google app</div>';
-  const sponsored = '<div id="tads"><a href="/aclk?ad=example">Sponsored</a></div>';
-  const output = rewrite(legacy + sponsored + organic).body;
-  assert.match(output, /class="B2VR9 CJHX3e" style="display:none!important"/);
-  assert.match(output, /id="tads" style="display:none!important"/);
-  assert.ok(output.endsWith(organic));
+test('Sponsored Results and verified app cards stay hidden beside ordinary results', () => {
+  const input = sponsored + promo + organic;
+  const expected = sponsored.replace('id="tads">', 'id="tads"' + hiddenStyle + '>') +
+    promo.replace('role="button">', 'role="button"' + hiddenStyle + '>') + organic;
+  const output = rewrite(input);
+  assert.equal(output.body, expected);
+  assert.deepEqual(Object.keys(output.result), ['body']);
+  expectPassthrough(output.body);
 });
 
 test('redirects, challenges and non-Google pages pass through without replacing headers or body', () => {
@@ -149,18 +168,27 @@ test('redirects, challenges and non-Google pages pass through without replacing 
   assert.deepEqual(Object.keys(rewrite(promo, { url: 'https://example.com/search?q=example' }).result), []);
 });
 
-test('ARC pagination updates lengths while retaining unrelated frames and valid inserted JavaScript', () => {
-  const insertion = `<script>jsl.dh("footer",${JSON.stringify(promo).replaceAll('<', '\\x3c')});</script>`;
-  const input = ")]}'\n" + [organic, insertion, footer].map(frame => frame.length.toString(16) + ';' + frame).join('');
+test('ARC pagination preserves same-class results and updates lengths for verified promotions', () => {
+  const result = '<div class="B2VR9 CJHX3e">正常搜尋結果 😀</div>';
+  const legacyPromo = promo.replace('new-layout footer-card', 'B2VR9 CJHX3e');
+  const hiddenPromo = legacyPromo.replace('role="button">', 'role="button"' + hiddenStyle + '>');
+  const ordinary = result + organic;
+  const input = arcResponse([ordinary, inserted(result + legacyPromo, 'hex'), sponsored, footer]);
+  const expectedFrames = [
+    ordinary,
+    inserted(result + hiddenPromo, 'hex'),
+    sponsored.replace('id="tads">', 'id="tads"' + hiddenStyle + '>'),
+    footer
+  ];
   for (const query of ['asearch=arc', 'async=arc_id%3Aexample']) {
-    const output = rewrite(input, { url: 'https://www.google.com/search?' + query }).body;
-    const frames = arcFrames(output);
-    assert.equal(frames[0], organic);
-    assert.equal(frames[2], footer);
-    assert.match(browserPayload(frames[1]), /style="display:none!important"/);
+    const options = { url: 'https://www.google.com/search?' + query };
+    const output = rewrite(input, options).body;
+    assert.equal(output, arcResponse(expectedFrames));
+    assert.equal(browserPayload(arcFrames(output)[1]), result + hiddenPromo);
+    expectPassthrough(output, options);
+    expectPassthrough(arcResponse([ordinary, footer]), options);
+    expectPassthrough(input.slice(0, -2), options);
   }
-  const truncated = input.slice(0, -2);
-  assert.deepEqual(Object.keys(rewrite(truncated, { url: 'https://www.google.com/search?asearch=arc' }).result), []);
 });
 
 test('private Google HAR replay removes the captured footer promotion without changing any other bytes', {
@@ -197,12 +225,52 @@ test('private Google HAR replay removes the captured footer promotion without ch
   assert.ok(replayed > 0, 'HAR must contain the captured footer promotion');
 });
 
- test('all four legacy card variants remain idempotent beside ordinary search content', () => {
-  for (const classes of ['B2VR9 CJHX3e', 'CJHX3e B2VR9']) for (const quote of ['"', String.fromCharCode(92, 34)]) {
-    const input = `<div class=${quote}${classes}${quote}>Ask and explore anything with the Google app</div>` + organic;
-    const once = rewrite(input).body;
-    assert.equal(rewrite(once).body, once);
-    assert(once.includes(organic));
-    assert.equal((once.match(/display:none!important/g) || []).length, 1);
+for (const classes of legacyClassOrders) {
+  for (const encoding of htmlEncodings) {
+    test(`separate promotion text leaves legacy class ${classes} results intact in ${encoding} HTML`, () => {
+      const result = `<div class="${classes}"><a href="https://example.com/">正常搜尋結果</a></div>`;
+      const html = result + organic + result;
+      expectPassthrough(encoding === 'plain' ? html : inserted(html, encoding));
+    });
   }
+}
+
+test('only the verified app card changes beside same-class siblings and ancestors', () => {
+  for (const classes of legacyClassOrders) {
+    const result = `<div class="${classes}">正常搜尋結果</div>`;
+    const parent = `<main class="${classes}">`;
+    const card = promo.replace('new-layout footer-card', classes);
+    const hiddenCard = card.replace('role="button">', 'role="button"' + hiddenStyle + '>');
+    const html = parent + result + card + result + '</main>';
+    const expected = parent + result + hiddenCard + result + '</main>';
+    for (const encoding of htmlEncodings) {
+      const input = encoding === 'plain' ? html : inserted(html, encoding);
+      const output = rewrite(input);
+      assert.equal(output.body, encoding === 'plain' ? expected : inserted(expected, encoding));
+      assert.deepEqual(Object.keys(output.result), ['body']);
+      expectPassthrough(output.body);
+    }
+  }
+});
+
+test('legacy text and classes keep cards visible without a verified app destination', () => {
+  for (const classes of legacyClassOrders) {
+    const card = promo.replace('new-layout footer-card', classes);
+    for (const destination of [
+      '',
+      'https://example.com/',
+      'https://iga.google.com.evil.test/?url=googleapp%3A%2F%2Fhome',
+      'https://iga.google.com/?url=googleapp%3A%2F%2Fhomepage',
+      'https://iga.google.com/?url=%E0%A4%A'
+    ]) {
+      const html = destination ? card.replace(appUrl, destination) : card.replace(` data-url="${appUrl}"`, '');
+      expectPassthrough(html);
+      expectPassthrough(inserted(html, 'hex'));
+    }
+  }
+});
+
+test('quoted class examples in JavaScript stay intact beside an ordinary app mention', () => {
+  const example = '<div class="B2VR9 CJHX3e">Documentation example</div>';
+  expectPassthrough(organic + `<script>const example = ${JSON.stringify(example)};</script>`);
 });
