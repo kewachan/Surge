@@ -22,7 +22,15 @@ const DENIED_URL_REWRITES = new Set([
   "^https?:\\/\\/\\s.youtube.com/api/stats/qoe?.*adformat= - reject",
   "^https?:\\/\\/s\\.youtube\\.com\\/api\\/stats\\/qoe(?:\\?.*)?$ - reject",
 ]);
-const DENIED_MITM_HOSTS = new Set(["s.youtube.com"]);
+const DENIED_MITM_HOSTS = new Set([
+  "s.youtube.com",
+  "*.fuliapps.com", "*.pipiapps.com", "*.xiangjiaoapps.com", "*.xiangxiangapps.com",
+  "ci.rnote.com", "edith.rnote.com", "rec.rnote.com", "so.rnote.com", "www.rnote.com",
+  "gql-fed.reddit.com", "gql.reddit.com", "gugongmini.dpm.org.cn", "iqushangwang.8quan.com",
+  "lzmh.lz-qs.com:6025", "m.airchina.com.cn", "mcsp.cloudpnr.com", "saas-ad.cloudpnr.com",
+  "starplucker.cyapi.cn", "tbgapplet.carlsberg.asia", "tiku.fenbi.com", "vue3-api.zhixiny.cn",
+  "wrapper.cyapi.cn", "yuudnn.lz-qs.com", "yuudnn.lz-qs.com:9220",
+]);
 const BROAD_AD_PATH_RULE = '"(?i)\\b\\/ad\\/" - reject';
 const PROTECTED_AD_PATH_RULE = '"(?i)^(?!https?://i2\\.bahamut\\.com\\.tw/JS/ad/(?:animeVideo2?|animeLogo)\\.js(?:[?#]|$)).*\\b\\/ad\\/" - reject';
 const PROTECTED_AD_PATH_WITH_PORT_RULE = '"(?i)^(?!https?://i2\\.bahamut\\.com\\.tw(?::443)?/JS/ad/(?:animeVideo2?|animeLogo)\\.js(?:[?#]|$)).*\\b\\/ad\\/" - reject';
@@ -309,6 +317,15 @@ export function applyUpstreamDelta(currentValues, previousValues, nextValues, de
   return uniqueInOrder(proposed);
 }
 
+export function requireReviewedMitmAdditions(currentHosts, proposedHosts, allowAdditions = false) {
+  const additions = setDifference(proposedHosts, currentHosts).sort(compareAscii);
+  if (additions.length && !allowAdditions) {
+    throw new Error(`New MITM hosts require review: ${additions.join(", ")}. ` +
+      "After reviewing all hosts, rerun with --allow-mitm-additions.");
+  }
+  return additions;
+}
+
 export function calculateChange(existingValues, proposedValues) {
   const existing = new Set(existingValues);
   const proposed = new Set(proposedValues);
@@ -375,6 +392,7 @@ async function fetchSource(definition) {
 
 function parseArguments(argv) {
   const options = {
+    allowMitmAdditions: false,
     allowLargeChange: false,
     bootstrap: false,
     check: false,
@@ -389,6 +407,7 @@ function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--allow-large-change") options.allowLargeChange = true;
+    else if (argument === "--allow-mitm-additions") options.allowMitmAdditions = true;
     else if (argument === "--bootstrap") options.bootstrap = true;
     else if (argument === "--check") options.check = true;
     else if (argument === "--dry-run") options.dryRun = true;
@@ -475,6 +494,7 @@ export async function run(argv = process.argv.slice(2)) {
     nextSnapshot.mitmHosts,
     DENIED_MITM_HOSTS,
   );
+  requireReviewedMitmAdditions(target.mitmHosts, proposedHosts, options.allowMitmAdditions);
   const renderedContent = renderTargetModule({
     mitmHosts: proposedHosts,
     preamble: target.preamble,

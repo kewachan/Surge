@@ -10,6 +10,7 @@ import {
   parseTargetModule,
   parseUrlRewriteSection,
   protectPlayerResources,
+  requireReviewedMitmAdditions,
   renderTargetModule,
   setModuleUpdatedDate,
 } from "./update-advertising-module.mjs";
@@ -88,6 +89,15 @@ test("applies only upstream deltas and preserves curated omissions", () => {
   );
 
   assert.deepEqual(proposed, ["manual", "keep", "new"]);
+});
+
+test("new MITM hosts stop updates until explicitly reviewed, without changing existing hosts", () => {
+  const current = ["keep.example", "manual.example"];
+  const next = ["keep.example", "manual.example", "*.new.example", "api.example:8443"];
+  assert.throws(() => requireReviewedMitmAdditions(current, next), /\*\.new\.example, api\.example:8443/u);
+  assert.deepEqual(current, ["keep.example", "manual.example"]);
+  assert.deepEqual(requireReviewedMitmAdditions(current, next, true), ["*.new.example", "api.example:8443"]);
+  assert.deepEqual(requireReviewedMitmAdditions(current, ["keep.example"]), []);
 });
 
 test("builds deterministic state and ignores audit rewrite rules", () => {
