@@ -11,6 +11,10 @@ on:
         required: true
         default: false
         type: boolean
+      approved_mitm_sha256:
+        description: SHA-256 of the reviewed new MITM hostname list
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -37,12 +41,16 @@ jobs:
       - name: Update block rewrite
         env:
           ALLOW_LARGE_CHANGE: ${{ inputs.allow_large_change || 'false' }}
+          APPROVED_MITM_SHA256: ${{ inputs.approved_mitm_sha256 || '' }}
         run: |
+          args=()
           if [[ "$ALLOW_LARGE_CHANGE" == "true" ]]; then
-            node Tools/Advertising/update-advertising-module.mjs --allow-large-change
-          else
-            node Tools/Advertising/update-advertising-module.mjs
+            args+=(--allow-large-change)
           fi
+          if [[ -n "$APPROVED_MITM_SHA256" ]]; then
+            args+=(--approved-mitm-sha256 "$APPROVED_MITM_SHA256")
+          fi
+          node Tools/Advertising/update-advertising-module.mjs "${args[@]}"
 
       - name: Validate block rewrite
         run: |
