@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
   applyUpstreamDelta,
+  assertNoDeniedMitmHosts,
   buildSnapshot,
   calculateChange,
   parseMitmHosts,
@@ -16,6 +18,22 @@ import {
 } from "./update-advertising-module.mjs";
 
 const SOURCE = "https://raw.githubusercontent.com/example/repo/main/module.sgmodule";
+
+test("the actual Advertising module contains no denied MITM hosts", () => {
+  const text = readFileSync(new URL("../../Rewrite/Advertising.sgmodule", import.meta.url), "utf8");
+  assert.doesNotThrow(() => assertNoDeniedMitmHosts(parseTargetModule(text).mitmHosts));
+});
+
+test("denied hosts already in a module fail validation regardless of upstream state", () => {
+  for (const host of ["m.airchina.com.cn", "GQL.REDDIT.COM", "*.fuliapps.com", "yuudnn.lz-qs.com:9220"]) {
+    const current = ["valid.example", host];
+    const state = [host];
+    const proposed = applyUpstreamDelta(current, state, state, new Set([host]));
+    assert.throws(() => assertNoDeniedMitmHosts(proposed), /contains denied MITM hosts/);
+    assert.deepEqual(current, ["valid.example", host]);
+  }
+  assert.doesNotThrow(() => assertNoDeniedMitmHosts(["other.example", "api.reddit.com"]));
+});
 
 test("generic ad-path filtering preserves only the three Bahamut player scripts across upstream deltas", () => {
   const broad = '"(?i)\\b\\/ad\\/" - reject';

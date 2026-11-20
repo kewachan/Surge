@@ -326,6 +326,13 @@ export function requireReviewedMitmAdditions(currentHosts, proposedHosts, allowA
   return additions;
 }
 
+export function assertNoDeniedMitmHosts(hosts) {
+  const denied = hosts.filter((host) => DENIED_MITM_HOSTS.has(host.toLowerCase()));
+  if (denied.length) {
+    throw new Error(`Advertising module contains denied MITM hosts: ${denied.sort(compareAscii).join(", ")}`);
+  }
+}
+
 export function calculateChange(existingValues, proposedValues) {
   const existing = new Set(existingValues);
   const proposed = new Set(proposedValues);
@@ -451,6 +458,7 @@ export async function run(argv = process.argv.slice(2)) {
   const options = parseArguments(argv);
   const currentContent = await readFile(options.targetPath, "utf8");
   const target = parseTargetModule(currentContent);
+  assertNoDeniedMitmHosts(target.mitmHosts);
   const sourceResults = await Promise.all(target.sourceDefinitions.map(fetchSource));
   const nextSnapshot = buildSnapshot(sourceResults);
 
