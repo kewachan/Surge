@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -317,11 +318,17 @@ export function applyUpstreamDelta(currentValues, previousValues, nextValues, de
   return uniqueInOrder(proposed);
 }
 
-export function requireReviewedMitmAdditions(currentHosts, proposedHosts, allowAdditions = false) {
-  const additions = setDifference(proposedHosts, currentHosts).sort(compareAscii);
-  if (additions.length && !allowAdditions) {
-    throw new Error(`New MITM hosts require review: ${additions.join(", ")}. ` +
-      "After reviewing all hosts, rerun with --allow-mitm-additions.");
+export function requireReviewedMitmAdditions(currentHosts, proposedHosts, approvedHash = "") {
+  const additions = sortedUnique(setDifference(proposedHosts, currentHosts));
+  if (approvedHash && !/^[a-f0-9]{64}$/u.test(approvedHash)) {
+    throw new Error("MITM approval must be a lowercase SHA-256 fingerprint");
+  }
+  if (additions.length || approvedHash) {
+    const fingerprint = createHash("sha256").update(`${additions.join("\n")}\n`, "utf8").digest("hex");
+    if (!additions.length || approvedHash !== fingerprint) {
+      throw new Error(`New MITM hosts require review: ${additions.join(", ") || "<none>"}. ` +
+        `SHA-256: ${fingerprint}. Supply the fingerprint only after reviewing the complete list.`);
+    }
   }
   return additions;
 }
@@ -399,7 +406,7 @@ async function fetchSource(definition) {
 
 function parseArguments(argv) {
   const options = {
-    allowMitmAdditions: false,
+    approvedMitmSha256: "",
     allowLargeChange: false,
     bootstrap: false,
     check: false,
@@ -414,7 +421,11 @@ function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--allow-large-change") options.allowLargeChange = true;
-    else if (argument === "--allow-mitm-additions") options.allowMitmAdditions = true;
+    else if (argument === "--approved-mitm-sha256") {
+      index += 1;
+      if (!argv[index]) throw new Error("--approved-mitm-sha256 requires a fingerprint");
+      options.approvedMitmSha256 = argv[index];
+    }
     else if (argument === "--bootstrap") options.bootstrap = true;
     else if (argument === "--check") options.check = true;
     else if (argument === "--dry-run") options.dryRun = true;
@@ -502,7 +513,8 @@ export async function run(argv = process.argv.slice(2)) {
     nextSnapshot.mitmHosts,
     DENIED_MITM_HOSTS,
   );
-  requireReviewedMitmAdditions(target.mitmHosts, proposedHosts, options.allowMitmAdditions);
+  assertNoDeniedMitmHosts(proposedHosts);
+  requireReviewedMitmAdditions(target.mitmHosts, proposedHosts, options.approvedMitmSha256);
   const renderedContent = renderTargetModule({
     mitmHosts: proposedHosts,
     preamble: target.preamble,

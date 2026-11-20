@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -14,6 +18,7 @@ import {
   protectPlayerResources,
   requireReviewedMitmAdditions,
   renderTargetModule,
+  run,
   setModuleUpdatedDate,
 } from "./update-advertising-module.mjs";
 
@@ -112,10 +117,53 @@ test("applies only upstream deltas and preserves curated omissions", () => {
 test("new MITM hosts stop updates until explicitly reviewed, without changing existing hosts", () => {
   const current = ["keep.example", "manual.example"];
   const next = ["keep.example", "manual.example", "*.new.example", "api.example:8443"];
-  assert.throws(() => requireReviewedMitmAdditions(current, next), /\*\.new\.example, api\.example:8443/u);
+  const hash = createHash("sha256").update("*.new.example\napi.example:8443\n").digest("hex");
+  assert.throws(() => requireReviewedMitmAdditions(current, next), (error) => error.message.includes(hash));
   assert.deepEqual(current, ["keep.example", "manual.example"]);
-  assert.deepEqual(requireReviewedMitmAdditions(current, next, true), ["*.new.example", "api.example:8443"]);
+  assert.deepEqual(requireReviewedMitmAdditions(current, next, hash), ["*.new.example", "api.example:8443"]);
+  assert.deepEqual(requireReviewedMitmAdditions(current, [...next].reverse(), hash), ["*.new.example", "api.example:8443"]);
+  assert.throws(() => requireReviewedMitmAdditions(current, [...next, "later.example"], hash), /require review/u);
+  assert.throws(() => requireReviewedMitmAdditions(current, next.slice(0, -1), hash), /require review/u);
+  assert.throws(() => requireReviewedMitmAdditions(current, next, "bad"), /lowercase SHA-256/u);
+  assert.throws(() => requireReviewedMitmAdditions(current, current, hash), /require review/u);
+  assert.throws(() => assertNoDeniedMitmHosts([...current, "m.airchina.com.cn"]), /denied MITM/u);
   assert.deepEqual(requireReviewedMitmAdditions(current, ["keep.example"]), []);
+});
+
+test("MITM fingerprint gates the complete update and rejects changed upstream hosts", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-mitm-test-"));
+  const target = path.join(dir, "target.sgmodule"), state = path.join(dir, "state.json");
+  const rule = "^https://old.example/ - reject";
+  const initial = renderTargetModule({preamble: `#!name=Fixture\n#!date=2026-01-01\n# Source: ${SOURCE}`, mitmHosts: ["old.example"], urlRewrite: [rule]});
+  const snapshot = buildSnapshot([{role: "source", url: SOURCE, mitmHosts: ["old.example"], urlRewrite: [rule]}]);
+  const previousFetch = globalThis.fetch;
+  let hosts = ["old.example", "new.example"];
+  const mockFetch = async () => new Response(renderTargetModule({preamble: "#!name=Source", mitmHosts: hosts, urlRewrite: [rule, "^https://new.example/ - reject"]}), {status: 200});
+  globalThis.fetch = async (...args) => { const response = await mockFetch(...args); Object.defineProperty(response, "url", {value: SOURCE}); return response; };
+  const args = ["--file", target, "--state-file", state, "--allow-large-change"];
+  try {
+    await writeFile(target, initial);
+    const initialState = `${JSON.stringify(snapshot, null, 2)}\n`;
+    await writeFile(state, initialState);
+    let message;
+    await assert.rejects(run(args), (error) => { message = error.message; return /require review/u.test(message); });
+    const fingerprint = /SHA-256: ([a-f0-9]{64})/u.exec(message)[1];
+    assert.equal(await readFile(target, "utf8"), initial);
+    assert.equal(await readFile(state, "utf8"), initialState);
+    hosts = [...hosts, "later.example"];
+    await assert.rejects(run([...args, "--approved-mitm-sha256", fingerprint]), /require review/u);
+    assert.equal(await readFile(target, "utf8"), initial);
+    assert.equal(await readFile(state, "utf8"), initialState);
+    hosts = ["old.example", "new.example"];
+    await run([...args, "--approved-mitm-sha256", fingerprint]);
+    assert.deepEqual(parseTargetModule(await readFile(target, "utf8")).mitmHosts, ["old.example", "new.example"]);
+    assert.equal(parseTargetModule(await readFile(target, "utf8")).urlRewrite.length, 2);
+    assert.deepEqual(JSON.parse(await readFile(state, "utf8")).mitmHosts, ["new.example", "old.example"]);
+    await assert.rejects(run([...args, "--allow-mitm-additions"]), /Unknown argument/u);
+  } finally {
+    globalThis.fetch = previousFetch;
+    await rm(dir, {recursive: true, force: true});
+  }
 });
 
 test("builds deterministic state and ignores audit rewrite rules", () => {
