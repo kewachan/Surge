@@ -30,7 +30,7 @@ jobs:
           node Rewrite/Youtube/build-lyrics-chinese.cjs --check
       - name: Run offline regressions
         run: |
-          node --test Tools/Testing/test-module-contracts.cjs Tools/NetworkInfo/network-info.test.cjs Tools/NodeOfflineMonitor/test-node-offline-monitor.cjs Tools/NodeOfflineMonitor/test-node-budgets.cjs Tools/CTMUsage/ctm-usage.test.cjs Tools/Rewrite/*.test.mjs Tools/Advertising/update-advertising-module.test.mjs Tools/Filters/update-imported-filters.test.mjs Rewrite/GeneralAdBlock/test-general-safety.cjs Rewrite/Bilibili/test-*.cjs Rewrite/Youtube/test-youtube-prewarm.cjs Rewrite/Youtube/test-youtube-prewarm-init.cjs Rewrite/Youtube/test-youtube-song-cache.cjs Rewrite/Youtube/test-youtube-module-safety.cjs
-          node Rewrite/Youtube/test-youtube-caption-queue.cjs
-          node Rewrite/Youtube/test-youtube-lyrics-order.cjs
+          node --test Tools/Testing/module-contracts.test.cjs Tools/NetworkInfo/network-info.test.cjs Tools/NodeOfflineMonitor/node-offline-monitor.test.cjs Tools/NodeOfflineMonitor/node-budgets.test.cjs Tools/CTMUsage/ctm-usage.test.cjs Tools/Rewrite/*.test.mjs Tools/Advertising/update-advertising-module.test.mjs Tools/Filters/update-imported-filters.test.mjs Rewrite/GeneralAdBlock/general-safety.test.cjs Rewrite/Bilibili/*.test.cjs Rewrite/Youtube/youtube-prewarm.test.cjs Rewrite/Youtube/youtube-prewarm-init.test.cjs Rewrite/Youtube/youtube-song-cache.test.cjs Rewrite/Youtube/youtube-module-safety.test.cjs
+          node Rewrite/Youtube/youtube-caption-queue.test.cjs
+          node Rewrite/Youtube/youtube-lyrics-order.test.cjs
           git diff --exit-code
