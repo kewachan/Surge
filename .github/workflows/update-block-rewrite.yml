@@ -36,7 +36,7 @@ jobs:
           fetch-depth: 0
 
       - name: Test updater
-        run: node --test Tools/Advertising/update-advertising-module.test.mjs
+        run: node --test Tools/Advertising/tests/update-advertising-module.test.mjs
 
       - name: Update block rewrite
         env:
