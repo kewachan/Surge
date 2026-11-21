@@ -7,6 +7,7 @@ const zlib = require('node:zlib');
 const source = fs.readFileSync(path.join(__dirname, 'bilibili.viewunite.response.js'), 'utf8');
 const moduleText = fs.readFileSync(path.join(__dirname, 'Bilibili.Enhance.sgmodule'), 'utf8');
 const endpoint = 'https://grpc.biliapi.net/bilibili.app.viewunite.v1.View/AIRelateAsync';
+const endEndpoint = endpoint.replace('AIRelateAsync', 'ViewEndPage');
 const adType = 'type.googleapis.com/bilibili.ad.v1.SourceContentDto';
 
 function integer(value) {
@@ -154,10 +155,52 @@ const rule = moduleText.split('\n').find(line => line.startsWith('BiliBili.ADBlo
 assert(rule);
 const regex = new RegExp(rule.match(/pattern=([^,]+),/)[1]);
 assert(regex.test(endpoint));
+assert(regex.test(endEndpoint));
 assert(regex.test(endpoint.replace('grpc.biliapi.net', 'app.bilibili.com')));
 assert(!regex.test(endpoint.replace('AIRelateAsync', 'AIRelateAsyncOther')));
 assert(rule.includes('binary-body-mode=1') && rule.includes('View.AD="{{{View.AD}}}"'));
 assert(moduleText.includes('View\\/(View|TFInfo|RelatesFeed)$'), 'existing upstream view filtering must stay intact');
+
+function endCard(label, button, type = 5) {
+  const metadata = Buffer.concat([field(1, label), field(2, field(5, button))]);
+  let inner = field(38, metadata);
+  for (const number of [11, 3, 9, 2, 2, 6]) inner = field(number, inner);
+  return field(1, Buffer.concat([Buffer.from([8, type]), inner]));
+}
+const endAd = field(1, endCard('广告', '屏蔽广告'));
+const normalEndCard = field(1, endCard('推荐', '不感兴趣'));
+const misleadingLabel = field(1, endCard('广告', '不感兴趣'));
+const otherType = field(1, endCard('广告', '屏蔽广告', 4));
+const otherEndData = field(2, Buffer.concat([field(1, '广告'), field(5, '屏蔽广告')]));
+const endPayload = Buffer.concat([normalEndCard, endAd, misleadingLabel, otherType, otherEndData]);
+const expectedEnd = Buffer.concat([normalEndCard, misleadingLabel, otherType, otherEndData]);
+for (const gzip of [false, true]) {
+  const result = run(frame(endPayload, gzip), {url: endEndpoint});
+  assert.deepEqual(decodeFrames(result.body)[0].value, expectedEnd);
+  unchanged(Buffer.from(result.body), {url: endEndpoint});
+}
+unchanged(frame(endPayload, true), {url: endEndpoint, argument: 'View.AD=false'});
+unchanged(frame(endPayload, true), {url: endEndpoint, noGzip: true});
+unchanged(frame(Buffer.concat([normalEndCard, misleadingLabel, otherType, otherEndData])), {url: endEndpoint});
+unchanged(frame(Buffer.from([10, 255])), {url: endEndpoint});
+
+let endHarResult = null;
+if (process.env.BILIBILI_END_HAR_PATH) {
+  const entries = JSON.parse(fs.readFileSync(process.env.BILIBILI_END_HAR_PATH, 'utf8')).log.entries;
+  const entry = entries.find(item => item.request.url.split('?')[0].endsWith('/ViewEndPage') && item.response?.status === 200);
+  assert(entry, 'expected a successful captured end-page response');
+  const input = Buffer.from(entry.response.content.text, entry.response.content.encoding === 'base64' ? 'base64' : 'utf8');
+  const headers = Object.fromEntries(entry.response.headers.map(header => [header.name, header.value]));
+  const requestHeaders = Object.fromEntries(entry.request.headers.map(header => [header.name, header.value]));
+  const result = run(input, {url: entry.request.url, headers, requestHeaders});
+  assert(result.body, 'captured end-page ads must be filtered');
+  const before = splitFields(decodeFrames(input)[0].value);
+  const after = splitFields(decodeFrames(result.body)[0].value);
+  assert.equal(before.length - after.length, 2);
+  assert.deepEqual(after.map(item => item.raw), before.filter(item => !item.value?.includes(Buffer.from('屏蔽广告'))).map(item => item.raw));
+  unchanged(Buffer.from(result.body), {url: entry.request.url, headers: result.headers || headers, requestHeaders});
+  endHarResult = {removedAds: 2, remainingRootFieldsPreserved: true, idempotent: true};
+}
 
 const harResults = [];
 if (process.env.BILIBILI_HAR_PATH) {
@@ -206,4 +249,4 @@ if (process.env.BILIBILI_SLOW_HAR_PATH) {
 }
 console.log(JSON.stringify({gzipAndIdentity: true, unknownFieldsPreserved: true, mixedFramesPreserved: true,
   viewAdSwitch: true, malformedFailOpen: true, moduleRule: true, grpcHeaderCompatibility: true,
-  explicitErrorsPreserved: true, harResults, slowHarResults}, null, 2));
+  explicitErrorsPreserved: true, endPage: true, endHarResult, harResults, slowHarResults}, null, 2));
