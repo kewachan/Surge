@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {run} = require('../../Testing/surge-harness.cjs');
+const {run} = require('../../../.github/Testing/surge-harness.cjs');
 const file = 'Tools/NodeOfflineMonitor/node-offline-monitor.js';
 const key = 'node_offline_monitor_state_v1', leaseKey = 'node_offline_monitor_lease_v1';
 const now = Date.parse('2026-11-02T12:00:00+08:00');

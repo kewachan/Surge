@@ -5,7 +5,7 @@ const vm = require("node:vm");
 const crypto = require("node:crypto");
 const zlib = require("node:zlib");
 const {test, before} = require("node:test");
-const {run: runSurge} = require("../../../Tools/Testing/surge-harness.cjs");
+const {run: runSurge} = require("../../../.github/Testing/surge-harness.cjs");
 let worker;
 const token = "a".repeat(64);
 const videoId = "abcdefghijk";
