@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const {run} = require('../../../.github/Testing/surge-harness.cjs');
+const {run} = require('../../../Automation/Testing/surge-harness.cjs');
 const bahamut = 'Rewrite/GeneralAdBlock/bahamut-adblock.js';
 const token = 'https://api.gamer.com.tw/mobile_app/anime/v4/token.php?videoSn=12345';
 const source = 'https://api.gamer.com.tw/anime/v1/video_src.php?videoSn=12345';

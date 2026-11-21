@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const {test} = require("node:test");
-const {run: nativeRun} = require("../../../.github/Testing/surge-harness.cjs");
+const {run: nativeRun} = require("../../../Automation/Testing/surge-harness.cjs");
 require("./youtube-lyrics-model.test.cjs");
 const directory = path.resolve(__dirname, '..');
 const token = "a".repeat(64);

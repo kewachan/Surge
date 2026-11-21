@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const {execFileSync} = require('node:child_process');
-const {run} = require('../../../.github/Testing/surge-harness.cjs');
+const {run} = require('../../../Automation/Testing/surge-harness.cjs');
 const file = 'Rewrite/Bilibili/bilibili.adblock.request.js';
 const endpoints = [
   ['Search.HotSearch', 'https://api.vc.bilibili.com/search_svr/v1/Search/recommend_words'],

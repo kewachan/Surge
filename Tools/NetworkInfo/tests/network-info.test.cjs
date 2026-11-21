@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {run} = require('../../../.github/Testing/surge-harness.cjs');
+const {run} = require('../../../Automation/Testing/surge-harness.cjs');
 const file = 'Tools/NetworkInfo/network-info.js';
 
 test('raw lookup URLs preserve separators, encoded values and fragments', async () => {

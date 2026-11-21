@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const {run} = require('../../../.github/Testing/surge-harness.cjs');
+const {run} = require('../../../Automation/Testing/surge-harness.cjs');
 const {loadClient} = require('./youtube-lyrics-order.test.cjs');
 const moduleText = fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'YouTube.Enhance.sgmodule'), 'utf8');
 
