@@ -318,16 +318,26 @@ export function applyUpstreamDelta(currentValues, previousValues, nextValues, de
   return uniqueInOrder(proposed);
 }
 
-export function requireReviewedMitmAdditions(currentHosts, proposedHosts, approvedHash = "") {
+export function requireReviewedMitmAdditions(currentHosts, proposedHosts, approvedHash = "", currentRules = [], proposedRules = []) {
   const additions = sortedUnique(setDifference(proposedHosts, currentHosts));
   if (approvedHash && !/^[a-f0-9]{64}$/u.test(approvedHash)) {
     throw new Error("MITM approval must be a lowercase SHA-256 fingerprint");
   }
   if (additions.length || approvedHash) {
-    const fingerprint = createHash("sha256").update(`${additions.join("\n")}\n`, "utf8").digest("hex");
+    const review = {
+      version: 2,
+      currentHosts: sortedUnique(currentHosts),
+      proposedHosts: sortedUnique(proposedHosts),
+      currentRules,
+      proposedRules,
+    };
+    const fingerprint = createHash("sha256").update(JSON.stringify(review), "utf8").digest("hex");
     if (!additions.length || approvedHash !== fingerprint) {
       throw new Error(`New MITM hosts require review: ${additions.join(", ") || "<none>"}. ` +
-        `SHA-256: ${fingerprint}. Supply the fingerprint only after reviewing the complete list.`);
+        `Removed MITM hosts: ${sortedUnique(setDifference(currentHosts, proposedHosts)).join(", ") || "<none>"}. ` +
+        `Added Rewrite rules: ${JSON.stringify(setDifference(proposedRules, currentRules))}. ` +
+        `Removed Rewrite rules: ${JSON.stringify(setDifference(currentRules, proposedRules))}. ` +
+        `SHA-256: ${fingerprint}. Review the complete proposed changes before approval.`);
     }
   }
   return additions;
@@ -461,6 +471,33 @@ async function atomicWrite(targetPath, content) {
   }
 }
 
+export async function writeUpdatePair(targetPath, content, original, statePath, state, io = {writeFile, rename, unlink}) {
+  if (path.resolve(targetPath) === path.resolve(statePath)) throw new Error("Target and state must be different files");
+  const targetTemp = `${targetPath}.tmp-${process.pid}-new`;
+  const stateTemp = `${statePath}.tmp-${process.pid}-new`;
+  const backup = `${targetPath}.tmp-${process.pid}-backup`;
+  let targetReplaced = false, preserveBackup = false;
+  try {
+    await io.writeFile(backup, original, "utf8");
+    await io.writeFile(targetTemp, content, "utf8");
+    await io.writeFile(stateTemp, state, "utf8");
+    await io.rename(targetTemp, targetPath);
+    targetReplaced = true;
+    await io.rename(stateTemp, statePath);
+  } catch (error) {
+    if (targetReplaced) {
+      try { await io.rename(backup, targetPath); }
+      catch (rollbackError) {
+        preserveBackup = true;
+        throw new Error(`State update failed; target rollback failed. Original target retained at ${backup}: ${rollbackError.message}`, {cause: error});
+      }
+    }
+    throw error;
+  } finally {
+    await Promise.all([targetTemp, stateTemp, ...(preserveBackup ? [] : [backup])].map(file => io.unlink(file).catch(() => {})));
+  }
+}
+
 function formatChange(label, change) {
   return `${label}: ${change.added} added, ${change.removed} removed`;
 }
@@ -514,7 +551,7 @@ export async function run(argv = process.argv.slice(2)) {
     DENIED_MITM_HOSTS,
   );
   assertNoDeniedMitmHosts(proposedHosts);
-  requireReviewedMitmAdditions(target.mitmHosts, proposedHosts, options.approvedMitmSha256);
+  requireReviewedMitmAdditions(target.mitmHosts, proposedHosts, options.approvedMitmSha256, target.urlRewrite, proposedRules);
   const renderedContent = renderTargetModule({
     mitmHosts: proposedHosts,
     preamble: target.preamble,
@@ -570,8 +607,9 @@ export async function run(argv = process.argv.slice(2)) {
     return;
   }
 
-  if (targetChanged) await atomicWrite(options.targetPath, proposedContent);
-  await atomicWrite(options.statePath, proposedState);
+  if (targetChanged && stateChanged) await writeUpdatePair(options.targetPath, proposedContent, currentContent, options.statePath, proposedState);
+  else if (targetChanged) await atomicWrite(options.targetPath, proposedContent);
+  else await atomicWrite(options.statePath, proposedState);
   console.log(summary);
 }
 
