@@ -3,9 +3,9 @@ name: Test Surge Modules
 on:
   push:
     branches: [main]
-    paths: ['Rewrite/**', 'Tools/**', '.github/Advertising/**', '.github/Testing/**', '.github/workflows/test-surge-modules.yml']
+    paths: ['Rewrite/**', 'Tools/**', 'Automation/**', '.github/workflows/test-surge-modules.yml']
   pull_request:
-    paths: ['Rewrite/**', 'Tools/**', '.github/Advertising/**', '.github/Testing/**', '.github/workflows/test-surge-modules.yml']
+    paths: ['Rewrite/**', 'Tools/**', 'Automation/**', '.github/workflows/test-surge-modules.yml']
   workflow_dispatch:
 
 permissions:
@@ -30,7 +30,7 @@ jobs:
           node Rewrite/Youtube/tools/build-lyrics-chinese.cjs --check
       - name: Run offline regressions
         run: |
-          node --test .github/Testing/tests/module-contracts.test.cjs Tools/NetworkInfo/tests/network-info.test.cjs Tools/NodeOfflineMonitor/tests/node-offline-monitor.test.cjs Tools/NodeOfflineMonitor/tests/node-budgets.test.cjs Tools/CTMUsage/tests/ctm-usage.test.cjs Tools/Rewrite/tests/*.test.mjs .github/Advertising/tests/update-advertising-module.test.mjs Tools/Filters/tests/update-imported-filters.test.mjs Rewrite/GeneralAdBlock/tests/general-safety.test.cjs Rewrite/Bilibili/tests/*.test.cjs Rewrite/Youtube/tests/youtube-prewarm.test.cjs Rewrite/Youtube/tests/youtube-prewarm-init.test.cjs Rewrite/Youtube/tests/youtube-song-cache.test.cjs Rewrite/Youtube/tests/youtube-module-safety.test.cjs
+          node --test Automation/Testing/tests/module-contracts.test.cjs Tools/NetworkInfo/tests/network-info.test.cjs Tools/NodeOfflineMonitor/tests/node-offline-monitor.test.cjs Tools/NodeOfflineMonitor/tests/node-budgets.test.cjs Tools/CTMUsage/tests/ctm-usage.test.cjs Automation/Rewrite/tests/*.test.mjs Automation/Advertising/tests/update-advertising-module.test.mjs Automation/Filters/tests/update-imported-filters.test.mjs Rewrite/GeneralAdBlock/tests/general-safety.test.cjs Rewrite/Bilibili/tests/*.test.cjs Rewrite/Youtube/tests/youtube-prewarm.test.cjs Rewrite/Youtube/tests/youtube-prewarm-init.test.cjs Rewrite/Youtube/tests/youtube-song-cache.test.cjs Rewrite/Youtube/tests/youtube-module-safety.test.cjs
           node Rewrite/Youtube/tests/youtube-caption-queue.test.cjs
           node Rewrite/Youtube/tests/youtube-lyrics-order.test.cjs
           git diff --exit-code
