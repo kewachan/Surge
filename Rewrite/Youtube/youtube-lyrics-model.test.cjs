@@ -167,7 +167,7 @@ test("a whole-line Thai name is intentionally ambiguous and takes the same conse
 });
 
 test("a rejected partial Thai response reaches native Google fallback without saving an AI cache", async () => {
-  const worker = await load(), {loadClient, lyricDocument} = require("./test-youtube-lyrics-order.cjs");
+  const worker = await load(), {loadClient, lyricDocument} = require("./youtube-lyrics-order.test.cjs");
   const oldCaches = global.caches, token = "d".repeat(64), events = [];
   const texts = ["ฉันยิ้มให้เธอ ทั้งที่ในใจยังร้องไห้", "ฉันยอมเป็นคนแพ้ ดีกว่าทำให้เธอเสียใจ"];
   const seed = loadClient(), input = lyricDocument(seed.client, texts);

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const {run} = require('../../Tools/Testing/surge-harness.cjs');
-const {loadClient} = require('./test-youtube-lyrics-order.cjs');
+const {loadClient} = require('./youtube-lyrics-order.test.cjs');
 const moduleText = fs.readFileSync(path.join(__dirname, 'YouTube.Enhance.sgmodule'), 'utf8');
 
 test('initplayback requires an exact ack query key in any position', () => {

@@ -4,7 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const {test} = require("node:test");
 const {run: nativeRun} = require("../../Tools/Testing/surge-harness.cjs");
-require("./test-youtube-lyrics-model.cjs");
+require("./youtube-lyrics-model.test.cjs");
 const directory = __dirname;
 const token = "a".repeat(64);
 const authorization = {Authorization: `Bearer ${token}`};

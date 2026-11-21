@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const {test} = require("node:test");
 const fs = require("node:fs");
-const {loadClient, lyricDocument} = require("./test-youtube-lyrics-order.cjs");
+const {loadClient, lyricDocument} = require("./youtube-lyrics-order.test.cjs");
 const texts = Array.from({length: 34}, (_, i) => `Original song line ${i}`);
 const videoId = "abcdefghijk";
 function runClient(handler, options = {}) {
