@@ -12,7 +12,7 @@ on:
         default: false
         type: boolean
       approved_mitm_sha256:
-        description: SHA-256 of the reviewed new MITM hostname list
+        description: SHA-256 of the reviewed MITM and Rewrite changes
         required: false
         type: string
 
