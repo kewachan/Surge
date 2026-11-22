@@ -15,6 +15,19 @@ const completion = (translations) => ({choices: [{finish_reason: "stop", message
   role: "assistant", content: JSON.stringify({translations}),
 }}]});
 
+test("Thai lyrics use language-appropriate translation instructions", async () => {
+  const worker = await load(), prompts = [];
+  const env = {AI: {run: async (_, input) => {
+    prompts.push(input.messages[1].content);
+    return completion([prompts.length === 1 ? "You are my hope" : "你是我的希望"]);
+  }}};
+  await worker.__test.translateLyrics(["เธอคือความหวัง"], "th", "en", env);
+  await worker.__test.translateLyrics(["เธอคือความหวัง"], "th", "zh-TW", env);
+  assert.match(prompts[0], /into en/);
+  assert.doesNotMatch(prompts[0], /always use 你 or 你的/);
+  assert.match(prompts[1], /always use 你 or 你的/);
+});
+
 test("replacement model uses its supported JSON schema without reasoning-only parameters", async () => {
   const worker = await load(), texts = ["Do not leave me alone.", "We will return together."];
   let calls = 0;

@@ -69,6 +69,17 @@ test('Adrewrite supplies exact MITM hosts and valid HTTP/HTTPS matching', () => 
   assert(!text.includes('^http?:'));
 });
 
+test('updater workflow changes trigger module tests on pushes and pull requests', () => {
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/test-surge-modules.yml'), 'utf8');
+  for (const event of ['push', 'pull_request']) {
+    const section = workflow.split(`  ${event}:`)[1]?.split(/\n  [a-z_]+:/)[0];
+    assert(section, `missing ${event} trigger`);
+    for (const updater of ['update-block-list.yml', 'update-block-rewrite.yml']) {
+      assert(section.includes(`.github/workflows/${updater}`), `${event} must cover ${updater}`);
+    }
+  }
+});
+
 test('native ICU compiles every HTTP pattern and preserves required Bahamut player resources', {skip: process.platform !== 'darwin'}, () => {
   assert(records.length > 1300);
   const source = 'ObjC.import("Foundation"); const records=' + JSON.stringify(records) + ';'

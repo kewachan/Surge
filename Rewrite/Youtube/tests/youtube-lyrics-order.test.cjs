@@ -152,13 +152,18 @@ async function verifyWorker() {
     assert.equal(aiCalls, 2, "server cache must contain actual AI results");
 
     values.clear();
-    let finishAI;
+    let finishAI, signalAIStarted;
+    const aiStarted = new Promise((resolve) => { signalAIStarted = resolve; });
     const deferred = new Promise((resolve) => { finishAI = resolve; });
-    env.AI.run = () => { aiCalls++; return deferred; };
+    env.AI.run = () => { aiCalls++; signalAIStarted(); return deferred; };
     const cold = worker.__test.translateCached(texts, "auto", "zh-TW", env, context);
-    await new Promise((resolve) => setImmediate(resolve));
-    const same = worker.__test.translateCached(texts, "auto", "zh-TW", env, context);
-    await new Promise((resolve) => setImmediate(resolve));
+    await aiStarted;
+    let signalShared;
+    const shared = new Promise((resolve) => { signalShared = resolve; });
+    const same = worker.__test.translateCached(texts, "auto", "zh-TW", env, {
+      waitUntil(work) { pending.push(work); signalShared(); },
+    });
+    await shared;
     assert.equal(aiCalls, 3, "same-isolate duplicate requests must share their AI attempt");
     finishAI(aiResult(2));
     assert.equal((await cold).provider, "cloudflare-ai");

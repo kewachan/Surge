@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { writeUpdatePair } from "../../write-update-pair.mjs";
 
 import {
   applyUpstreamDelta,
@@ -10,8 +14,41 @@ import {
   parseRuleText,
   parseTargetFile,
   renderTargetFile,
+  run,
   setFilterUpdatedDate,
 } from "../update-imported-filters.mjs";
+
+test("failed state replacement restores both filter and source state", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-filter-pair-"));
+  const target = path.join(dir, "filter.list"), state = path.join(dir, "state.json");
+  const url = "https://raw.githubusercontent.com/example/repo/main/list";
+  const original = `# Last Updated: 2026-01-01\n\n# Imported List\n# Source: ${url}\nDOMAIN, old.example\n`;
+  const snapshot = `${JSON.stringify(buildSnapshot([{url, rules: parseRuleText("DOMAIN,old.example")}]), null, 2)}\n`;
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const response = new Response("DOMAIN,old.example\nDOMAIN,new.example\n");
+    Object.defineProperty(response, "url", {value: url});
+    return response;
+  };
+  try {
+    await writeFile(target, original);
+    await writeFile(state, snapshot);
+    const io = {writeFile, unlink, rename: async (from, to) => {
+      if (to === state) throw new Error("state rename failed");
+      return rename(from, to);
+    }};
+    const args = ["--file", target, "--state-file", state, "--allow-large-change"];
+    await assert.rejects(run(args, {writePair: (...values) => writeUpdatePair(...values, io)}), /state rename failed/);
+    assert.equal(await readFile(target, "utf8"), original);
+    assert.equal(await readFile(state, "utf8"), snapshot);
+    await run(args);
+    assert.match(await readFile(target, "utf8"), /DOMAIN, new\.example/);
+    assert(JSON.parse(await readFile(state, "utf8")).rules.includes("DOMAIN, new.example"));
+  } finally {
+    globalThis.fetch = oldFetch;
+    await rm(dir, {recursive: true, force: true});
+  }
+});
 
 test("normalizes supported rules and removes policy fields", () => {
   const rules = parseRuleText(`

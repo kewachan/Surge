@@ -2,6 +2,7 @@
 
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { writeUpdatePair } from "../write-update-pair.mjs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -471,32 +472,7 @@ async function atomicWrite(targetPath, content) {
   }
 }
 
-export async function writeUpdatePair(targetPath, content, original, statePath, state, io = {writeFile, rename, unlink}) {
-  if (path.resolve(targetPath) === path.resolve(statePath)) throw new Error("Target and state must be different files");
-  const targetTemp = `${targetPath}.tmp-${process.pid}-new`;
-  const stateTemp = `${statePath}.tmp-${process.pid}-new`;
-  const backup = `${targetPath}.tmp-${process.pid}-backup`;
-  let targetReplaced = false, preserveBackup = false;
-  try {
-    await io.writeFile(backup, original, "utf8");
-    await io.writeFile(targetTemp, content, "utf8");
-    await io.writeFile(stateTemp, state, "utf8");
-    await io.rename(targetTemp, targetPath);
-    targetReplaced = true;
-    await io.rename(stateTemp, statePath);
-  } catch (error) {
-    if (targetReplaced) {
-      try { await io.rename(backup, targetPath); }
-      catch (rollbackError) {
-        preserveBackup = true;
-        throw new Error(`State update failed; target rollback failed. Original target retained at ${backup}: ${rollbackError.message}`, {cause: error});
-      }
-    }
-    throw error;
-  } finally {
-    await Promise.all([targetTemp, stateTemp, ...(preserveBackup ? [] : [backup])].map(file => io.unlink(file).catch(() => {})));
-  }
-}
+export { writeUpdatePair };
 
 function formatChange(label, change) {
   return `${label}: ${change.added} added, ${change.removed} removed`;
