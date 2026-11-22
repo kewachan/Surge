@@ -41,6 +41,27 @@ test("denied hosts already in a module fail validation regardless of upstream st
   assert.doesNotThrow(() => assertNoDeniedMitmHosts(["other.example", "api.reddit.com"]));
 });
 
+test("a denied host in the existing module aborts before fetching or writing either file", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-denied-existing-"));
+  const target = path.join(dir, "module.sgmodule"), state = path.join(dir, "state.json");
+  const initial = renderTargetModule({preamble: `#!name=Fixture\n# Source: ${SOURCE}`,
+    mitmHosts: ["m.airchina.com.cn"], urlRewrite: ["^https://old.example/ - reject"]});
+  const initialState = "original state\n", previousFetch = globalThis.fetch;
+  let fetched = false;
+  globalThis.fetch = async () => { fetched = true; throw new Error("unexpected network"); };
+  try {
+    await writeFile(target, initial);
+    await writeFile(state, initialState);
+    await assert.rejects(run(["--file", target, "--state-file", state, "--allow-large-change"]), /denied MITM hosts/);
+    assert.equal(fetched, false);
+    assert.equal(await readFile(target, "utf8"), initial);
+    assert.equal(await readFile(state, "utf8"), initialState);
+  } finally {
+    globalThis.fetch = previousFetch;
+    await rm(dir, {recursive: true, force: true});
+  }
+});
+
 test("generic ad-path filtering preserves only the three Bahamut player scripts across upstream deltas", () => {
   const broad = '"(?i)\\b\\/ad\\/" - reject';
   const [protectedRule] = protectPlayerResources([broad]);
