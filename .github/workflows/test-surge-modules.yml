@@ -3,9 +3,9 @@ name: Test Surge Modules
 on:
   push:
     branches: [main]
-    paths: ['Rewrite/**', 'Tools/**', 'Automation/**', '.github/workflows/test-surge-modules.yml']
+    paths: ['Rewrite/**', 'Tools/**', 'Automation/**', '.github/workflows/test-surge-modules.yml', '.github/workflows/update-block-list.yml', '.github/workflows/update-block-rewrite.yml']
   pull_request:
-    paths: ['Rewrite/**', 'Tools/**', 'Automation/**', '.github/workflows/test-surge-modules.yml']
+    paths: ['Rewrite/**', 'Tools/**', 'Automation/**', '.github/workflows/test-surge-modules.yml', '.github/workflows/update-block-list.yml', '.github/workflows/update-block-rewrite.yml']
   workflow_dispatch:
 
 permissions:
