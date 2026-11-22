@@ -357,7 +357,8 @@ globalThis.YouTubeChinese = {
 
   function cacheKey(lines, target) {
     let hash = 2166136261;
-    const value = `${target}|${lines.join("\u001f")}`;
+    const affected = !/^zh(?:-|$)/i.test(target) && lines.some((line) => /[\u0e00-\u0e7f]/.test(line));
+    const value = `${target}|${lines.join("\u001f")}${affected ? "|thai-target-prompt-v26" : ""}`;
     for (let index = 0; index < value.length; index++) {
       hash ^= value.charCodeAt(index);
       hash = Math.imul(hash, 16777619);

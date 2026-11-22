@@ -66,6 +66,22 @@ function lyricDocument(client, texts) {
 }
 
 async function verifyClient() {
+  const thai = ["เธอคือความหวัง"], plain = ["Ordinary lyric"];
+  const legacyKey = (lines, target) => {
+    let hash = 2166136261;
+    for (const char of `${target}|${lines.join("\u001f")}`) {
+      hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619);
+    }
+    return `YouTubeLyrics.v6.${(hash >>> 0).toString(16)}`;
+  };
+  const isolate = loadClient();
+  const oldThaiKey = legacyKey(thai, "en");
+  isolate.store.set(oldThaiKey, JSON.stringify({translations: ["你 are my hope"], provider: "cloudflare-ai", savedAt: Date.now(), expiresAt: Date.now() + 86400000}));
+  assert.notEqual(isolate.client.cacheKey(thai, "en"), oldThaiKey);
+  assert.equal(isolate.client.readCache(isolate.client.cacheKey(thai, "en"), 1), null);
+  assert(isolate.store.has(oldThaiKey), "old data is not deleted");
+  assert.equal(isolate.client.cacheKey(thai, "zh-Hant"), legacyKey(thai, "zh-Hant"));
+  assert.equal(isolate.client.cacheKey(plain, "en"), legacyKey(plain, "en"));
   const texts = ["A gentle breeze", "An evening sky"];
   const first = loadClient();
   const key = first.client.cacheKey(texts, "zh-Hant");

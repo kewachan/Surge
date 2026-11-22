@@ -48,6 +48,54 @@ function message(body, attempts = 1) {
 function request(url, body, auth = authorization) {
   return new Request(url, {method: "POST", headers: {...auth, "Content-Type": "application/json"}, body: JSON.stringify(body)});
 }
+
+test("non-Chinese song prewarm does not reuse a v26 song or its old batch", async () => {
+  const {lyrics} = await ready;
+  const namespace = new Namespace(lyrics.LyricsPrewarm), messages = [];
+  const lines = ["เธอคือความหวัง"], videoId = "abcdefghijk", target = "en";
+  const model = "@cf/aisingapore/gemma-sea-lion-v4-27b-it";
+  const oldSongId = await shared.identifier({version: 2, videoId, target, model});
+  await shared.jobCall(namespace, oldSongId, "prepare", {work: {kind: "source", videoId, target}});
+  await shared.jobCall(namespace, oldSongId, "run", {});
+  await shared.jobCall(namespace, oldSongId, "complete", {result: {available: true, batchJobIds: [], body: JSON.stringify({version: 1, target, provider: "cloudflare-ai", texts: lines, translations: ["你 are my hope"]})}});
+  const env = {LYRICS_ACCESS_TOKEN: token, LYRICS_PREWARM: namespace,
+    LYRICS_QUEUE: {send: async (item) => messages.push(item)},
+    AI: {run: async () => ({response: JSON.stringify({translations: ["You are my hope"]})})}};
+  const before = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId, texts: lines, target}), env, {})).json();
+  assert.equal(before.status, "pending");
+  const queued = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm", {videoId, target, sourceLines: lines}), env, {})).json();
+  assert.notEqual(queued.jobId, oldSongId);
+  assert.equal(queued.reused, false);
+  await lyrics.default.queue({messages: [message(messages[0])]}, env, {});
+  await lyrics.default.queue({messages: [message(messages[1])]}, env, {});
+  const after = await (await lyrics.default.fetch(request("https://worker.test/lyrics/prewarm/result", {videoId, texts: lines, target}), env, {})).json();
+  assert.deepEqual(after.translations, ["You are my hope"]);
+  assert.equal((await shared.jobCall(namespace, oldSongId, "state")).status, "complete", "old job is not deleted");
+});
+
+test("an older queued Thai batch cannot restore its stale cache into new results", async () => {
+  const {createHash} = require("node:crypto"), {lyrics} = await ready;
+  const namespace = new Namespace(lyrics.LyricsPrewarm), texts = ["เธอคือความหวัง"], target = "en";
+  const model = "@cf/aisingapore/gemma-sea-lion-v4-27b-it";
+  const digest = createHash("sha256").update(JSON.stringify({version: "v7", model, source: "auto", target, texts})).digest("hex");
+  const oldUrl = `https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/__cache/v7/${digest}`;
+  const store = new Map([[oldUrl, Response.json({provider: "cloudflare-ai", translations: ["你 are my hope"]})]]);
+  const previous = globalThis.caches;
+  globalThis.caches = {default: {match: async (key) => store.get(key.url)?.clone(), put: async (key, value) => store.set(key.url, value.clone())}};
+  let calls = 0;
+  try {
+    await shared.jobCall(namespace, `batch:${digest}`, "prepare", {work: {kind: "batch", texts, source: "auto", target}});
+    const item = message({jobId: `batch:${digest}`, prewarm: true});
+    await lyrics.default.queue({messages: [item]}, {LYRICS_PREWARM: namespace, AI: {run: async () => {
+      calls++; return {response: JSON.stringify({translations: ["You are my hope"]})};
+    }}}, {});
+    assert(item.acked);
+    assert.equal(calls, 1);
+    assert.deepEqual((await shared.jobCall(namespace, `batch:${digest}`, "state")).result.translations, ["You are my hope"]);
+    assert(store.has(oldUrl), "old cache is not deleted");
+    assert(store.has((await lyrics.__test.cacheRequest(texts, "auto", target)).request.url));
+  } finally { globalThis.caches = previous; }
+});
 test("durable leases serialize duplicate submissions and survive consumer retries", async () => {
   await ready;
   const namespace = new Namespace(shared.PrewarmJob), sent = [];

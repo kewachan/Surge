@@ -28,6 +28,23 @@ test("Thai lyrics use language-appropriate translation instructions", async () =
   assert.match(prompts[1], /always use 你 or 你的/);
 });
 
+test("cache isolation applies only to Thai lines with non-Chinese targets", async () => {
+  const {createHash} = require("node:crypto");
+  const worker = await load(), model = "@cf/aisingapore/gemma-sea-lion-v4-27b-it";
+  const oldKey = (texts, target) => createHash("sha256").update(JSON.stringify({version: "v7", model, source: "auto", target, texts})).digest("hex");
+  for (const [texts, target, changed] of [
+    [["เธอคือความหวัง"], "en", true],
+    [["中文", "เธอคือความหวัง"], "en", true],
+    [["เธอคือความหวัง"], "zh-TW", false],
+    [["เธอคือความหวัง"], "zh-CN", false],
+    [["English lyric"], "en", false],
+  ]) {
+    const key = await worker.__test.cacheRequest(texts, "auto", target);
+    assert.equal(key.identifier !== oldKey(texts, target), changed);
+    assert(key.request.url.includes(changed ? "/v8/" : "/v7/"));
+  }
+});
+
 test("replacement model uses its supported JSON schema without reasoning-only parameters", async () => {
   const worker = await load(), texts = ["Do not leave me alone.", "We will return together."];
   let calls = 0;

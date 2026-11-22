@@ -3,7 +3,7 @@ import {chineseConversionEnabled, chineseLyricLine} from "./youtube.chinese.js";
 export {PrewarmJob as LyricsPrewarm};
 const LYRICS_PATH = "/lyrics";
 const AI_MODEL = "@cf/aisingapore/gemma-sea-lion-v4-27b-it";
-const WORKER_BUILD = "lyrics-translate-v26-target-prompt";
+const WORKER_BUILD = "lyrics-translate-v27-target-cache";
 // Do not reuse source lookups that older builds cached after one empty response.
 const PREWARM_SOURCE_VERSION = 2;
 const MAX_REQUEST_BYTES = 48 * 1024;
@@ -12,6 +12,7 @@ const MAX_LINE_CHARS = 500;
 const MAX_TOTAL_CHARS = 600;
 const MAX_AI_CONCURRENCY = 3;
 const CACHE_VERSION = "v7";
+const THAI_NON_CHINESE_CACHE_VERSION = "v8";
 const CACHE_TTL_SECONDS = 14 * 24 * 60 * 60;
 const IN_FLIGHT_TRANSLATIONS = new Map();
 const ACCESS_TOKEN_PREFIX = "Bearer ";
@@ -262,13 +263,21 @@ function createRequestLimiter(limit) {
 }
 
 async function cacheRequest(texts, source, target) {
-  const input = JSON.stringify({ version: CACHE_VERSION, model: AI_MODEL, source, target, texts });
+  const version = !/^zh(?:-|$)/i.test(target) && texts.some((text) => /[\u0e00-\u0e7f]/.test(text))
+    ? THAI_NON_CHINESE_CACHE_VERSION : CACHE_VERSION;
+  const input = JSON.stringify({ version, model: AI_MODEL, source, target, texts });
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", TEXT_ENCODER.encode(input)));
   const identifier = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return {
     identifier,
-    request: new Request(`https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/__cache/${CACHE_VERSION}/${identifier}`),
+    request: new Request(`https://youtube-lyrics-translate.hmtw47cv7m.workers.dev/__cache/${version}/${identifier}`),
   };
+}
+
+async function songPrewarmIdentifier(videoId, target) {
+  // The source may not be available yet, so separate all non-Chinese song jobs.
+  const version = /^zh(?:-|$)/i.test(target) ? PREWARM_SOURCE_VERSION : PREWARM_SOURCE_VERSION + 1;
+  return identifier({version, videoId, target, model: AI_MODEL});
 }
 
 async function readCache(request, texts, target) {
@@ -394,7 +403,7 @@ async function lyricsPrewarm(request, env, context) {
       try { sourceLines = checkedLyricBatches(payload.sourceLines).flat(); }
       catch (_) { return response("Lyric source too large", 413); }
     }
-    const id = await identifier({version: PREWARM_SOURCE_VERSION, videoId: payload.videoId, target, model: AI_MODEL});
+    const id = await songPrewarmIdentifier(payload.videoId, target);
     if (sourceLines) {
       // The device already supplied the source. prepare atomically handles reuse
       // and queued upgrades, so do not put a redundant state RPC on playback.
@@ -445,7 +454,7 @@ async function lyricsPrewarm(request, env, context) {
 async function prewarmedSongBatch(videoId, texts, target, env, context, allowPartial = false) {
   if (!env.LYRICS_PREWARM || !/^[\w-]{11}$/.test(videoId || "")) return null;
   try {
-    const id = await identifier({version: PREWARM_SOURCE_VERSION, videoId, target, model: AI_MODEL});
+    const id = await songPrewarmIdentifier(videoId, target);
     const song = await jobCall(env.LYRICS_PREWARM, id, "state");
     if (song.status !== "complete" || !song.result.available) return null;
     const ids = song.result.batchJobIds;
