@@ -1,14 +1,16 @@
 /*
- * Bilibili AIRelateAsync ad filtering — v1.0.1
+ * Bilibili AIRelateAsync and ViewEndPage ad filtering — v1.1.0
  * The captured replies put ad modules at 1 -> 5 -> 1 (protobuf Any), with
  * type.googleapis.com/bilibili.ad.v1.SourceContentDto as their type URL.
  * Remove only those modules; preserve other fields and unmodified frames.
+ * ViewEndPage uses a distinct captured card structure and requires both the
+ * ad label and ad-block control before removing an entire end-page item.
  */
 (function () {
   'use strict';
 
   const AD_TYPE = 'type.googleapis.com/bilibili.ad.v1.SourceContentDto';
-  const ENDPOINT = /^https?:\/\/(?:grpc|app)\.bili(?:bili\.com|api\.net)\/bilibili\.app\.viewunite\.v1\.View\/AIRelateAsync(?:\?.*)?$/;
+  const ENDPOINT = /^https?:\/\/(?:grpc|app)\.bili(?:bili\.com|api\.net)\/bilibili\.app\.viewunite\.v1\.View\/(AIRelateAsync|ViewEndPage)(?:\?.*)?$/;
   const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 
   function headerValue(headers, name) {
@@ -138,7 +140,45 @@
     return {bytes: removed ? join(output) : bytes, removed};
   }
 
-  function filterFrames(bytes, encoding) {
+  function onlyMessage(bytes, number) {
+    const matches = fields(bytes).filter(field => field.number === number && field.wire === 2);
+    return matches.length === 1 ? data(bytes, matches[0]) : null;
+  }
+
+  function equalsBytes(bytes, expected) {
+    return bytes.length === expected.length && bytes.every((byte, index) => byte === expected[index]);
+  }
+
+  function isEndPageAd(bytes) {
+    // Only the captured end-page card layout with both ad label and ad controls
+    // is recognised. Unknown or ambiguous structures remain untouched.
+    let value = onlyMessage(bytes, 1);
+    if (!value) return false;
+    const type = fields(value).filter(field => field.number === 1 && field.wire === 0);
+    if (type.length !== 1 || data(value, type[0]).length !== 1 || data(value, type[0])[0] !== 5) return false;
+    for (const number of [6, 2, 2, 9, 3, 11, 38]) {
+      value = onlyMessage(value, number);
+      if (!value) return false;
+    }
+    const entries = fields(value);
+    const labels = entries.filter(field => field.number === 1 && field.wire === 2);
+    if (labels.length !== 1 || !equalsBytes(data(value, labels[0]), [229, 185, 191, 229, 145, 138])) return false;
+    return entries.some(field => field.number === 2 && field.wire === 2 &&
+      fields(data(value, field)).some(item => item.number === 5 && item.wire === 2 &&
+        equalsBytes(data(data(value, field), item), [229, 177, 143, 232, 148, 189, 229, 185, 191, 229, 145, 138])));
+  }
+
+  function filterEndPage(bytes) {
+    let removed = 0;
+    const kept = fields(bytes).filter(field => {
+      if (field.number !== 1 || field.wire !== 2 || !isEndPageAd(data(bytes, field))) return true;
+      removed++;
+      return false;
+    }).map(field => raw(bytes, field));
+    return {bytes: removed ? join(kept) : bytes, removed};
+  }
+
+  function filterFrames(bytes, encoding, filter) {
     let offset = 0;
     let removed = 0;
     const output = [];
@@ -158,7 +198,7 @@
         payload = $utils.ungzip(payload);
         if (!(payload instanceof Uint8Array) || payload.length > MAX_MESSAGE_BYTES) throw new Error('Invalid gzip payload');
       }
-      const filtered = filterMessage(payload);
+      const filtered = filter(payload);
       removed += filtered.removed;
       if (!filtered.removed) { output.push(bytes.subarray(start, offset)); continue; }
       // The gRPC compression flag is per message: flag 0 is valid even when
@@ -171,7 +211,8 @@
   }
 
   try {
-    if (!ENDPOINT.test($request.url) || Number($response.status ?? $response.statusCode ?? 200) !== 200) return $done({});
+    const endpoint = ENDPOINT.exec($request.url);
+    if (!endpoint || Number($response.status ?? $response.statusCode ?? 200) !== 200) return $done({});
     const options = argumentsMap(typeof $argument === 'undefined' ? '' : $argument);
     if (options['View.AD'] !== undefined && !/^(true|1)$/i.test(String(options['View.AD']))) return $done({});
     const body = $response.body;
@@ -179,9 +220,10 @@
     const headers = $response.headers || {};
     const grpcStatus = headerValue(headers, 'grpc-status');
     if (grpcStatus !== undefined && String(grpcStatus).trim() !== '0') return $done({});
-    const result = filterFrames(body, String(headerValue(headers, 'grpc-encoding') || 'identity').trim().toLowerCase());
+    const result = filterFrames(body, String(headerValue(headers, 'grpc-encoding') || 'identity').trim().toLowerCase(),
+      endpoint[1] === 'ViewEndPage' ? filterEndPage : filterMessage);
     if (result.removed && /^(INFO|DEBUG|ALL)$/i.test(String(options.LogLevel || ''))) {
-      console.log(`Bilibili AIRelateAsync: removed ${result.removed} ad modules`);
+      console.log(`Bilibili ${endpoint[1]}: removed ${result.removed} ad modules`);
     }
     const response = result.removed ? {body: result.bytes} : {};
     if (grpcStatus === undefined && needsGrpcStatus($request.headers || {})) {

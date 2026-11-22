@@ -11,6 +11,10 @@ on:
         required: true
         default: false
         type: boolean
+      approved_mitm_sha256:
+        description: SHA-256 of the reviewed MITM and Rewrite changes
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -32,23 +36,27 @@ jobs:
           fetch-depth: 0
 
       - name: Test updater
-        run: node --test Tools/Advertising/update-advertising-module.test.mjs
+        run: node --test Automation/Advertising/tests/update-advertising-module.test.mjs
 
       - name: Update block rewrite
         env:
           ALLOW_LARGE_CHANGE: ${{ inputs.allow_large_change || 'false' }}
+          APPROVED_MITM_SHA256: ${{ inputs.approved_mitm_sha256 || '' }}
         run: |
+          args=()
           if [[ "$ALLOW_LARGE_CHANGE" == "true" ]]; then
-            node Tools/Advertising/update-advertising-module.mjs --allow-large-change
-          else
-            node Tools/Advertising/update-advertising-module.mjs
+            args+=(--allow-large-change)
           fi
+          if [[ -n "$APPROVED_MITM_SHA256" ]]; then
+            args+=(--approved-mitm-sha256 "$APPROVED_MITM_SHA256")
+          fi
+          node Automation/Advertising/update-advertising-module.mjs "${args[@]}"
 
       - name: Validate block rewrite
         run: |
-          node Tools/Advertising/update-advertising-module.mjs --check --allow-large-change
+          node Automation/Advertising/update-advertising-module.mjs --check --allow-large-change
           git diff --check
-          unexpected_files="$(git diff --name-only | grep -Ev '^(Rewrite/Advertising\.sgmodule|Tools/Advertising/advertising-source-state\.json)$' || true)"
+          unexpected_files="$(git diff --name-only | grep -Ev '^(Rewrite/Advertising\.sgmodule|Automation/Advertising/advertising-source-state\.json)$' || true)"
           if [[ -n "$unexpected_files" ]]; then
             echo "Unexpected generated files:"
             printf '%s\n' "$unexpected_files"
@@ -70,7 +78,7 @@ jobs:
           git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" || true
           remote_sha="$(git show-ref --verify --hash "refs/remotes/origin/$branch" 2>/dev/null || true)"
           git switch -C "$branch"
-          git add Rewrite/Advertising.sgmodule Tools/Advertising/advertising-source-state.json
+          git add Rewrite/Advertising.sgmodule Automation/Advertising/advertising-source-state.json
           git commit -m "Update block rewrite"
 
           if [[ -n "$remote_sha" ]]; then

@@ -3,9 +3,9 @@ name: Test Surge Modules
 on:
   push:
     branches: [main]
-    paths: ['Rewrite/**', 'Tools/**', '.github/workflows/test-surge-modules.yml']
+    paths: ['Rewrite/**', 'Tools/**', 'Automation/**', '.github/workflows/test-surge-modules.yml']
   pull_request:
-    paths: ['Rewrite/**', 'Tools/**', '.github/workflows/test-surge-modules.yml']
+    paths: ['Rewrite/**', 'Tools/**', 'Automation/**', '.github/workflows/test-surge-modules.yml']
   workflow_dispatch:
 
 permissions:
@@ -26,11 +26,11 @@ jobs:
           node-version: '24'
       - name: Check generated bundles
         run: |
-          node Rewrite/Youtube/build-prewarm.cjs --check
-          node Rewrite/Youtube/build-lyrics-chinese.cjs --check
+          node Rewrite/Youtube/tools/build-prewarm.cjs --check
+          node Rewrite/Youtube/tools/build-lyrics-chinese.cjs --check
       - name: Run offline regressions
         run: |
-          node --test Tools/Testing/test-module-contracts.cjs Tools/NetworkInfo/network-info.test.cjs Tools/NodeOfflineMonitor/test-node-offline-monitor.cjs Tools/NodeOfflineMonitor/test-node-budgets.cjs Tools/CTMUsage/ctm-usage.test.cjs Tools/Rewrite/*.test.mjs Tools/Advertising/update-advertising-module.test.mjs Tools/Filters/update-imported-filters.test.mjs Rewrite/GeneralAdBlock/test-general-safety.cjs Rewrite/Bilibili/test-*.cjs Rewrite/Youtube/test-youtube-prewarm.cjs Rewrite/Youtube/test-youtube-prewarm-init.cjs Rewrite/Youtube/test-youtube-song-cache.cjs Rewrite/Youtube/test-youtube-module-safety.cjs
-          node Rewrite/Youtube/test-youtube-caption-queue.cjs
-          node Rewrite/Youtube/test-youtube-lyrics-order.cjs
+          node --test Automation/Testing/tests/module-contracts.test.cjs Tools/NetworkInfo/tests/network-info.test.cjs Tools/NodeOfflineMonitor/tests/node-offline-monitor.test.cjs Tools/NodeOfflineMonitor/tests/node-budgets.test.cjs Tools/CTMUsage/tests/ctm-usage.test.cjs Automation/Rewrite/tests/*.test.mjs Automation/Advertising/tests/update-advertising-module.test.mjs Automation/Filters/tests/update-imported-filters.test.mjs Rewrite/GeneralAdBlock/tests/general-safety.test.cjs Rewrite/Bilibili/tests/*.test.cjs Rewrite/Youtube/tests/youtube-prewarm.test.cjs Rewrite/Youtube/tests/youtube-prewarm-init.test.cjs Rewrite/Youtube/tests/youtube-song-cache.test.cjs Rewrite/Youtube/tests/youtube-module-safety.test.cjs
+          node Rewrite/Youtube/tests/youtube-caption-queue.test.cjs
+          node Rewrite/Youtube/tests/youtube-lyrics-order.test.cjs
           git diff --exit-code

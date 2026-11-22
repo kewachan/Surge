@@ -32,23 +32,23 @@ jobs:
           fetch-depth: 0
 
       - name: Test updater
-        run: node --test Tools/Filters/update-imported-filters.test.mjs
+        run: node --test Automation/Filters/tests/update-imported-filters.test.mjs
 
       - name: Update block list
         env:
           ALLOW_LARGE_CHANGE: ${{ inputs.allow_large_change || 'false' }}
         run: |
           if [[ "$ALLOW_LARGE_CHANGE" == "true" ]]; then
-            node Tools/Filters/update-imported-filters.mjs --allow-large-change
+            node Automation/Filters/update-imported-filters.mjs --allow-large-change
           else
-            node Tools/Filters/update-imported-filters.mjs
+            node Automation/Filters/update-imported-filters.mjs
           fi
 
       - name: Validate block list
         run: |
-          node Tools/Filters/update-imported-filters.mjs --check --allow-large-change
+          node Automation/Filters/update-imported-filters.mjs --check --allow-large-change
           git diff --check
-          unexpected_files="$(git diff --name-only | grep -Ev '^(Filters/filters_block\.list|Tools/Filters/block-list-source-state\.json)$' || true)"
+          unexpected_files="$(git diff --name-only | grep -Ev '^(Filters/filters_block\.list|Automation/Filters/block-list-source-state\.json)$' || true)"
           if [[ -n "$unexpected_files" ]]; then
             echo "Unexpected generated files:"
             printf '%s\n' "$unexpected_files"
@@ -70,7 +70,7 @@ jobs:
           git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" || true
           remote_sha="$(git show-ref --verify --hash "refs/remotes/origin/$branch" 2>/dev/null || true)"
           git switch -C "$branch"
-          git add Filters/filters_block.list Tools/Filters/block-list-source-state.json
+          git add Filters/filters_block.list Automation/Filters/block-list-source-state.json
           git commit -m "Update block list"
 
           if [[ -n "$remote_sha" ]]; then
