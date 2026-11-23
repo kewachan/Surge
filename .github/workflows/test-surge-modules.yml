@@ -34,3 +34,14 @@ jobs:
           node Rewrite/Youtube/tests/youtube-caption-queue.test.cjs
           node Rewrite/Youtube/tests/youtube-lyrics-order.test.cjs
           git diff --exit-code
+
+  macos-native:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+      - name: Run native ICU and JavaScriptCore regressions
+        run: node --test Automation/Rewrite/tests/google-search.test.mjs Automation/Testing/tests/module-contracts.test.cjs
