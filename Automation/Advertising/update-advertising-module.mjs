@@ -2,7 +2,7 @@
 
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { writeUpdatePair } from "../write-update-pair.mjs";
+import { assertInputsUnchanged, withUpdateLock, writeUpdatePair } from "../write-update-pair.mjs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -480,6 +480,10 @@ function formatChange(label, change) {
 
 export async function run(argv = process.argv.slice(2)) {
   const options = parseArguments(argv);
+  return withUpdateLock(options.targetPath, () => runLocked(options));
+}
+
+async function runLocked(options) {
   const currentContent = await readFile(options.targetPath, "utf8");
   const target = parseTargetModule(currentContent);
   assertNoDeniedMitmHosts(target.mitmHosts);
@@ -583,9 +587,12 @@ export async function run(argv = process.argv.slice(2)) {
     return;
   }
 
-  if (targetChanged && stateChanged) await writeUpdatePair(options.targetPath, proposedContent, currentContent, options.statePath, proposedState);
-  else if (targetChanged) await atomicWrite(options.targetPath, proposedContent);
-  else await atomicWrite(options.statePath, proposedState);
+  if (targetChanged && stateChanged) await writeUpdatePair(options.targetPath, proposedContent, currentContent, options.statePath, proposedState, undefined, stateText);
+  else {
+    await assertInputsUnchanged(options.targetPath, currentContent, options.statePath, stateText);
+    if (targetChanged) await atomicWrite(options.targetPath, proposedContent);
+    else await atomicWrite(options.statePath, proposedState);
+  }
   console.log(summary);
 }
 

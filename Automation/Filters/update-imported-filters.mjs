@@ -4,7 +4,7 @@ import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { writeUpdatePair } from "../write-update-pair.mjs";
+import { assertInputsUnchanged, withUpdateLock, writeUpdatePair } from "../write-update-pair.mjs";
 
 const MARKER = "# Imported List";
 const SOURCE_PREFIX = "# Source: ";
@@ -387,6 +387,10 @@ async function atomicWrite(targetPath, content) {
 
 export async function run(argv = process.argv.slice(2), { writePair = writeUpdatePair } = {}) {
   const options = parseArguments(argv);
+  return withUpdateLock(options.targetPath, () => runLocked(options, writePair));
+}
+
+async function runLocked(options, writePair) {
   const currentContent = await readFile(options.targetPath, "utf8");
   const target = parseTargetFile(currentContent);
   const sourceGroups = await Promise.all(target.sourceUrls.map((url) => fetchSource(url)));
@@ -479,9 +483,12 @@ export async function run(argv = process.argv.slice(2), { writePair = writeUpdat
     return;
   }
 
-  if (targetChanged && stateChanged) await writePair(options.targetPath, proposedContent, currentContent, options.statePath, proposedState);
-  else if (targetChanged) await atomicWrite(options.targetPath, proposedContent);
-  else await atomicWrite(options.statePath, proposedState);
+  if (targetChanged && stateChanged) await writePair(options.targetPath, proposedContent, currentContent, options.statePath, proposedState, undefined, stateText);
+  else {
+    await assertInputsUnchanged(options.targetPath, currentContent, options.statePath, stateText);
+    if (targetChanged) await atomicWrite(options.targetPath, proposedContent);
+    else await atomicWrite(options.statePath, proposedState);
+  }
   console.log(summary);
 }
 

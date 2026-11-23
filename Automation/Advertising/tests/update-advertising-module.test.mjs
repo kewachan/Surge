@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { withUpdateLock } from "../../write-update-pair.mjs";
 
 import {
   applyUpstreamDelta,
@@ -159,12 +163,53 @@ test("paired update stages both files and rolls back after a second rename failu
       return rename(from, to);
     }};
     await assert.rejects(writeUpdatePair(target, "new module", "original module", state, "new state", rollbackFailure), /rollback failed/);
-    assert.equal(await readFile(`${target}.tmp-${process.pid}-backup`, "utf8"), "original module");
+    const backups = (await readdir(dir)).filter(name => name.startsWith("module.tmp-") && name.endsWith("-backup"));
+    assert.equal(backups.length, 1);
+    assert.equal(await readFile(path.join(dir, backups[0]), "utf8"), "original module");
     assert.equal(await readFile(state, "utf8"), "original state");
     await reset();
     await writeUpdatePair(target, "new module", "original module", state, "new state");
     assert.equal(await readFile(target, "utf8"), "new module");
     assert.equal(await readFile(state, "utf8"), "new state");
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test("concurrent writers fail safely across tasks and processes without mismatched files", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-writer-lock-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state");
+  try {
+    await writeFile(target, "old"); await writeFile(state, "old");
+    let release, started;
+    const gate = new Promise(resolve => { release = resolve; });
+    const ready = new Promise(resolve => { started = resolve; });
+    const io = {rename, unlink, writeFile: async (file, ...args) => {
+      if (file.startsWith(`${state}.tmp-`)) { started(); await gate; }
+      return writeFile(file, ...args);
+    }};
+    const first = writeUpdatePair(target, "A", "old", state, "A", io, "old");
+    await ready;
+    await assert.rejects(writeUpdatePair(target, "B", "old", state, "B", undefined, "old"), /Update already running/);
+    const moduleUrl = pathToFileURL(path.resolve("Automation/write-update-pair.mjs")).href;
+    const code = `import {writeUpdatePair} from ${JSON.stringify(moduleUrl)}; try {await writeUpdatePair(${JSON.stringify(target)},'B','old',${JSON.stringify(state)},'B'); process.exitCode=1} catch(e) {console.log(e.message)}`;
+    const child = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", code]);
+    assert.match(child.stdout, /Update already running/);
+    release(); await first;
+    assert.equal(await readFile(target, "utf8"), "A"); assert.equal(await readFile(state, "utf8"), "A");
+    await assert.rejects(writeUpdatePair(target, "B", "old", state, "B", undefined, "old"), /changed since it was read/);
+    assert.equal(await readFile(target, "utf8"), "A"); assert.equal(await readFile(state, "utf8"), "A");
+    assert.equal((await readdir(dir)).some(name => name.endsWith(".update.lock")), false);
+    await withUpdateLock(target, () => writeUpdatePair(target, "C", "A", state, "C", undefined, "A"));
+    assert.equal(await readFile(state, "utf8"), "C");
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test("a changed source snapshot aborts without overwriting either file", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-stale-state-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state");
+  try {
+    await writeFile(target, "original"); await writeFile(state, "newer");
+    await assert.rejects(writeUpdatePair(target, "updated", "original", state, "updated", undefined, "older"), /changed since it was read/);
+    assert.equal(await readFile(target, "utf8"), "original"); assert.equal(await readFile(state, "utf8"), "newer");
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
 

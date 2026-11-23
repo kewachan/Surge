@@ -38,7 +38,7 @@ test("failed state replacement restores both filter and source state", async () 
       return rename(from, to);
     }};
     const args = ["--file", target, "--state-file", state, "--allow-large-change"];
-    await assert.rejects(run(args, {writePair: (...values) => writeUpdatePair(...values, io)}), /state rename failed/);
+    await assert.rejects(run(args, {writePair: (t, c, o, s, v, _io, oldState) => writeUpdatePair(t, c, o, s, v, io, oldState)}), /state rename failed/);
     assert.equal(await readFile(target, "utf8"), original);
     assert.equal(await readFile(state, "utf8"), snapshot);
     await run(args);
@@ -48,6 +48,51 @@ test("failed state replacement restores both filter and source state", async () 
     globalThis.fetch = oldFetch;
     await rm(dir, {recursive: true, force: true});
   }
+});
+
+test("concurrent full filter updates do not read or write the same target together", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-filter-lock-"));
+  const target = path.join(dir, "filter.list"), state = path.join(dir, "state.json");
+  const url = "https://raw.githubusercontent.com/example/repo/main/list";
+  const original = `# Last Updated: 2026-01-01\n\n# Imported List\n# Source: ${url}\nDOMAIN, old.example\n`;
+  const snapshot = `${JSON.stringify(buildSnapshot([{url, rules: parseRuleText("DOMAIN,old.example")}]), null, 2)}\n`;
+  const oldFetch = globalThis.fetch; let release, started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const ready = new Promise(resolve => { started = resolve; });
+  globalThis.fetch = async () => {
+    started(); await gate;
+    const response = new Response("DOMAIN,old.example\nDOMAIN,new.example\n");
+    Object.defineProperty(response, "url", {value: url}); return response;
+  };
+  try {
+    await writeFile(target, original); await writeFile(state, snapshot);
+    const args = ["--file", target, "--state-file", state, "--allow-large-change"];
+    const first = run(args); await ready;
+    await assert.rejects(run(args), /Update already running/);
+    release(); await first;
+    assert.match(await readFile(target, "utf8"), /DOMAIN, new\.example/);
+    assert(JSON.parse(await readFile(state, "utf8")).rules.includes("DOMAIN, new.example"));
+  } finally { release(); globalThis.fetch = oldFetch; await rm(dir, {recursive: true, force: true}); }
+});
+
+test("an external edit during an update is preserved rather than overwritten", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-filter-external-"));
+  const target = path.join(dir, "filter.list"), state = path.join(dir, "state.json");
+  const url = "https://raw.githubusercontent.com/example/repo/main/list";
+  const original = `# Last Updated: 2026-01-01\n\n# Imported List\n# Source: ${url}\nDOMAIN, old.example\n`;
+  const snapshot = `${JSON.stringify(buildSnapshot([{url, rules: parseRuleText("DOMAIN,old.example")}]), null, 2)}\n`;
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    await writeFile(target, original + "# external edit\n");
+    const response = new Response("DOMAIN,old.example\nDOMAIN,new.example\n");
+    Object.defineProperty(response, "url", {value: url}); return response;
+  };
+  try {
+    await writeFile(target, original); await writeFile(state, snapshot);
+    await assert.rejects(run(["--file", target, "--state-file", state, "--allow-large-change"]), /changed since it was read/);
+    assert.equal(await readFile(target, "utf8"), original + "# external edit\n");
+    assert.equal(await readFile(state, "utf8"), snapshot);
+  } finally { globalThis.fetch = oldFetch; await rm(dir, {recursive: true, force: true}); }
 });
 
 test("normalizes supported rules and removes policy fields", () => {
