@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { withUpdateLock } from "../../write-update-pair.mjs";
+import { recoverUpdatePair, withUpdateLock } from "../../write-update-pair.mjs";
 
 import {
   applyUpstreamDelta,
@@ -167,6 +167,8 @@ test("paired update stages both files and rolls back after a second rename failu
     assert.equal(backups.length, 1);
     assert.equal(await readFile(path.join(dir, backups[0]), "utf8"), "original module");
     assert.equal(await readFile(state, "utf8"), "original state");
+    await assert.rejects(writeUpdatePair(target, "other", "new module", state, "other"), /requires recovery/);
+    assert.equal(await recoverUpdatePair(target, state), "rolled-back");
     await reset();
     await writeUpdatePair(target, "new module", "original module", state, "new state");
     assert.equal(await readFile(target, "utf8"), "new module");
@@ -210,6 +212,100 @@ test("a changed source snapshot aborts without overwriting either file", async (
     await writeFile(target, "original"); await writeFile(state, "newer");
     await assert.rejects(writeUpdatePair(target, "updated", "original", state, "updated", undefined, "older"), /changed since it was read/);
     assert.equal(await readFile(target, "utf8"), "original"); assert.equal(await readFile(state, "utf8"), "newer");
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test("SIGKILL at either rename leaves recoverable, validated journal evidence", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-crash-recovery-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state");
+  const moduleUrl = pathToFileURL(path.resolve("Automation/write-update-pair.mjs")).href;
+  try {
+    for (const phase of ["before-target", "after-target", "after-state"]) {
+      await writeFile(target, "old"); await writeFile(state, "old");
+      const code = `import {writeFile,rename,unlink} from 'node:fs/promises';import {writeUpdatePair} from ${JSON.stringify(moduleUrl)};const target=${JSON.stringify(target)},state=${JSON.stringify(state)},phase=${JSON.stringify(phase)};await writeUpdatePair(target,'new','old',state,'new',{writeFile,unlink,rename:async(a,b)=>{if(phase==='before-target'&&b===target)process.kill(process.pid,'SIGKILL');await rename(a,b);if((phase==='after-target'&&b===target)||(phase==='after-state'&&b===state))process.kill(process.pid,'SIGKILL')}},'old')`;
+      const child = spawn(process.execPath, ["--input-type=module", "-e", code], {stdio: "ignore"});
+      assert.equal(await new Promise(resolve => child.on("exit", (_code, signal) => resolve(signal))), "SIGKILL");
+      await assert.rejects(writeUpdatePair(target, "other", "old", state, "other"), /stale lock/);
+      const result = await recoverUpdatePair(target, state);
+      const expected = phase === "after-state" ? "new" : "old";
+      assert.equal(result, phase === "after-state" ? "completed" : "rolled-back");
+      assert.equal(await readFile(target, "utf8"), expected); assert.equal(await readFile(state, "utf8"), expected);
+      assert.deepEqual((await readdir(dir)).sort(), ["module", "state"]);
+    }
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test("recovery preserves changed files and refuses active locks", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-unsafe-recovery-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state");
+  try {
+    await writeFile(target, "old"); await writeFile(state, "old");
+    await withUpdateLock(target, async () => assert.rejects(recoverUpdatePair(target, state), /still running/));
+    const io = {writeFile, unlink, rename: async (from, to) => {
+      if (to === state || from.endsWith("-backup")) throw new Error("rename blocked");
+      return rename(from, to);
+    }};
+    await assert.rejects(writeUpdatePair(target, "new", "old", state, "new", io, "old"), /rollback failed/);
+    await writeFile(state, "external edit");
+    await assert.rejects(recoverUpdatePair(target, state), /differ from journal/);
+    assert.equal(await readFile(target, "utf8"), "new"); assert.equal(await readFile(state, "utf8"), "external edit");
+    assert((await readdir(dir)).some(name => name.endsWith(".update.journal")));
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test("corrupt recovery artifacts are rejected before either target is modified", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-corrupt-recovery-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state");
+  try {
+    await writeFile(target, "old"); await writeFile(state, "old");
+    const io = {writeFile, unlink, rename: async (from, to) => {
+      if (to === state || from.endsWith("-backup")) throw new Error("rename blocked");
+      return rename(from, to);
+    }};
+    await assert.rejects(writeUpdatePair(target, "new", "old", state, "new", io, "old"), /rollback failed/);
+    const staged = (await readdir(dir)).find(name => name.startsWith("state.tmp-"));
+    assert(staged); await writeFile(path.join(dir, staged), "external edit");
+    await assert.rejects(recoverUpdatePair(target, state), /artifact changed/);
+    assert.equal(await readFile(target, "utf8"), "new"); assert.equal(await readFile(state, "utf8"), "old");
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test("an external target edit during a failed commit is not overwritten by rollback", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-rollback-edit-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state");
+  try {
+    await writeFile(target, "old"); await writeFile(state, "old");
+    const io = {writeFile, unlink, rename: async (from, to) => {
+      if (to === state) { await writeFile(target, "external edit"); throw new Error("state rename failed"); }
+      return rename(from, to);
+    }};
+    await assert.rejects(writeUpdatePair(target, "new", "old", state, "new", io, "old"), /rollback failed/);
+    assert.equal(await readFile(target, "utf8"), "external edit");
+    assert.equal(await readFile(state, "utf8"), "old");
+    await assert.rejects(recoverUpdatePair(target, state), /differ from journal/);
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test("an interrupted recovery remains fail-closed and can resume after its guard is verified stale", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-recovery-killed-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state");
+  try {
+    await writeFile(target, "old"); await writeFile(state, "old");
+    const io = {writeFile, unlink, rename: async (from, to) => {
+      if (to === state || from.endsWith("-backup")) throw new Error("rename blocked");
+      return rename(from, to);
+    }};
+    await assert.rejects(writeUpdatePair(target, "new", "old", state, "new", io, "old"), /rollback failed/);
+    const moduleUrl = pathToFileURL(path.resolve("Automation/write-update-pair.mjs")).href;
+    const code = `import {rename} from 'node:fs/promises';import {recoverUpdatePair} from ${JSON.stringify(moduleUrl)};await recoverUpdatePair(${JSON.stringify(target)},${JSON.stringify(state)},{rename:async(a,b)=>{await rename(a,b);process.kill(process.pid,'SIGKILL')}})`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", code], {stdio: "ignore"});
+    assert.equal(await new Promise(resolve => child.on("exit", (_code, signal) => resolve(signal))), "SIGKILL");
+    await assert.rejects(recoverUpdatePair(target, state), error => error.code === "EEXIST");
+    assert.equal(await readFile(target, "utf8"), "old"); assert.equal(await readFile(state, "utf8"), "old");
+    // Only after this test's child is confirmed dead can its recovery guard be removed.
+    await unlink(`${target}.update.recover`);
+    assert.equal(await recoverUpdatePair(target, state), "rolled-back");
+    assert.deepEqual((await readdir(dir)).sort(), ["module", "state"]);
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
