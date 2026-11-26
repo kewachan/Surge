@@ -26,6 +26,7 @@ const DENIED_URL_REWRITES = new Set([
 ]);
 const DENIED_MITM_HOSTS = new Set([
   "s.youtube.com",
+  "*.googlevideo.com",
   "*.fuliapps.com", "*.pipiapps.com", "*.xiangjiaoapps.com", "*.xiangxiangapps.com",
   "ci.rnote.com", "edith.rnote.com", "rec.rnote.com", "so.rnote.com", "www.rnote.com",
   "gql-fed.reddit.com", "gql.reddit.com", "gugongmini.dpm.org.cn", "iqushangwang.8quan.com",

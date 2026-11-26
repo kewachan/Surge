@@ -138,6 +138,26 @@ test("new MITM hosts stop updates until explicitly reviewed, without changing ex
   assert.deepEqual(requireReviewedMitmAdditions(current, ["keep.example"]), []);
 });
 
+test("upstream googlevideo wildcard is recorded but never added to Advertising MITM", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-googlevideo-denied-"));
+  const target = path.join(dir, "module.sgmodule"), state = path.join(dir, "state.json");
+  const rule = "^https://old.example/ - reject";
+  const initial = renderTargetModule({preamble: `#!name=Fixture\n#!date=2026-01-01\n# Source: ${SOURCE}`, mitmHosts: ["old.example"], urlRewrite: [rule]});
+  const snapshot = buildSnapshot([{role: "source", url: SOURCE, mitmHosts: ["old.example"], urlRewrite: [rule]}]);
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const response = new Response(renderTargetModule({preamble: "#!name=Source", mitmHosts: ["old.example", "*.googlevideo.com"], urlRewrite: [rule]}));
+    Object.defineProperty(response, "url", {value: SOURCE}); return response;
+  };
+  try {
+    await writeFile(target, initial); await writeFile(state, `${JSON.stringify(snapshot, null, 2)}\n`);
+    assert.throws(() => assertNoDeniedMitmHosts(["*.googlevideo.com"]), /denied MITM/);
+    await run(["--file", target, "--state-file", state, "--allow-large-change"]);
+    assert.equal(await readFile(target, "utf8"), initial);
+    assert(JSON.parse(await readFile(state, "utf8")).mitmHosts.includes("*.googlevideo.com"));
+  } finally { globalThis.fetch = previousFetch; await rm(dir, {recursive: true, force: true}); }
+});
+
 test("paired update stages both files and rolls back after a second rename failure", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "surge-pair-test-"));
   const target = path.join(dir, "module"), state = path.join(dir, "state");
