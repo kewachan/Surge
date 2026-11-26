@@ -36,7 +36,15 @@ const digest = value => createHash("sha256").update(value).digest("hex");
 export async function recoverUpdatePair(targetPath, statePath, io = {rename}) {
   const target = path.resolve(targetPath), state = path.resolve(statePath);
   const lockPath = `${target}.update.lock`, guardPath = `${target}.update.recover`;
-  const guard = await open(guardPath, "wx");
+  let guard;
+  try { guard = await open(guardPath, "wx"); }
+  catch (error) {
+    if (error.code === "EEXIST") {
+      const wrapped = new Error(`Recovery already running or stale recovery guard exists: ${guardPath}; verify the owner before manual inspection`, {cause: error});
+      wrapped.code = error.code; throw wrapped;
+    }
+    throw error;
+  }
   let ownedLock = false;
   try {
     try {
@@ -52,7 +60,16 @@ export async function recoverUpdatePair(targetPath, statePath, io = {rename}) {
       finally { await lock.close(); }
     }
     const journalPath = `${target}.update.journal`;
-    const journal = JSON.parse(await readFile(journalPath, "utf8"));
+    let journalText;
+    try { journalText = await readFile(journalPath, "utf8"); }
+    catch (error) {
+      if (error.code === "ENOENT") {
+        const wrapped = new Error(`Recovery journal missing: ${journalPath}; preserve files and verify both versions before manual recovery`, {cause: error});
+        wrapped.code = error.code; throw wrapped;
+      }
+      throw error;
+    }
+    const journal = JSON.parse(journalText);
     if (journal.version !== 1 || journal.target !== target || journal.state !== state ||
         !/^\d+-[a-f0-9-]{36}$/.test(journal.suffix) ||
         ![journal.oldTarget, journal.oldState, journal.newTarget, journal.newState].every(x => /^[a-f0-9]{64}$/.test(x)))

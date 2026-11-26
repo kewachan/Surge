@@ -309,6 +309,35 @@ test("an interrupted recovery remains fail-closed and can resume after its guard
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
+test("missing journals preserve a dead owner's lock and both versions", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-missing-journal-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state"), lock = `${target}.update.lock`;
+  try {
+    for (const text of ["old", "new"]) {
+      await writeFile(target, text); await writeFile(state, text);
+      const code = `require('fs').writeFileSync(${JSON.stringify(lock)},JSON.stringify({version:1,pid:process.pid,host:require('os').hostname()}))`;
+      await promisify(execFile)(process.execPath, ["-e", code]);
+      const priorLock = await readFile(lock, "utf8");
+      await assert.rejects(recoverUpdatePair(target, state), e => /Recovery journal missing/.test(e.message) && e.code === "ENOENT" && e.cause?.code === "ENOENT");
+      assert.equal(await readFile(lock, "utf8"), priorLock);
+      assert.equal(await readFile(target, "utf8"), text); assert.equal(await readFile(state, "utf8"), text);
+      await assert.rejects(writeUpdatePair(target, "newer", text, state, "newer"), /stale lock/);
+      await unlink(lock);
+    }
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test("an existing recovery guard is preserved and reported without guessing ownership", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-guard-diagnostic-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state"), guard = `${target}.update.recover`;
+  try {
+    await writeFile(target, "old"); await writeFile(state, "old"); await writeFile(guard, "existing");
+    await assert.rejects(recoverUpdatePair(target, state), e => /Recovery already running or stale recovery guard/.test(e.message) && e.code === "EEXIST" && e.cause?.code === "EEXIST");
+    assert.equal(await readFile(guard, "utf8"), "existing");
+    assert.equal(await readFile(target, "utf8"), "old"); assert.equal(await readFile(state, "utf8"), "old");
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
 test("MITM fingerprint gates the complete update and rejects changed upstream hosts", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "surge-mitm-test-"));
   const target = path.join(dir, "target.sgmodule"), state = path.join(dir, "state.json");
