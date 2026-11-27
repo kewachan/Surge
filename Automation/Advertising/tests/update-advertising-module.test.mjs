@@ -158,6 +158,49 @@ test("upstream googlevideo wildcard is recorded but never added to Advertising M
   } finally { globalThis.fetch = previousFetch; await rm(dir, {recursive: true, force: true}); }
 });
 
+test("Googlevideo host variants are denied without bypassing review for unrelated hosts", async () => {
+  const denied = ["*.googlevideo.com", "rr*.googlevideo.com", "r1.googlevideo.com", "nested.r1.googlevideo.com:443", "*.GOOGLEVIDEO.COM:443", "rr*.googlevideo.com:8443"];
+  for (const host of denied) assert.throws(() => assertNoDeniedMitmHosts([host]), /denied MITM/);
+  for (const host of ["googlevideo.com.evil.example", "notgooglevideo.com", "googlevideo.com", "*.example.com"]) assert.doesNotThrow(() => assertNoDeniedMitmHosts([host]));
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-googlevideo-review-"));
+  const target = path.join(dir, "module.sgmodule"), state = path.join(dir, "state.json");
+  const rule = "^https://old.example/ - reject", safe = "unrelated.example";
+  const initial = renderTargetModule({preamble: `#!name=Fixture\n#!date=2026-01-01\n# Source: ${SOURCE}`, mitmHosts: ["old.example"], urlRewrite: [rule]});
+  const snapshot = `${JSON.stringify(buildSnapshot([{role: "source", url: SOURCE, mitmHosts: ["old.example"], urlRewrite: [rule]}]), null, 2)}\n`;
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const response = new Response(renderTargetModule({preamble: "#!name=Source", mitmHosts: ["old.example", ...denied, safe], urlRewrite: [rule]}));
+    Object.defineProperty(response, "url", {value: SOURCE}); return response;
+  };
+  try {
+    await writeFile(target, initial); await writeFile(state, snapshot);
+    let msg = ""; const args = ["--file", target, "--state-file", state, "--allow-large-change"];
+    await assert.rejects(run(args), error => {msg = error.message; return /require review/.test(msg);});
+    assert.match(msg, /unrelated\.example/); for (const host of denied) assert(!msg.includes(host));
+    assert.equal(await readFile(target, "utf8"), initial); assert.equal(await readFile(state, "utf8"), snapshot);
+    const hash = /SHA-256: ([a-f0-9]{64})/.exec(msg)[1]; await run([...args, "--approved-mitm-sha256", hash]);
+    const hosts = parseTargetModule(await readFile(target, "utf8")).mitmHosts;
+    assert(hosts.includes(safe)); for (const host of denied) assert(!hosts.includes(host));
+    const saved = JSON.parse(await readFile(state, "utf8")); for (const host of denied) assert(saved.mitmHosts.includes(host));
+  } finally { globalThis.fetch = previousFetch; await rm(dir, {recursive: true, force: true}); }
+});
+
+test("existing Googlevideo variants stop before upstream fetch or file changes", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-existing-googlevideo-"));
+  const target = path.join(dir, "module.sgmodule"), state = path.join(dir, "state.json");
+  const previousFetch = globalThis.fetch; let fetched = false;
+  globalThis.fetch = async () => { fetched = true; throw new Error("unexpected fetch"); };
+  try {
+    for (const host of ["rr*.googlevideo.com", "r1.googlevideo.com:443", "*.GOOGLEVIDEO.COM:443"]) {
+      const initial = renderTargetModule({preamble: `#!name=Fixture\n# Source: ${SOURCE}`, mitmHosts: [host], urlRewrite: ["^https://old.example/ - reject"]});
+      await writeFile(target, initial); await writeFile(state, "unchanged state\n");
+      await assert.rejects(run(["--file", target, "--state-file", state, "--allow-large-change"]), /denied MITM hosts/);
+      assert.equal(fetched, false); assert.equal(await readFile(target, "utf8"), initial);
+      assert.equal(await readFile(state, "utf8"), "unchanged state\n");
+    }
+  } finally { globalThis.fetch = previousFetch; await rm(dir, {recursive: true, force: true}); }
+});
+
 test("paired update stages both files and rolls back after a second rename failure", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "surge-pair-test-"));
   const target = path.join(dir, "module"), state = path.join(dir, "state");

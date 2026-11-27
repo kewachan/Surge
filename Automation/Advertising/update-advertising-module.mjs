@@ -34,6 +34,11 @@ const DENIED_MITM_HOSTS = new Set([
   "starplucker.cyapi.cn", "tbgapplet.carlsberg.asia", "tiku.fenbi.com", "vue3-api.zhixiny.cn",
   "wrapper.cyapi.cn", "yuudnn.lz-qs.com", "yuudnn.lz-qs.com:9220",
 ]);
+function isDeniedMitmHost(host) {
+  const normalized = host.toLowerCase();
+  return DENIED_MITM_HOSTS.has(normalized) || /\.googlevideo\.com(?::\d{1,5})?$/.test(normalized);
+}
+const DENIED_MITM_POLICY = {has: isDeniedMitmHost};
 const BROAD_AD_PATH_RULE = '"(?i)\\b\\/ad\\/" - reject';
 const PROTECTED_AD_PATH_RULE = '"(?i)^(?!https?://i2\\.bahamut\\.com\\.tw/JS/ad/(?:animeVideo2?|animeLogo)\\.js(?:[?#]|$)).*\\b\\/ad\\/" - reject';
 const PROTECTED_AD_PATH_WITH_PORT_RULE = '"(?i)^(?!https?://i2\\.bahamut\\.com\\.tw(?::443)?/JS/ad/(?:animeVideo2?|animeLogo)\\.js(?:[?#]|$)).*\\b\\/ad\\/" - reject';
@@ -346,7 +351,7 @@ export function requireReviewedMitmAdditions(currentHosts, proposedHosts, approv
 }
 
 export function assertNoDeniedMitmHosts(hosts) {
-  const denied = hosts.filter((host) => DENIED_MITM_HOSTS.has(host.toLowerCase()));
+  const denied = hosts.filter(isDeniedMitmHost);
   if (denied.length) {
     throw new Error(`Advertising module contains denied MITM hosts: ${denied.sort(compareAscii).join(", ")}`);
   }
@@ -529,7 +534,7 @@ async function runLocked(options) {
     target.mitmHosts,
     previousSnapshot.mitmHosts,
     nextSnapshot.mitmHosts,
-    DENIED_MITM_HOSTS,
+    DENIED_MITM_POLICY,
   );
   assertNoDeniedMitmHosts(proposedHosts);
   requireReviewedMitmAdditions(target.mitmHosts, proposedHosts, options.approvedMitmSha256, target.urlRewrite, proposedRules);
