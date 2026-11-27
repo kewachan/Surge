@@ -215,6 +215,7 @@ const sponsored = '<div id="tads"><a href="/aclk?ad=example">Sponsored</a></div>
 const insertionEncodings = ['hex', 'unicode', 'literal', 'encoded-end'];
 const htmlEncodings = ['plain', ...insertionEncodings];
 const legacyClassOrders = ['B2VR9 CJHX3e', 'CJHX3e B2VR9'];
+const nativeResponseCases = [];
 
 function rewrite(body, options = {}) {
   let result;
@@ -230,6 +231,10 @@ function rewrite(body, options = {}) {
   script.runInNewContext(context, { timeout: 1000 });
   assert.notEqual(result, undefined);
   assert.deepEqual(headers['Set-Cookie'], ['first=one', 'second=two']);
+  if (options.nativeFixture !== false) {
+    nativeResponseCases.push({body, url: context.$request.url, status: context.$response.status,
+      expected: JSON.parse(JSON.stringify(result))});
+  }
   return { result, body: result.body ?? body, context };
 }
 
@@ -400,7 +405,7 @@ test('private Google HAR replay removes the captured footer promotion without ch
     if (url.hostname !== 'www.google.com' || url.pathname !== '/search') continue;
     const content = entry.response?.content || {};
     const input = content.encoding === 'base64' ? Buffer.from(content.text || '', 'base64').toString('utf8') : content.text || '';
-    const output = rewrite(input, { url: entry.request.url, status: entry.response.status });
+    const output = rewrite(input, { url: entry.request.url, status: entry.response.status, nativeFixture: false });
     if (!input.includes('Ask and explore anything with the Google app')) {
       assert.ok(output.body === input, 'unrelated captured response must pass through');
       continue;
@@ -472,5 +477,23 @@ test('legacy text and classes keep cards visible without a verified app destinat
 test('quoted class examples in JavaScript stay intact beside an ordinary app mention', () => {
   const example = '<div class="B2VR9 CJHX3e">Documentation example</div>';
   expectPassthrough(organic + `<script>const example = ${JSON.stringify(example)};</script>`);
+});
+
+test('native JavaScriptCore matches response filtering fixtures and completes exactly once', {
+  skip: process.platform !== 'darwin'
+}, () => {
+  assert.ok(nativeResponseCases.length >= 50, 'response fixtures must be exercised before native replay');
+  const code = 'const source=' + JSON.stringify(scriptText) + ', cases=' + JSON.stringify(nativeResponseCases) + ';'
+    + 'const run=new Function("$request","$response","$done",source); let failures=[];'
+    + 'cases.forEach((c,i)=>{let results=[]; const headers={"Content-Type":"text/html","Set-Cookie":["first=one","second=two"]};'
+    + 'try{run({url:c.url},{body:c.body,headers:headers,status:c.status},v=>results.push(v));'
+    + 'if(results.length!==1||JSON.stringify(results[0])!==JSON.stringify(c.expected)||'
+    + 'JSON.stringify(headers["Set-Cookie"])!==JSON.stringify(["first=one","second=two"])) failures.push(i);'
+    + '}catch(e){failures.push(i);}}); JSON.stringify({count:cases.length,failures:failures});';
+  const result = JSON.parse(execFileSync('/usr/bin/osascript', ['-l', 'JavaScript'], {
+    input: code, encoding: 'utf8', timeout: 15000
+  }));
+  assert.equal(result.count, nativeResponseCases.length);
+  assert.deepEqual(result.failures, []);
 });
 }
