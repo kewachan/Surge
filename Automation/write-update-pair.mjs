@@ -32,6 +32,17 @@ export async function withUpdateLock(targetPath, action) {
 
 const digest = value => createHash("sha256").update(value).digest("hex");
 
+async function describeRecoveryGuard(guardPath) {
+  try {
+    const owner = JSON.parse(await readFile(guardPath, "utf8"));
+    if (owner.version !== 1 || typeof owner.host !== "string" || !Number.isSafeInteger(owner.pid) || owner.pid <= 0)
+      return "owner unidentified";
+    if (owner.host !== hostname()) return "owner is on another host";
+    try { process.kill(owner.pid, 0); return `PID ${owner.pid} is running or has been reused`; }
+    catch (error) { return error.code === "ESRCH" ? `PID ${owner.pid} is not running` : "owner status cannot be verified"; }
+  } catch (_) { return "owner unidentified"; }
+}
+
 // Explicit recovery never removes an active, foreign-host or unidentified lock.
 export async function recoverUpdatePair(targetPath, statePath, io = {rename}) {
   const target = path.resolve(targetPath), state = path.resolve(statePath);
@@ -40,13 +51,16 @@ export async function recoverUpdatePair(targetPath, statePath, io = {rename}) {
   try { guard = await open(guardPath, "wx"); }
   catch (error) {
     if (error.code === "EEXIST") {
-      const wrapped = new Error(`Recovery already running or stale recovery guard exists: ${guardPath}; verify the owner before manual inspection`, {cause: error});
+      const detail = await describeRecoveryGuard(guardPath);
+      const wrapped = new Error(`Recovery already running or stale recovery guard exists: ${guardPath} (${detail}); verify the owner before manual inspection`, {cause: error});
       wrapped.code = error.code; throw wrapped;
     }
     throw error;
   }
   let ownedLock = false;
   try {
+    await guard.writeFile(JSON.stringify({version: 1, pid: process.pid, host: hostname()}));
+    await guard.sync();
     try {
       const lock = JSON.parse(await readFile(lockPath, "utf8"));
       if (lock.version !== 1 || lock.host !== hostname() || !Number.isSafeInteger(lock.pid) || lock.pid <= 0)

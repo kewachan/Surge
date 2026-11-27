@@ -5,7 +5,7 @@ import { mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from "node:
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { recoverUpdatePair, withUpdateLock } from "../../write-update-pair.mjs";
@@ -363,7 +363,9 @@ test("an interrupted recovery remains fail-closed and can resume after its guard
     const code = `import {rename} from 'node:fs/promises';import {recoverUpdatePair} from ${JSON.stringify(moduleUrl)};await recoverUpdatePair(${JSON.stringify(target)},${JSON.stringify(state)},{rename:async(a,b)=>{await rename(a,b);process.kill(process.pid,'SIGKILL')}})`;
     const child = spawn(process.execPath, ["--input-type=module", "-e", code], {stdio: "ignore"});
     assert.equal(await new Promise(resolve => child.on("exit", (_code, signal) => resolve(signal))), "SIGKILL");
-    await assert.rejects(recoverUpdatePair(target, state), error => error.code === "EEXIST");
+    const guard = JSON.parse(await readFile(`${target}.update.recover`, "utf8"));
+    assert.equal(guard.pid, child.pid); assert.equal(guard.host, hostname());
+    await assert.rejects(recoverUpdatePair(target, state), error => error.code === "EEXIST" && /not running|has been reused/.test(error.message));
     assert.equal(await readFile(target, "utf8"), "old"); assert.equal(await readFile(state, "utf8"), "old");
     // Only after this test's child is confirmed dead can its recovery guard be removed.
     await unlink(`${target}.update.recover`);
@@ -372,19 +374,62 @@ test("an interrupted recovery remains fail-closed and can resume after its guard
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
+test("concurrent recoveries preserve the live guard until the first recovery completes", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-concurrent-recovery-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state"), guard = `${target}.update.recover`;
+  try {
+    await writeFile(target, "old"); await writeFile(state, "old");
+    const io = {writeFile, unlink, rename: async (from, to) => {
+      if (to === state || from.endsWith("-backup")) throw new Error("rename blocked");
+      return rename(from, to);
+    }};
+    await assert.rejects(writeUpdatePair(target, "new", "old", state, "new", io, "old"), /rollback failed/);
+    let release, started;
+    const gate = new Promise(resolve => { release = resolve; });
+    const ready = new Promise(resolve => { started = resolve; });
+    const first = recoverUpdatePair(target, state, {rename: async (from, to) => { started(); await gate; await rename(from, to); }});
+    try {
+      await ready;
+      const owner = await readFile(guard, "utf8");
+      await assert.rejects(recoverUpdatePair(target, state), /running or has been reused/);
+      assert.equal(await readFile(guard, "utf8"), owner);
+    } finally { release(); }
+    assert.equal(await first, "rolled-back");
+    assert.deepEqual((await readdir(dir)).sort(), ["module", "state"]);
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test("foreign, reused and incomplete recovery guard owners remain fail-closed", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "surge-guard-owners-"));
+  const target = path.join(dir, "module"), state = path.join(dir, "state"), guard = `${target}.update.recover`;
+  try {
+    await writeFile(target, "old"); await writeFile(state, "old");
+    for (const [value, reason] of [
+      [JSON.stringify({version: 1, pid: process.pid, host: hostname()}), /running or has been reused/],
+      [JSON.stringify({version: 1, pid: process.pid, host: `${hostname()}-other`}), /another host/],
+      ["", /owner unidentified/], ["{", /owner unidentified/]
+    ]) {
+      await writeFile(guard, value);
+      await assert.rejects(recoverUpdatePair(target, state), error => error.code === "EEXIST" && reason.test(error.message));
+      assert.equal(await readFile(guard, "utf8"), value);
+      assert.equal(await readFile(target, "utf8"), "old"); assert.equal(await readFile(state, "utf8"), "old");
+    }
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
 test("missing journals preserve a dead owner's lock and both versions", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "surge-missing-journal-"));
   const target = path.join(dir, "module"), state = path.join(dir, "state"), lock = `${target}.update.lock`;
   try {
-    for (const text of ["old", "new"]) {
-      await writeFile(target, text); await writeFile(state, text);
+    for (const [targetText, stateText] of [["old", "old"], ["new", "new"], ["new", "old"]]) {
+      await writeFile(target, targetText); await writeFile(state, stateText);
       const code = `require('fs').writeFileSync(${JSON.stringify(lock)},JSON.stringify({version:1,pid:process.pid,host:require('os').hostname()}))`;
       await promisify(execFile)(process.execPath, ["-e", code]);
       const priorLock = await readFile(lock, "utf8");
       await assert.rejects(recoverUpdatePair(target, state), e => /Recovery journal missing/.test(e.message) && e.code === "ENOENT" && e.cause?.code === "ENOENT");
       assert.equal(await readFile(lock, "utf8"), priorLock);
-      assert.equal(await readFile(target, "utf8"), text); assert.equal(await readFile(state, "utf8"), text);
-      await assert.rejects(writeUpdatePair(target, "newer", text, state, "newer"), /stale lock/);
+      assert.equal(await readFile(target, "utf8"), targetText); assert.equal(await readFile(state, "utf8"), stateText);
+      await assert.rejects(writeUpdatePair(target, "newer", targetText, state, "newer"), /stale lock/);
       await unlink(lock);
     }
   } finally { await rm(dir, {recursive: true, force: true}); }
